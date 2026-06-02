@@ -30,7 +30,8 @@ The MVP exists to validate one hypothesis: a non-technical executive can ask a q
 
 | Metric | Target | How measured |
 | :---- | :---- | :---- |
-| Query-to-answer latency | \< 60 seconds end-to-end | P90 across pilot sessions |
+| Query-to-answer latency (excluding Snowflake cold-start) | < 8 seconds P95 | P50 and P95 measured across pilot sessions, split by pipeline stage in Langfuse |
+| Query-to-answer latency (including Snowflake cold-start) | < 60 seconds P90 | P90 across pilot sessions — Snowflake warehouse pre-warming is a deployment recommendation, not a product requirement |
 | SQL accuracy rate | \> 85% correct on first attempt | Human review of pilot queries |
 | Clarification loop trigger rate | \< 30% of queries | Logged per session |
 | Pilot user satisfaction | \>= 4/5 post-session rating | In-product feedback prompt |
@@ -48,6 +49,8 @@ Scope decisions are intentional. Everything marked out-of-scope is a post-MVP fe
 
 * LLM-based SQL generation (Claude claude-sonnet-4-20250514) with sqlglot validation
 
+* Read-only enforcement (CQRS): only SELECT statements are permitted; INSERT, UPDATE, DELETE, CREATE, ALTER, and DROP are rejected at the sqlglot AST validation layer before any Snowflake connection is opened — this is the command/query segregation boundary
+
 * Snowflake query execution with row-limit enforcement
 
 * Clarification prompt when query intent is ambiguous
@@ -58,21 +61,24 @@ Scope decisions are intentional. Everything marked out-of-scope is a post-MVP fe
 
 * Single-session conversation memory (context within one browser session)
 
+* Proactive question suggestions: after each result renders, surface 2–3 contextually relevant follow-up questions generated from the result shape, schema context, and user role — "tells you what you should be asking"
+
 * Single-tenant Snowflake connection per workspace
 
 * SSO authentication via OAuth (Auth0 or Clerk)
 
 * Web application — Next.js, desktop-first
 
+* Row-level security: VoxQuery passes the authenticated user's Snowflake role to the connector at query execution time — users receive only data their existing Snowflake permissions permit; no shadow permission layer is built inside VoxQuery
+
 ### **Out of scope for MVP**
 
-* Multi-warehouse support (BigQuery, Redshift, Postgres)
+* Multi-warehouse support (BigQuery, Redshift, Postgres) — out of scope for MVP execution, but the warehouse connector must sit behind a WarehouseConnector abstract interface in the backend so Snowflake is a pluggable implementation, not hardcoded
 
 * Cross-session conversation memory and history search
 
-* Scheduled reports or data alerts
+* Scheduled reports or data alerts — out of scope for MVP execution. The post-MVP roadmap includes Morning Briefing Mode (V2): scheduled background queries run nightly against key executive metrics, z-score and week-over-week anomaly detection flags outliers, and the system proactively surfaces a priority-ranked briefing at session open ("Good morning. Three things before your 9 AM: EMEA revenue dropped 23% WoW, conversion rate fell below 30-day avg, pipeline is 118% of target"). The backend pipeline (scheduled queries + anomaly detection) must be designed at MVP so that Morning Briefing is an additive feature, not a rewrite — specifically: (a) query execution must be callable programmatically, not only via user request, and (b) the result store (turns table) must support a source column distinguishing user-initiated vs scheduled runs.
 
-* Row-level security or column-level access filtering
 
 * Mobile native app (iOS / Android)
 
@@ -124,6 +130,8 @@ Scope decisions are intentional. Everything marked out-of-scope is a post-MVP fe
 
 * Clarification is skipped if confidence is high — it must not be shown on every query
 
+* After each result, a single-tap thumbs-up / thumbs-down is shown inline; negative feedback logs the turn (input, generated SQL, result) for confidence threshold tuning and is flagged in Langfuse — this is the primary mechanism for calibrating the 0.65 clarification threshold post-launch
+
 ## **4.3 Conversation Memory**
 
 | *As an executive, I want to ask follow-up questions that reference my previous query so I can drill into data naturally, the way I'd talk to an analyst.* |
@@ -150,7 +158,13 @@ Scope decisions are intentional. Everything marked out-of-scope is a post-MVP fe
 
 * Schema is ingested via Snowflake INFORMATION\_SCHEMA on workspace setup
 
-* Table descriptions, column names, and data types are embedded and stored in pgvector
+* Table descriptions, column names, data types, and a business glossary are embedded and stored in pgvector; during admin onboarding, the admin explicitly maps executive-facing terms (e.g. "revenue", "bookings", "churn") to actual column names — this glossary is embedded alongside schema chunks and co-retrieved, resolving the vocabulary mismatch between non-technical executives and developer-named columns (Domain-Driven Design vocabulary layer)
+
+* Schema metadata is processed and embedded per table individually, not bulk-ingested as a single document — this preserves retrieval precision when similar column names exist across tables (e.g. orders.total vs invoices.total)
+
+* Admin setup wizard prompts for explicit declaration of inter-table relationships (join paths, business keys) where FK/PK constraints are absent in the schema — these are stored as relationship context chunks and injected into the SQL generation prompt; production warehouses routinely carry constraints "in developers' minds" rather than in the schema definition
+
+* If the customer has an existing Snowflake QUERY_HISTORY, the top-200 most-executed queries filtered by the relevant warehouse roles are ingested at onboarding, embedded, and used as retrieval context alongside schema chunks — this bootstraps multi-table join accuracy for patterns specific to that warehouse
 
 * Top-5 most semantically relevant schema chunks are retrieved per query
 
@@ -171,6 +185,8 @@ Scope decisions are intentional. Everything marked out-of-scope is a post-MVP fe
 
 * Every generated SQL statement passes through sqlglot parse validation before execution
 
+* sqlglot AST inspection rejects any statement whose root node is not a SELECT — DDL (CREATE, ALTER, DROP) and DML (INSERT, UPDATE, DELETE) are blocked before Snowflake connection is opened; rejection returns a structured user-facing error, not a raw exception
+
 * Queries without an explicit LIMIT are automatically capped at 10,000 rows
 
 * Queries referencing non-existent tables or columns are rejected with a user-facing error
@@ -181,6 +197,8 @@ Scope decisions are intentional. Everything marked out-of-scope is a post-MVP fe
 
 * Snowflake query execution timeout is set at 30 seconds
 
+* Post-execution result deduplication: if the result set contains duplicate rows attributable to implicit cross-joins (detectable via row-count anomaly vs expected cardinality), the system flags this to the user and offers to re-run with DISTINCT — it does not silently return inflated numbers
+
 ## **4.6 Chart Selector & Output**
 
 | *As an executive, I want the system to automatically choose the right chart type for my result so I don't have to configure visualisations myself.* |
@@ -189,6 +207,8 @@ Scope decisions are intentional. Everything marked out-of-scope is a post-MVP fe
 ### **Acceptance criteria**
 
 * Result shape analysis determines chart type: time series → line, categorical comparison → bar, single number → stat card, multi-column → table
+
+* When the system auto-selects a chart type, a one-line rationale is shown beneath the chart (e.g. "Showing as line chart — time series detected on date column"); user can override via the existing selector
 
 * Charts render using Recharts with default styling — no custom theme in MVP
 
@@ -217,6 +237,46 @@ Scope decisions are intentional. Everything marked out-of-scope is a post-MVP fe
 
 * If TTS generation fails, the text summary is shown silently — no error is surfaced
 
+* STT provider is Deepgram at MVP; if transcription accuracy on domain-specific vocabulary (product names, internal metrics) falls below 90% in pilot, evaluate ElevenLabs STT (higher cost, better domain accuracy) or Microsoft VibeVoice (open-source, self-hostable: https://github.com/microsoft/VibeVoice) as a drop-in replacement — the STT interface must be abstracted to allow this swap without pipeline changes
+
+## **4.8 Query Confidence & Transparency**
+
+| *As an executive, I want to know how confident VoxQuery is in its answer so I can decide whether to act on it immediately or verify with my data team.* |
+| :---- |
+
+### **Acceptance criteria**
+
+* Every query result displays a confidence indicator (High / Medium / Low) derived from: RAG retrieval score, sqlglot validation pass/fail on first attempt, and result row count plausibility check
+
+* High confidence (≥ 0.80): result displayed immediately with no friction
+
+* Medium confidence (0.65–0.79): a single-sentence caveat is shown inline: "I'm moderately confident — the query joined tables I'm less familiar with. Review the SQL before actioning."
+
+* Low confidence (< 0.65): clarification loop triggers (existing Section 4.2 behaviour)
+
+* The generated SQL is always visible via an expandable "View SQL" toggle — collapsed by default, one click to expand
+
+* Confidence score and SQL are both logged per turn in the turns table for calibration review in Langfuse
+
+* Confidence UI must not be shown as a numerical percentage — only the three-tier label (High / Medium / Low) is shown to the executive; the raw score is internal only
+
+## **4.9 Data Storytelling Engine**
+
+| *As an executive, I want the spoken summary to tell me the story behind the numbers — not just read them out — so I can make a decision without further analysis.* |
+| :---- |
+
+### **Acceptance criteria**
+
+* The TTS summary prompt instructs the LLM to produce a narrative with: (1) the headline number, (2) the primary driver if detectable from the result set, and (3) a directional implication if inferrable ("Revenue grew 15% QoQ, driven by Enterprise which saw a 23% uplift. SMB declined 8% — potentially pricing-sensitive.")
+
+* The narrative must not exceed 3 sentences — enforced by the prompt, not post-processing
+
+* If the result set is a single number (stat card), the summary states the value, its change vs the prior period if available, and whether it is above or below a relevant benchmark if that benchmark was part of the retrieved schema context
+
+* The storytelling prompt is a distinct LLM call from the SQL generation call — it receives only the sanitised result shape (not raw rows) and the user's original question, not the full schema context
+
+* Storytelling LLM call must complete within 2 seconds P95 — it runs in parallel with chart rendering (existing Section 4.7 behaviour)
+
 # **5\. High-Level Architecture**
 
 Three layers: client, backend pipeline, and data layer. The client is thin — it handles audio capture, displays results, and plays audio. All intelligence lives in the backend.
@@ -229,14 +289,16 @@ Three layers: client, backend pipeline, and data layer. The client is thin — i
 | Client | Recharts | Bar, line, table, stat card visualisation |
 | Backend | FastAPI (Python 3.12) | Async API gateway, session management, pipeline orchestration |
 | Backend | Deepgram Streaming STT | Real-time speech-to-text transcription |
+| Backend | LiveKit (evaluate for v1.1) | Voice agent state management and WebSocket session orchestration — recommended for MVP if voice agent complexity grows; use HTTP/WebSocket endpoints for structured responses at MVP, evaluate LiveKit cutover before pilot scale-up |
 | Backend | Claude claude-sonnet-4-20250514 | SQL generation, clarification, summary generation |
 | Backend | sqlglot | SQL validation, dialect normalisation, safety enforcement |
 | Backend | OpenAI tts-1 | Voice summary generation |
 | Data | Postgres 16 \+ pgvector | Users, sessions, turns, schema embeddings |
 | Data | Upstash Redis | Session state, rate limiting, query caching |
 | Data | Snowflake (customer) | Live warehouse query execution |
+| Backend (V2) | Executive Memory Graph | Persistent per-user knowledge store: preferred metrics, typical time ranges, departments overseen, past questions — enables "Last week you asked about EMEA. Want an update?" and learns that "how are we doing" means ARR for a specific CEO. Built over the existing turns + conversations tables at V2 — no additional infra required at MVP. |
 
-| *Architecture principle: the LLM never touches Snowflake directly. All SQL passes through sqlglot validation before execution. This is the trust layer — it catches hallucinated column names, unsafe patterns, and missing row limits.* |
+| *Architecture principle: the LLM never touches Snowflake directly. All SQL passes through sqlglot validation before execution. This is the trust layer — it catches hallucinated column names, unsafe patterns, and missing row limits. Additionally: raw Snowflake result rows are never passed to the LLM. Only schema metadata, glossary terms, and query intent travel to the LLM API boundary. The LLM generates SQL and narrative summaries — it never sees the actual data values returned by the warehouse. This boundary is the primary confidentiality guarantee for enterprise pilots.* |
 | :---- |
 
 # **6\. MVP Data Model**
@@ -339,6 +401,10 @@ Optimised for rapid development, low operational overhead, and easy deployment. 
 
 * RAG retrieval: \< 500ms P90
 
+* Snowflake query execution target: < 10 seconds P50 on pre-warmed warehouses with row limits applied; cache hits (Redis): < 200ms
+
+* Contextual result caching: identical normalised SQL + tenant_id combinations are cached in Upstash Redis (TTL configurable per tenant, default 5 minutes) — cache hit bypasses Snowflake execution entirely; cache key is a hash of normalised SQL post-sqlglot formatting
+
 * TTS audio playback begins: \< 3 seconds after chart renders
 
 ### **Security**
@@ -352,6 +418,10 @@ Optimised for rapid development, low operational overhead, and easy deployment. 
 * SQL validation layer prevents injection — no raw user input reaches Snowflake
 
 * JWT tokens expire after 8 hours; refresh tokens rotated on use
+
+* Data confidentiality: raw Snowflake query result rows are never transmitted to third-party LLM APIs; only schema metadata, business glossary terms, and sanitised query intent are sent to Claude — result data stays within the customer's execution boundary; this must be enforced at the pipeline orchestration layer and verified during pilot onboarding
+
+* The SQL generation prompt interface must be model-agnostic: no Claude-specific API constructs (e.g. system prompt formatting, tool use schema) are hardcoded outside of a single adapter class — this enables swap-in of a private SLM (e.g. fine-tuned Mistral/LLaMA deployed on-prem) for customers with strict data residency or InfoSec requirements without a pipeline rewrite
 
 ### **Reliability**
 
@@ -385,11 +455,17 @@ Every query follows this sequence. The orchestrator manages state and retries be
 
 5. sqlglot validates SQL — on failure, retry once with error correction prompt
 
+5a. AST-level write check: if the statement root is not SELECT, reject immediately with user-facing error — pipeline halts here
+
 6. If confidence \< threshold, clarification prompt sent to client — user selects option — loop restarts from step 4
 
 7. Validated SQL executed against customer's Snowflake warehouse
 
+7a. Result checked against Redis cache (key: hash of normalised SQL + tenant_id); cache hit returns immediately, skipping Snowflake — cache miss proceeds to execution and populates cache on return
+
 8. Result shape analysed → chart type selected (bar / line / table / stat card)
+
+8a. Storytelling call: the LLM is called in parallel with TTS generation using only the result shape (column names, aggregated values) and the original user question — not raw row data — to produce a 1–3 sentence narrative summary. This call and the TTS generation (Step 9) are parallelised; whichever completes first waits for the other before audio plays.
 
 9. TTS summary generated in parallel, streamed to client
 
@@ -405,6 +481,11 @@ Every query follows this sequence. The orchestrator manages state and retries be
 | Poor warehouse metadata quality breaks RAG grounding | High | Admin setup wizard to guide metadata entry; sample query seeding at onboarding |
 | Voice modality not used in open office environments | Medium | Text fallback is first-class — voice is one input mode, not a requirement |
 | Incumbent (Snowflake, Microsoft) ships native feature | Medium | Speed to reference customer; focus on conversation memory as defensible differentiator |
+| Vocabulary mismatch: executive language vs DB column naming breaks RAG grounding | High | Business glossary layer at onboarding (Change 6); admin maps business terms to column names; glossary embedded alongside schema chunks and co-retrieved |
+| DB schema lacks FK/PK constraints — join relationships exist only implicitly | High | Admin setup wizard collects explicit relationship declarations at onboarding (Change 8); stored as relationship context injected into SQL generation prompt |
+| LLM generates incorrect SQL on 3+ table joins with similar field names across tables | High | Per-table metadata embedding (Change 7); historical query log seeding (Change 9); deduplication detection (Change 11); sqlglot validates join structure |
+| Enterprise prospect refuses SaaS model — will not share warehouse credentials with external vendor | High | Single-tenant logical isolation in MVP (separate Postgres schema + encrypted Snowflake DSN per tenant); VPC/self-hosted deployment on roadmap; model-agnostic interface (Change 16) enables on-prem LLM swap |
+| Snowflake Cortex, Microsoft Fabric, or Tableau ships native voice-to-SQL before pilot completes | Medium | Speed to reference customer is the primary mitigation; conversation memory and Morning Briefing Mode (V2) are defensible differentiators that incumbents cannot ship quickly; focus pilot on relationship and workflow integration, not feature parity |
 
 # **11\. MVP Milestones**
 
@@ -430,6 +511,25 @@ These items require a decision before or during development. Each has a proposed
 | Should generated SQL be visible to users by default? | Collapsed, expandable on click | Product |
 | Row limit for Snowflake queries? | 10,000 rows hard cap in MVP | Engineering |
 | TTS voice — alloy or nova? | Alloy (neutral, clear) unless pilot requests change | Product |
+| STT provider: Deepgram (current) vs ElevenLabs vs Microsoft VibeVoice (OSS)? | Deepgram for MVP; trigger ElevenLabs evaluation if domain vocabulary transcription accuracy < 90% in first 2 pilot weeks | Engineering lead |
+| SQL generation: Claude API (current) vs private SLM for InfoSec-sensitive pilots? | Claude API for MVP; model-agnostic adapter (Change 16) enables swap without pipeline rewrite; revisit after first enterprise InfoSec review | Engineering lead |
+| Will pilot customer accept SaaS (shared infra) or require single-tenant VPC isolation? | Single-tenant logical isolation in MVP; physical VPC as a fast-follow if pilot deal requires it | Product / Sales |
+| Does the pilot customer's Snowflake instance have QUERY_HISTORY accessible for bootstrapping RAG context? | Assume yes; confirm during onboarding call — if not, rely entirely on admin-provided sample queries | Engineering / Customer Success |
+
+# **13\. Post-MVP Roadmap (V2)**
+
+This section documents features that are explicitly out of scope for MVP but must be architected for — meaning MVP decisions must not foreclose these features. V2 scope will be defined in a separate PRD following pilot feedback.
+
+| Feature | V2 Designation | MVP Architecture Constraint |
+| :--- | :--- | :--- |
+| Morning Briefing Mode | V2.1 — first priority post-pilot | query execution must be callable programmatically (Change 29); turns table needs a `source` column (user \| scheduled) |
+| Executive Memory Graph | V2.2 | conversations and turns tables already capture the data; memory graph is an analytics layer over existing tables — no schema change required |
+| Cross-session conversation memory | V2.2 | conversations table already persists turns; V2 is a retrieval + summarisation feature over existing data |
+| Multi-warehouse support (BigQuery, Redshift) | V2.3 | WarehouseConnector abstract interface required at MVP (Change 4) |
+| Row-level security — column-level filtering | V2.3 | Snowflake role passthrough is MVP (Change 1); column masking requires Snowflake Dynamic Data Masking — document as V2 dependency |
+| Mobile native app | V2.4 | Next.js PWA wrapper at MVP keeps mobile path open without native dev cost |
+| Slack / email output channel | V2.3 | query result format must be serialisable to JSON from day one — do not couple chart rendering to the pipeline response |
+| VPC / self-hosted deployment | V2.5 | model-agnostic LLM interface (Change 16) and connector abstraction (Change 4) are the two critical prerequisites |
 
 | *Document owner: Product / Venture CTO. This PRD covers the MVP scope only. Post-pilot scope (multi-warehouse, cross-session memory, SOC 2, VPC deployment) will be captured in a separate V2 PRD following pilot feedback.* |
 | :---- |
