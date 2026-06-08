@@ -1,5 +1,3 @@
-﻿
-
 **VoxQuery**
 
 Voice-Driven Data Analyst
@@ -78,7 +76,6 @@ Scope decisions are intentional. Everything marked out-of-scope is a post-MVP fe
 * Cross-session conversation memory and history search
 
 * Scheduled reports or data alerts — out of scope for MVP execution. The post-MVP roadmap includes Morning Briefing Mode (V2): scheduled background queries run nightly against key executive metrics, z-score and week-over-week anomaly detection flags outliers, and the system proactively surfaces a priority-ranked briefing at session open ("Good morning. Three things before your 9 AM: EMEA revenue dropped 23% WoW, conversion rate fell below 30-day avg, pipeline is 118% of target"). The backend pipeline (scheduled queries + anomaly detection) must be designed at MVP so that Morning Briefing is an additive feature, not a rewrite — specifically: (a) query execution must be callable programmatically, not only via user request, and (b) the result store (turns table) must support a source column distinguishing user-initiated vs scheduled runs.
-
 
 * Mobile native app (iOS / Android)
 
@@ -533,5 +530,3 @@ This section documents features that are explicitly out of scope for MVP but mus
 
 | *Document owner: Product / Venture CTO. This PRD covers the MVP scope only. Post-pilot scope (multi-warehouse, cross-session memory, SOC 2, VPC deployment) will be captured in a separate V2 PRD following pilot feedback.* |
 | :---- |
-
-
