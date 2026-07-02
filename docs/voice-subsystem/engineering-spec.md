@@ -23,7 +23,7 @@ Everything else (SQL generation, schema RAG, Snowflake execution, TTS, chart ren
 
 | Layer | Technology |
 |---|---|
-| Frontend | Next.js 14 + TypeScript - Vercel |
+| Frontend | Next.js 16 + TypeScript - Vercel; Node >=20.9 |
 | Backend | FastAPI - Python 3.12 - Railway (single instance) |
 | STT | Deepgram `nova-2` via FastAPI WebSocket relay |
 | LLM | Anthropic `claude-sonnet-4-20250514` |
@@ -886,5 +886,3 @@ Progress events are triggered by real Orchestrator events - not setTimeout appro
 ---
 
 *VoxQuery Engineering Spec - Subsystems 4.1 · 4.2 · 4.3*  
-*Derived from Architecture Foundation Document v1.0 + Batches 1–5*  
-*Changes require explicit architecture review*

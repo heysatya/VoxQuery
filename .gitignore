@@ -1,0 +1,35 @@
+# Python bytecode / cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local env files
+.env
+.env.local
+
+# Test / build caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.next/
+dist/
+coverage/
+
+# Node dependencies
+node_modules/
+
+# Exclude documentation archive
+docs/archive/
+
+# Exclude pitch deck directory
+pitch-deck/

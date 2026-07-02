@@ -2,7 +2,7 @@
 
 **Companion to:** VoxQuery Engineering Spec — Subsystems 4.1 · 4.2 · 4.3  
 **Covers:** WebSocket message schemas · REST API contracts · HTTP error envelope  
-**Status:** Required before Day 6 (Deepgram proxy implementation)
+**Status:** Required before Deepgram proxy implementation
 
 ---
 
@@ -359,6 +359,8 @@ Railway health probe. No auth required.
 ```
 
 `degraded` means the dependency is reachable but slow (> 100ms ping). The health endpoint does not fail on degraded dependencies — Railway should not restart a healthy process because Redis is slow. It returns `200` with the degraded status so monitoring can observe it.
+
+Local MVP note: before Redis/Postgres are wired, the local slice returns `redis: "local_stub"` and `postgres: "not_configured"` so fake dependencies are not mistaken for production-ready services.
 
 ---
 

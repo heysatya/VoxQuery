@@ -4,7 +4,16 @@ VoxQuery is an enterprise-grade, voice-driven data analyst that enables non-tech
 
 ## Project Documents
 
-- **MVP Product Requirements Document (PRD)**: [VoxQuery_MVP_PRD.md](./VoxQuery_MVP_PRD.md)
+### Active Specifications (Voice Subsystem)
+- **Voice Subsystem Engineering Spec**: [engineering-spec.md](./docs/voice-subsystem/engineering-spec.md)
+- **Voice Subsystem Interface Contracts**: [interface-contracts.md](./docs/voice-subsystem/interface-contracts.md)
+
+### Active Core Documents
+- **Revised MVP Product Requirements Document (PRD)**: [prd.md](./docs/prd.md)
+
+### Archived Core Documents
+- **Foundational Architectural Blueprint**: [architecture-blueprint.md](./docs/archive/architecture-blueprint.md)
+- **Archived & Historical Documents**: All historical blueprints, PRD versions, and drafts can be found in the [docs/archive/](./docs/archive/) directory.
 
 ## Contribution & Review Workflow
 
@@ -23,7 +32,7 @@ To ensure the integrity of the Product Requirements Document (PRD) and core proj
 2. **Make and Commit Your Edits**:
    Edit the PRD or relevant files and commit your changes with a clear message:
    ```bash
-   git add VoxQuery_MVP_PRD.md
+   git add docs/prd.md
    git commit -m "docs: suggest revisions to section X"
    ```
 

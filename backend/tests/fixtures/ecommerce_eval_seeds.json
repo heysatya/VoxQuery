@@ -1,0 +1,44 @@
+[
+  {
+    "name": "Monthly revenue growth",
+    "question": "Show monthly revenue growth with year over year comparison",
+    "expected_tables": ["orders", "order_items"],
+    "expected_metrics": ["total_revenue", "mom_growth_pct", "yoy_growth_pct"],
+    "complexity": "High"
+  },
+  {
+    "name": "CLV by segment",
+    "question": "Show customer lifetime value by customer segment",
+    "expected_tables": ["customers", "orders", "order_items"],
+    "expected_metrics": ["avg_clv", "avg_order_value", "customers"],
+    "complexity": "Advanced"
+  },
+  {
+    "name": "Product margin",
+    "question": "Show top products by profit margin",
+    "expected_tables": ["products", "order_items", "orders"],
+    "expected_metrics": ["total_revenue", "total_profit", "profit_margin_pct"],
+    "complexity": "High"
+  },
+  {
+    "name": "Seller performance",
+    "question": "Show seller performance by revenue and rating",
+    "expected_tables": ["sellers", "order_items", "orders", "order_reviews", "products"],
+    "expected_metrics": ["total_revenue", "avg_rating", "late_delivery_pct"],
+    "complexity": "Advanced"
+  },
+  {
+    "name": "Geographic revenue",
+    "question": "Show revenue by state and city",
+    "expected_tables": ["geolocation", "customers", "orders", "order_items"],
+    "expected_metrics": ["total_revenue", "avg_order_value", "revenue_per_customer"],
+    "complexity": "High"
+  },
+  {
+    "name": "Delivery performance",
+    "question": "Show on time versus late delivery performance",
+    "expected_tables": ["orders", "order_items", "sellers"],
+    "expected_metrics": ["on_time_pct", "avg_actual_delivery_days", "delivery_variance_days"],
+    "complexity": "High"
+  }
+]

@@ -282,7 +282,7 @@ Three layers: client, backend pipeline, and data layer. The client is thin — i
 
 | Layer | Component | Responsibility |
 | :---- | :---- | :---- |
-| Client | Next.js 14 (TypeScript) | Audio capture, transcript display, chart render, TTS playback |
+| Client | Next.js 16 (TypeScript, Node >=20.9) | Audio capture, transcript display, chart render, TTS playback |
 | Client | Recharts | Bar, line, table, stat card visualisation |
 | Backend | FastAPI (Python 3.12) | Async API gateway, session management, pipeline orchestration |
 | Backend | Deepgram Streaming STT | Real-time speech-to-text transcription |
@@ -371,7 +371,7 @@ Optimised for rapid development, low operational overhead, and easy deployment. 
 
 | Area | Choice | Rationale |
 | :---- | :---- | :---- |
-| Frontend | Next.js 14 \+ TypeScript | App Router, SSR, one-click Vercel deploy |
+| Frontend | Next.js 16 \+ TypeScript | App Router, SSR, one-click Vercel deploy |
 | UI / Charts | Tailwind CSS \+ Recharts | No design system overhead at MVP |
 | Backend | Python 3.12 \+ FastAPI | Async, strong AI/ML ecosystem |
 | LLM | Claude claude-sonnet-4-20250514 (Anthropic) | Best-in-class SQL generation & schema reasoning |
