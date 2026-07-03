@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from app.config import Settings, get_settings
-from app.main import app
+from app.main import app, redact_token_query_params
 from app.middleware import auth
 from app.middleware.auth import ClerkJwtVerifier, get_clerk_verifier, get_current_user
 from app.models.contracts import ApiError
@@ -47,6 +47,7 @@ def clerk_settings():
         AUTH_MODE="clerk",
         CLERK_ISSUER=ISSUER,
         CLERK_JWKS_URL=JWKS_URL,
+        CLERK_AUDIENCE=None,
     )
 
 
@@ -80,6 +81,40 @@ def test_clerk_verifier_accepts_signed_token_and_maps_claims(key_pair, clerk_set
     assert claims.email == "local-user@voxquery.test"
     assert claims.role == "viewer"
     assert claims.snowflake_role == "ANALYST_READONLY"
+
+
+def test_blank_clerk_audience_is_treated_as_unset(key_pair):
+    private_key, public_key = key_pair
+    settings = Settings(
+        APP_ENV="test",
+        AUTH_MODE="clerk",
+        CLERK_ISSUER=ISSUER,
+        CLERK_JWKS_URL=JWKS_URL,
+        CLERK_AUDIENCE="",
+    )
+    verifier = ClerkJwtVerifier(settings, jwks_client=FakeJwksClient(public_key))
+
+    assert settings.clerk_audience is None
+    assert verifier.verify(signed_token(private_key)).tenant_id == TENANT_ID
+
+
+def test_clerk_verifier_allows_small_clock_skew(key_pair, clerk_settings):
+    private_key, public_key = key_pair
+    verifier = ClerkJwtVerifier(clerk_settings, jwks_client=FakeJwksClient(public_key))
+
+    claims = verifier.verify(signed_token(private_key, iat=datetime.now(UTC) + timedelta(seconds=30)))
+
+    assert claims.user_id == USER_ID
+
+
+def test_access_log_redacts_websocket_token_query_param():
+    redacted = redact_token_query_params(
+        'WebSocket /ws/audio?session_id=session-1&token=header.payload.signature&x=1'
+    )
+
+    assert "header.payload.signature" not in redacted
+    assert "token=<redacted>" in redacted
+    assert "session_id=session-1" in redacted
 
 
 def test_clerk_verifier_rejects_invalid_issuer(key_pair, clerk_settings):
@@ -135,7 +170,7 @@ def test_clerk_verifier_rejects_malformed_uuid_claims(key_pair, clerk_settings):
 
 
 def test_clerk_startup_requires_metadata_and_https_in_hosted_envs():
-    missing = Settings(APP_ENV="test", AUTH_MODE="clerk")
+    missing = Settings(APP_ENV="test", AUTH_MODE="clerk", CLERK_ISSUER=None, CLERK_JWKS_URL=None)
     with pytest.raises(RuntimeError, match="CLERK_ISSUER"):
         missing.validate_startup()
 
@@ -180,7 +215,13 @@ def test_clerk_verifier_is_cached_per_settings(clerk_settings):
 def test_rest_session_enforces_clerk_tenant_claims(monkeypatch, key_pair):
     private_key, public_key = key_pair
     verifier = ClerkJwtVerifier(
-        Settings(APP_ENV="test", AUTH_MODE="clerk", CLERK_ISSUER=ISSUER, CLERK_JWKS_URL=JWKS_URL),
+        Settings(
+            APP_ENV="test",
+            AUTH_MODE="clerk",
+            CLERK_ISSUER=ISSUER,
+            CLERK_JWKS_URL=JWKS_URL,
+            CLERK_AUDIENCE=None,
+        ),
         jwks_client=FakeJwksClient(public_key),
     )
     force_clerk_mode(monkeypatch, verifier)
@@ -205,7 +246,13 @@ def test_rest_session_enforces_clerk_tenant_claims(monkeypatch, key_pair):
 def test_websocket_auth_accepts_valid_token_and_rejects_missing_token(monkeypatch, key_pair):
     private_key, public_key = key_pair
     verifier = ClerkJwtVerifier(
-        Settings(APP_ENV="test", AUTH_MODE="clerk", CLERK_ISSUER=ISSUER, CLERK_JWKS_URL=JWKS_URL),
+        Settings(
+            APP_ENV="test",
+            AUTH_MODE="clerk",
+            CLERK_ISSUER=ISSUER,
+            CLERK_JWKS_URL=JWKS_URL,
+            CLERK_AUDIENCE=None,
+        ),
         jwks_client=FakeJwksClient(public_key),
     )
     force_clerk_mode(monkeypatch, verifier)
@@ -230,7 +277,13 @@ def test_websockets_reject_tampered_signature_with_4001(monkeypatch, key_pair):
     private_key, public_key = key_pair
     attacker_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     verifier = ClerkJwtVerifier(
-        Settings(APP_ENV="test", AUTH_MODE="clerk", CLERK_ISSUER=ISSUER, CLERK_JWKS_URL=JWKS_URL),
+        Settings(
+            APP_ENV="test",
+            AUTH_MODE="clerk",
+            CLERK_ISSUER=ISSUER,
+            CLERK_JWKS_URL=JWKS_URL,
+            CLERK_AUDIENCE=None,
+        ),
         jwks_client=FakeJwksClient(public_key),
     )
     force_clerk_mode(monkeypatch, verifier)
@@ -270,4 +323,5 @@ def force_clerk_mode(monkeypatch, verifier: ClerkJwtVerifier):
     monkeypatch.setattr(settings, "auth_mode", "clerk")
     monkeypatch.setattr(settings, "clerk_issuer", ISSUER)
     monkeypatch.setattr(settings, "clerk_jwks_url", JWKS_URL)
+    monkeypatch.setattr(settings, "clerk_audience", None)
     monkeypatch.setattr(auth, "get_clerk_verifier", lambda current_settings: verifier)

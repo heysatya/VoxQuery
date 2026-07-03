@@ -22,6 +22,8 @@ Add custom session claims in the Clerk dashboard using the UUIDs stored on the C
 ```
 
 If either claim is missing or malformed, the backend rejects the request with `auth_invalid`.
+After changing Session Token claims or user metadata, sign out and sign back in so Clerk
+issues a fresh token with the updated claims.
 
 ## Environment Variables
 
@@ -47,6 +49,9 @@ Optional but recommended for staging/production:
 CLERK_AUDIENCE=https://api.voxquery.com
 ```
 
+Leave `CLERK_AUDIENCE` unset or blank for the first local smoke unless the Clerk token is
+configured with a matching `aud` claim. Blank optional Clerk env values are treated as unset.
+
 The frontend sends Clerk tokens as REST `Authorization: Bearer <jwt>` headers and as
-`token=<jwt>` query params for `/ws/audio` and `/ws/pipeline`. Do not commit Clerk secrets
-or local `.env` files.
+`token=<jwt>` query params for `/ws/audio` and `/ws/pipeline`. Backend access logs redact
+the `token` query param. Do not commit Clerk secrets or local `.env` files.

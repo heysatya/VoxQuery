@@ -59,6 +59,14 @@ class Settings(BaseSettings):
             raise ValueError(f"SESSION_STORE must be one of {sorted(allowed)}")
         return value
 
+    @field_validator("clerk_issuer", "clerk_jwks_url", "clerk_audience", mode="before")
+    @classmethod
+    def empty_optional_clerk_value_is_unset(cls, value: str | None) -> str | None:
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.backend_cors_origins.split(",") if origin.strip()]

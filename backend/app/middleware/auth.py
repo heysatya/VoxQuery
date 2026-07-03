@@ -29,6 +29,7 @@ class ClerkJwtVerifier:
                 algorithms=["RS256"],
                 audience=self.settings.clerk_audience,
                 issuer=self.settings.clerk_issuer,
+                leeway=60,
                 options={
                     "require": ["exp", "iat", "iss", "sub"],
                     "verify_aud": self.settings.clerk_audience is not None,

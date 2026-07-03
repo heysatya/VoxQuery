@@ -45,7 +45,7 @@ Acceptance criteria:
 
 ## Gate 3 - Clerk Auth
 
-Status: backend JWT enforcement and frontend Clerk login/token relay implemented locally; real Clerk project validation pending. Clerk dashboard setup notes are in `docs/voice-subsystem/clerk-auth-setup.md`.
+Status: complete. Backend JWT enforcement, frontend Clerk login/token relay, and real Clerk project smoke validation passed. Clerk dashboard setup notes are in `docs/voice-subsystem/clerk-auth-setup.md`.
 
 Acceptance criteria:
 
@@ -54,6 +54,8 @@ Acceptance criteria:
 - Tenant and user claims are enforced.
 - Mismatched tenant requests fail.
 - Production/staging fail startup if fake auth is enabled.
+- Real Clerk Session Token claims create sessions, drive `/ws/pipeline`, and drive fake voice through `/ws/audio`.
+- Access logs redact WebSocket `token` query params.
 
 ## Gate 4 - Real Deepgram Streaming
 

@@ -1,3 +1,6 @@
+import logging
+import re
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +17,32 @@ from app.services.pipeline import PipelineOrchestrator
 
 settings = get_settings()
 settings.validate_startup()
+logger = logging.getLogger("voxquery.api")
+_TOKEN_QUERY_RE = re.compile(r"([?&]token=)[^&\s\"]+")
+
+
+def redact_token_query_params(value: str) -> str:
+    return _TOKEN_QUERY_RE.sub(r"\1<redacted>", value)
+
+
+class AccessTokenRedactionFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = redact_token_query_params(record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                redact_token_query_params(arg) if isinstance(arg, str) else arg
+                for arg in record.args
+            )
+        elif isinstance(record.args, dict):
+            record.args = {
+                key: redact_token_query_params(value) if isinstance(value, str) else value
+                for key, value in record.args.items()
+            }
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(AccessTokenRedactionFilter())
 
 app = FastAPI(title="VoxQuery Voice Subsystem", version="0.1.0")
 app.add_middleware(
@@ -36,6 +65,13 @@ app.state.pipeline = PipelineOrchestrator(
 @app.exception_handler(ApiError)
 async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
     detail = None if settings.app_env == "production" else exc.detail
+    if settings.app_env != "production":
+        logger.warning(
+            "api_error path=%s code=%s detail=%s",
+            request.url.path,
+            exc.code.value,
+            detail,
+        )
     return JSONResponse(
         status_code=exc.status_code,
         content=ErrorEnvelope(
