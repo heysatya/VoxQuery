@@ -63,6 +63,9 @@ def signed_token(private_key, **overrides) -> str:
         "snowflake_role": "ANALYST_READONLY",
     }
     payload.update(overrides)
+    for key, value in list(payload.items()):
+        if value is None:
+            payload.pop(key)
     return jwt.encode(payload, private_key, algorithm="RS256", headers={"kid": "test-key"})
 
 
@@ -89,12 +92,43 @@ def test_clerk_verifier_rejects_invalid_issuer(key_pair, clerk_settings):
     assert exc.value.code == "auth_invalid"
 
 
+def test_clerk_verifier_rejects_expired_token(key_pair, clerk_settings):
+    private_key, public_key = key_pair
+    verifier = ClerkJwtVerifier(clerk_settings, jwks_client=FakeJwksClient(public_key))
+
+    with pytest.raises(ApiError) as exc:
+        verifier.verify(signed_token(private_key, exp=datetime.now(UTC) - timedelta(minutes=1)))
+
+    assert exc.value.code == "auth_invalid"
+
+
+def test_clerk_verifier_rejects_missing_sub(key_pair, clerk_settings):
+    private_key, public_key = key_pair
+    verifier = ClerkJwtVerifier(clerk_settings, jwks_client=FakeJwksClient(public_key))
+
+    with pytest.raises(ApiError) as exc:
+        verifier.verify(signed_token(private_key, sub=None))
+
+    assert exc.value.code == "auth_invalid"
+
+
 def test_clerk_verifier_rejects_missing_voxquery_claims(key_pair, clerk_settings):
     private_key, public_key = key_pair
     verifier = ClerkJwtVerifier(clerk_settings, jwks_client=FakeJwksClient(public_key))
 
     with pytest.raises(ApiError) as exc:
         verifier.verify(signed_token(private_key, vox_tenant_id=None))
+
+    assert exc.value.code == "auth_invalid"
+    assert "VoxQuery authorization claims" in exc.value.detail
+
+
+def test_clerk_verifier_rejects_malformed_uuid_claims(key_pair, clerk_settings):
+    private_key, public_key = key_pair
+    verifier = ClerkJwtVerifier(clerk_settings, jwks_client=FakeJwksClient(public_key))
+
+    with pytest.raises(ApiError) as exc:
+        verifier.verify(signed_token(private_key, vox_user_id="not-a-uuid"))
 
     assert exc.value.code == "auth_invalid"
     assert "VoxQuery authorization claims" in exc.value.detail
@@ -149,26 +183,23 @@ def test_rest_session_enforces_clerk_tenant_claims(monkeypatch, key_pair):
         Settings(APP_ENV="test", AUTH_MODE="clerk", CLERK_ISSUER=ISSUER, CLERK_JWKS_URL=JWKS_URL),
         jwks_client=FakeJwksClient(public_key),
     )
-    restore_settings = force_clerk_mode(monkeypatch, verifier)
+    force_clerk_mode(monkeypatch, verifier)
     client = TestClient(app)
     token = signed_token(private_key)
-    try:
-        response = client.post(
-            "/api/session",
-            headers={"Authorization": f"Bearer {token}"},
-            json={"tenant_id": str(TENANT_ID)},
-        )
-        assert response.status_code == 201
+    response = client.post(
+        "/api/session",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"tenant_id": str(TENANT_ID)},
+    )
+    assert response.status_code == 201
 
-        mismatch = client.post(
-            "/api/session",
-            headers={"Authorization": f"Bearer {token}"},
-            json={"tenant_id": str(OTHER_TENANT_ID)},
-        )
-        assert mismatch.status_code == 401
-        assert mismatch.json()["error"]["code"] == "auth_invalid"
-    finally:
-        restore_settings()
+    mismatch = client.post(
+        "/api/session",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"tenant_id": str(OTHER_TENANT_ID)},
+    )
+    assert mismatch.status_code == 401
+    assert mismatch.json()["error"]["code"] == "auth_invalid"
 
 
 def test_websocket_auth_accepts_valid_token_and_rejects_missing_token(monkeypatch, key_pair):
@@ -177,27 +208,48 @@ def test_websocket_auth_accepts_valid_token_and_rejects_missing_token(monkeypatc
         Settings(APP_ENV="test", AUTH_MODE="clerk", CLERK_ISSUER=ISSUER, CLERK_JWKS_URL=JWKS_URL),
         jwks_client=FakeJwksClient(public_key),
     )
-    restore_settings = force_clerk_mode(monkeypatch, verifier)
+    force_clerk_mode(monkeypatch, verifier)
     client = TestClient(app)
     token = signed_token(private_key)
-    try:
-        session = client.post(
-            "/api/session",
-            headers={"Authorization": f"Bearer {token}"},
-            json={"tenant_id": str(TENANT_ID)},
-        ).json()
+    session = client.post(
+        "/api/session",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"tenant_id": str(TENANT_ID)},
+    ).json()
 
-        with client.websocket_connect(
-            f"/ws/pipeline?session_id={session['session_id']}&token={token}"
-        ) as ws:
-            assert ws is not None
+    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token={token}") as ws:
+        assert ws is not None
 
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}"):
+            pass
+    assert exc.value.code == 4001
+
+
+def test_websockets_reject_tampered_signature_with_4001(monkeypatch, key_pair):
+    private_key, public_key = key_pair
+    attacker_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    verifier = ClerkJwtVerifier(
+        Settings(APP_ENV="test", AUTH_MODE="clerk", CLERK_ISSUER=ISSUER, CLERK_JWKS_URL=JWKS_URL),
+        jwks_client=FakeJwksClient(public_key),
+    )
+    force_clerk_mode(monkeypatch, verifier)
+    client = TestClient(app)
+    valid_token = signed_token(private_key)
+    tampered_token = signed_token(attacker_key)
+    session = client.post(
+        "/api/session",
+        headers={"Authorization": f"Bearer {valid_token}"},
+        json={"tenant_id": str(TENANT_ID)},
+    ).json()
+
+    for path in ("pipeline", "audio"):
         with pytest.raises(WebSocketDisconnect) as exc:
-            with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}"):
+            with client.websocket_connect(
+                f"/ws/{path}?session_id={session['session_id']}&token={tampered_token}"
+            ):
                 pass
         assert exc.value.code == 4001
-    finally:
-        restore_settings()
 
 
 def test_clerk_verification_stays_within_local_budget(key_pair, clerk_settings):
@@ -215,19 +267,7 @@ def test_clerk_verification_stays_within_local_budget(key_pair, clerk_settings):
 
 def force_clerk_mode(monkeypatch, verifier: ClerkJwtVerifier):
     settings = get_settings()
-    original = {
-        "auth_mode": settings.auth_mode,
-        "clerk_issuer": settings.clerk_issuer,
-        "clerk_jwks_url": settings.clerk_jwks_url,
-    }
-    settings.auth_mode = "clerk"
-    settings.clerk_issuer = ISSUER
-    settings.clerk_jwks_url = JWKS_URL
+    monkeypatch.setattr(settings, "auth_mode", "clerk")
+    monkeypatch.setattr(settings, "clerk_issuer", ISSUER)
+    monkeypatch.setattr(settings, "clerk_jwks_url", JWKS_URL)
     monkeypatch.setattr(auth, "get_clerk_verifier", lambda current_settings: verifier)
-
-    def restore_settings() -> None:
-        settings.auth_mode = original["auth_mode"]
-        settings.clerk_issuer = original["clerk_issuer"]
-        settings.clerk_jwks_url = original["clerk_jwks_url"]
-
-    return restore_settings

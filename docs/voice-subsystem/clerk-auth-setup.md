@@ -1,0 +1,42 @@
+# VoxQuery Clerk Auth Setup
+
+## Required JWT Claims
+
+The backend validates Clerk JWTs and maps them into the existing VoxQuery session contract.
+The token must include these custom UUID claims:
+
+- `vox_user_id`
+- `vox_tenant_id`
+
+These claims are required because VoxQuery session, Redis, and app metadata contracts currently use UUID user and tenant IDs.
+
+## Clerk Dashboard Setup
+
+Add custom session claims in the Clerk dashboard using the UUIDs stored on the Clerk user:
+
+```json
+{
+  "vox_user_id": "{{user.public_metadata.vox_user_id}}",
+  "vox_tenant_id": "{{user.public_metadata.vox_tenant_id}}"
+}
+```
+
+If either claim is missing or malformed, the backend rejects the request with `auth_invalid`.
+
+## Environment Variables
+
+Required when `AUTH_MODE=clerk`:
+
+```env
+AUTH_MODE=clerk
+CLERK_ISSUER=https://...
+CLERK_JWKS_URL=https://...
+```
+
+Optional but recommended for staging/production:
+
+```env
+CLERK_AUDIENCE=https://api.voxquery.com
+```
+
+Frontend Clerk token relay is a separate Gate 3 slice. Do not commit Clerk secrets or local `.env` files.
