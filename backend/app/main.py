@@ -7,7 +7,7 @@ from app.api.rest import router as rest_router
 from app.api.ws_audio import router as ws_audio_router
 from app.api.ws_pipeline import router as ws_pipeline_router
 from app.config import get_settings
-from app.core.session import InMemorySessionStore
+from app.core.session import build_session_store
 from app.models.contracts import ApiError, ErrorCode, ErrorEnvelope, ERROR_MESSAGES
 from app.services.events import PipelineEventBus
 from app.services.pipeline import PipelineOrchestrator
@@ -24,7 +24,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.state.sessions = InMemorySessionStore(settings=settings)
+app.state.sessions = build_session_store(settings=settings)
 app.state.events = PipelineEventBus()
 app.state.pipeline = PipelineOrchestrator(
     sessions=app.state.sessions,
@@ -68,7 +68,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 async def health() -> dict[str, str]:
     return {
         "status": "ok",
-        "redis": "local_stub",
+        "redis": app.state.sessions.health_status(),
         "postgres": "not_configured",
         "version": "local-dev",
     }

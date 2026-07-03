@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     session_ttl_seconds: int = Field(default=14_400, alias="SESSION_TTL_SECONDS")
     token_budget: int = Field(default=2_500, alias="TOKEN_BUDGET")
     clarification_timeout_seconds: int = Field(default=30, alias="CLARIFICATION_TIMEOUT_SECONDS")
+    session_store: str = Field(default="memory", alias="SESSION_STORE")
+    upstash_redis_url: str | None = Field(default=None, alias="UPSTASH_REDIS_URL")
     backend_cors_origins: str = Field(
         default="http://localhost:3000,http://127.0.0.1:3000",
         alias="BACKEND_CORS_ORIGINS",
@@ -38,6 +40,14 @@ class Settings(BaseSettings):
             raise ValueError(f"APP_ENV must be one of {sorted(allowed)}")
         return value
 
+    @field_validator("session_store")
+    @classmethod
+    def validate_session_store(cls, value: str) -> str:
+        allowed = {"memory", "redis"}
+        if value not in allowed:
+            raise ValueError(f"SESSION_STORE must be one of {sorted(allowed)}")
+        return value
+
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.backend_cors_origins.split(",") if origin.strip()]
@@ -45,6 +55,15 @@ class Settings(BaseSettings):
     def validate_startup(self) -> None:
         if self.app_env in {"staging", "production"} and self.auth_mode == "fake":
             raise RuntimeError("AUTH_MODE=fake is only allowed in development or test.")
+        if self.session_store == "redis" and not self.upstash_redis_url:
+            raise RuntimeError("UPSTASH_REDIS_URL is required when SESSION_STORE=redis.")
+        if (
+            self.session_store == "redis"
+            and self.upstash_redis_url
+            and self.app_env in {"staging", "production"}
+            and not self.upstash_redis_url.startswith("rediss://")
+        ):
+            raise RuntimeError("UPSTASH_REDIS_URL must use rediss:// in staging/production.")
 
 
 @lru_cache

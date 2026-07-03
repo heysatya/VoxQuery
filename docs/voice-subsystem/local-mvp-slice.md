@@ -21,6 +21,7 @@ It proves the application contracts and state flow before real external provider
 - Deterministic ambiguity detection.
 - Deterministic confidence scoring.
 - In-memory session memory.
+- Redis session-store adapter behind the same session contract.
 - Clarification state and resolved entity handling.
 - E-commerce warehouse-shaped fake schema, SQL, and results.
 - Tests for backend contracts and frontend behavior.
@@ -31,7 +32,7 @@ The following are intentionally stubbed for this local slice:
 
 - Deepgram STT
 - Clerk auth
-- Redis session store
+- Credentialed Upstash Redis validation
 - Supabase/Postgres audit writes
 - Langfuse tracing
 - Claude SQL generation
@@ -95,7 +96,9 @@ The local MVP slice is a working, testable skeleton of the voice subsystem. It p
 - `POST /api/query` is text-only and returns `202` with `status: processing`.
 - `/ws/pipeline` drives progress, clarification, and result-ready UI state.
 - `/api/result/{turn_id}` remains as a read-model endpoint after `result_ready`; the frontend does not poll it.
-- `/health` reports Redis as `local_stub` and Postgres as `not_configured` in the local slice.
+- `SESSION_STORE=memory` is the default and reports Redis as `local_stub`.
+- `SESSION_STORE=redis` enables the Redis adapter and requires `UPSTASH_REDIS_URL`.
+- `/health` reports Redis as `ok` or `degraded` only when Redis mode is enabled. Postgres remains `not_configured`.
 
 ## Current Demo Warehouse
 

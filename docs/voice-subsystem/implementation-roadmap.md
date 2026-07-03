@@ -30,6 +30,8 @@ Acceptance criteria:
 
 ## Gate 2 - Redis Session Store
 
+Status: local adapter implemented; credentialed Upstash validation pending.
+
 Acceptance criteria:
 
 - In-memory session store remains available for tests.
@@ -38,6 +40,8 @@ Acceptance criteria:
 - TTL refreshes on turn write.
 - Resolved entities are preserved through history truncation.
 - Redis failures return the spec-defined session error.
+- `SESSION_STORE=redis` requires `UPSTASH_REDIS_URL`.
+- `/health` reports Redis `ok` or `degraded` when Redis mode is enabled.
 
 ## Gate 3 - Clerk Auth
 

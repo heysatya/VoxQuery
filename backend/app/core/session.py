@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 from uuid import UUID, uuid4
 
 from app.config import Settings, get_settings
 from app.core.token_count import TokenCounter
 from app.models.contracts import (
+    ApiError,
     AuthClaims,
     ClarificationState,
+    ErrorCode,
     InputModality,
     QualityFlag,
     ResolvedEntity,
@@ -16,6 +19,14 @@ from app.models.contracts import (
     SessionHistoryTurn,
     VoiceSession,
 )
+
+
+class RedisClientProtocol(Protocol):
+    def get(self, name: str) -> str | bytes | None: ...
+
+    def setex(self, name: str, time: int, value: str) -> object: ...
+
+    def ping(self) -> object: ...
 
 
 class InMemorySessionStore:
@@ -146,6 +157,101 @@ class InMemorySessionStore:
                 return True
         return False
 
+    def health_status(self) -> str:
+        return "local_stub"
+
     @staticmethod
     def _key(tenant_id: UUID, session_id: UUID) -> tuple[UUID, UUID]:
         return tenant_id, session_id
+
+
+class RedisSessionStore(InMemorySessionStore):
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        counter: TokenCounter | None = None,
+        client: RedisClientProtocol | None = None,
+    ) -> None:
+        self.settings = settings or get_settings()
+        self.counter = counter or TokenCounter()
+        self.client = client or self._client_from_settings(self.settings)
+
+    def create(self, claims: AuthClaims) -> tuple[VoiceSession, datetime]:
+        session = VoiceSession(
+            session_id=uuid4(),
+            user_id=claims.user_id,
+            tenant_id=claims.tenant_id,
+            conversation_id=uuid4(),
+            snowflake_role=claims.snowflake_role,
+        )
+        expires_at = self.save(session)
+        return session, expires_at
+
+    def get(self, tenant_id: UUID, session_id: UUID) -> VoiceSession | None:
+        try:
+            raw = self.client.get(self.redis_key(tenant_id, session_id))
+        except Exception as exc:
+            raise self._session_unavailable(exc) from exc
+        if raw is None:
+            return None
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        try:
+            session = VoiceSession.model_validate_json(raw)
+        except Exception as exc:
+            raise self._session_unavailable(exc) from exc
+        if session.tenant_id != tenant_id or session.session_id != session_id:
+            return None
+        return session
+
+    def save(self, session: VoiceSession) -> datetime:
+        session.last_interaction_ts = datetime.now(UTC)
+        expires_at = datetime.now(UTC) + timedelta(seconds=self.settings.session_ttl_seconds)
+        try:
+            self.client.setex(
+                self.redis_key(session.tenant_id, session.session_id),
+                self.settings.session_ttl_seconds,
+                session.model_dump_json(),
+            )
+        except Exception as exc:
+            raise self._session_unavailable(exc) from exc
+        return expires_at
+
+    def health_status(self) -> str:
+        try:
+            self.client.ping()
+        except Exception:
+            return "degraded"
+        return "ok"
+
+    @staticmethod
+    def redis_key(tenant_id: UUID, session_id: UUID) -> str:
+        return f"session:{tenant_id}:{session_id}"
+
+    @staticmethod
+    def _session_unavailable(exc: Exception) -> ApiError:
+        return ApiError(
+            ErrorCode.session_not_found,
+            status_code=404,
+            detail=f"Redis session store unavailable: {type(exc).__name__}",
+        )
+
+    @staticmethod
+    def _client_from_settings(settings: Settings) -> RedisClientProtocol:
+        if not settings.upstash_redis_url:
+            raise RuntimeError("UPSTASH_REDIS_URL is required when SESSION_STORE=redis.")
+        import redis
+
+        return redis.Redis.from_url(
+            settings.upstash_redis_url,
+            decode_responses=True,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        )
+
+
+def build_session_store(settings: Settings | None = None) -> InMemorySessionStore:
+    resolved_settings = settings or get_settings()
+    if resolved_settings.session_store == "redis":
+        return RedisSessionStore(settings=resolved_settings)
+    return InMemorySessionStore(settings=resolved_settings)
