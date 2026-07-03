@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     clarification_timeout_seconds: int = Field(default=30, alias="CLARIFICATION_TIMEOUT_SECONDS")
     session_store: str = Field(default="memory", alias="SESSION_STORE")
     upstash_redis_url: str | None = Field(default=None, alias="UPSTASH_REDIS_URL")
+    stt_provider: str = Field(default="fake", alias="STT_PROVIDER")
+    deepgram_api_key: str | None = Field(default=None, alias="DEEPGRAM_API_KEY")
     clerk_issuer: str | None = Field(default=None, alias="CLERK_ISSUER")
     clerk_jwks_url: str | None = Field(default=None, alias="CLERK_JWKS_URL")
     clerk_audience: str | None = Field(default=None, alias="CLERK_AUDIENCE")
@@ -59,9 +61,25 @@ class Settings(BaseSettings):
             raise ValueError(f"SESSION_STORE must be one of {sorted(allowed)}")
         return value
 
+    @field_validator("stt_provider")
+    @classmethod
+    def validate_stt_provider(cls, value: str) -> str:
+        allowed = {"fake", "deepgram"}
+        if value not in allowed:
+            raise ValueError(f"STT_PROVIDER must be one of {sorted(allowed)}")
+        return value
+
     @field_validator("clerk_issuer", "clerk_jwks_url", "clerk_audience", mode="before")
     @classmethod
     def empty_optional_clerk_value_is_unset(cls, value: str | None) -> str | None:
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+    @field_validator("deepgram_api_key", mode="before")
+    @classmethod
+    def empty_deepgram_key_is_unset(cls, value: str | None) -> str | None:
         if isinstance(value, str):
             stripped = value.strip()
             return stripped or None
@@ -94,6 +112,8 @@ class Settings(BaseSettings):
             and not self.upstash_redis_url.startswith("rediss://")
         ):
             raise RuntimeError("UPSTASH_REDIS_URL must use rediss:// in staging/production.")
+        if self.stt_provider == "deepgram" and not self.deepgram_api_key:
+            raise RuntimeError("DEEPGRAM_API_KEY is required when STT_PROVIDER=deepgram.")
 
 
 @lru_cache
