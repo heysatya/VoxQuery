@@ -60,6 +60,8 @@ Acceptance criteria:
 
 ## Gate 4 - Real Deepgram Streaming
 
+Planning artifact: `docs/voice-subsystem/gate-4-deepgram-plan.md`.
+
 Acceptance criteria:
 
 - Browser microphone flow requests permission clearly.
