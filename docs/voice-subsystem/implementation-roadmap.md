@@ -30,7 +30,7 @@ Acceptance criteria:
 
 ## Gate 2 - Redis Session Store
 
-Status: local adapter implemented; credentialed Upstash validation pending.
+Status: complete. Local adapter tests pass and credentialed Upstash TLS smoke validation passed.
 
 Acceptance criteria:
 

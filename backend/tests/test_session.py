@@ -175,7 +175,12 @@ def test_redis_failure_maps_to_safe_session_error_without_leaking_connection_det
 
 
 def test_redis_mode_requires_url_at_startup_and_reports_ok_when_reachable():
-    settings = Settings(APP_ENV="test", AUTH_MODE="fake", SESSION_STORE="redis")
+    settings = Settings(
+        APP_ENV="test",
+        AUTH_MODE="fake",
+        SESSION_STORE="redis",
+        UPSTASH_REDIS_URL=None,
+    )
     with pytest.raises(RuntimeError, match="UPSTASH_REDIS_URL"):
         settings.validate_startup()
 
