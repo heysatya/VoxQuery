@@ -20,6 +20,7 @@ from app.models.contracts import ApiError
 USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 TENANT_ID = UUID("00000000-0000-0000-0000-000000000101")
 OTHER_TENANT_ID = UUID("00000000-0000-0000-0000-000000000999")
+OTHER_USER_ID = UUID("00000000-0000-0000-0000-000000000002")
 ISSUER = "https://clerk.voxquery.test"
 JWKS_URL = "https://clerk.voxquery.test/.well-known/jwks.json"
 
@@ -243,6 +244,42 @@ def test_rest_session_enforces_clerk_tenant_claims(monkeypatch, key_pair):
     assert mismatch.json()["error"]["code"] == "auth_invalid"
 
 
+def test_rest_query_rejects_same_tenant_different_user_session(monkeypatch, key_pair):
+    private_key, public_key = key_pair
+    verifier = ClerkJwtVerifier(
+        Settings(
+            APP_ENV="test",
+            AUTH_MODE="clerk",
+            CLERK_ISSUER=ISSUER,
+            CLERK_JWKS_URL=JWKS_URL,
+            CLERK_AUDIENCE=None,
+        ),
+        jwks_client=FakeJwksClient(public_key),
+    )
+    force_clerk_mode(monkeypatch, verifier)
+    client = TestClient(app)
+    owner_token = signed_token(private_key)
+    other_user_token = signed_token(private_key, vox_user_id=str(OTHER_USER_ID), sub="user_other")
+    session = client.post(
+        "/api/session",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"tenant_id": str(TENANT_ID)},
+    ).json()
+
+    response = client.post(
+        "/api/query",
+        headers={"Authorization": f"Bearer {other_user_token}"},
+        json={
+            "session_id": session["session_id"],
+            "submitted_text": "Show net revenue by customer segment",
+            "input_modality": "text",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "session_not_found"
+
+
 def test_websocket_auth_accepts_valid_token_and_rejects_missing_token(monkeypatch, key_pair):
     private_key, public_key = key_pair
     verifier = ClerkJwtVerifier(
@@ -271,6 +308,37 @@ def test_websocket_auth_accepts_valid_token_and_rejects_missing_token(monkeypatc
         with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}"):
             pass
     assert exc.value.code == 4001
+
+
+def test_websockets_reject_same_tenant_different_user_session(monkeypatch, key_pair):
+    private_key, public_key = key_pair
+    verifier = ClerkJwtVerifier(
+        Settings(
+            APP_ENV="test",
+            AUTH_MODE="clerk",
+            CLERK_ISSUER=ISSUER,
+            CLERK_JWKS_URL=JWKS_URL,
+            CLERK_AUDIENCE=None,
+        ),
+        jwks_client=FakeJwksClient(public_key),
+    )
+    force_clerk_mode(monkeypatch, verifier)
+    client = TestClient(app)
+    owner_token = signed_token(private_key)
+    other_user_token = signed_token(private_key, vox_user_id=str(OTHER_USER_ID), sub="user_other")
+    session = client.post(
+        "/api/session",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"tenant_id": str(TENANT_ID)},
+    ).json()
+
+    for path in ("pipeline", "audio"):
+        with pytest.raises(WebSocketDisconnect) as exc:
+            with client.websocket_connect(
+                f"/ws/{path}?session_id={session['session_id']}&token={other_user_token}"
+            ):
+                pass
+        assert exc.value.code == 4002
 
 
 def test_websockets_reject_tampered_signature_with_4001(monkeypatch, key_pair):

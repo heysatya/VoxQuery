@@ -124,7 +124,7 @@ async def submit_feedback(
     turn = pipeline.get_turn_for_user(request.turn_id, claims)
     if turn.feedback_submitted:
         raise ApiError(ErrorCode.feedback_duplicate, status_code=409)
-    session = sessions.get(claims.tenant_id, request.session_id)
+    session = sessions.get_for_claims(claims, request.session_id)
     if session is None:
         raise ApiError(ErrorCode.session_not_found, status_code=404)
     sessions.mark_low_quality(session, request.turn_id)

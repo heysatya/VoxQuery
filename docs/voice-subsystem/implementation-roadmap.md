@@ -53,6 +53,7 @@ Acceptance criteria:
 - Clerk JWT validation works for REST and WebSocket connections.
 - Tenant and user claims are enforced.
 - Mismatched tenant requests fail.
+- Same-tenant cross-user session access fails for REST and WebSockets.
 - Production/staging fail startup if fake auth is enabled.
 - Real Clerk Session Token claims create sessions, drive `/ws/pipeline`, and drive fake voice through `/ws/audio`.
 - Access logs redact WebSocket `token` query params.

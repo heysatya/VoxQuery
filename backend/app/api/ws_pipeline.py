@@ -20,7 +20,7 @@ async def pipeline_socket(
         return
     from app.main import app
 
-    session = app.state.sessions.get(claims.tenant_id, session_id)
+    session = app.state.sessions.get_for_claims(claims, session_id)
     if session is None:
         await websocket.close(code=4002)
         return

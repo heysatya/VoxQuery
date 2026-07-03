@@ -59,6 +59,12 @@ class InMemorySessionStore:
             return None
         return self._sessions.get(key)
 
+    def get_for_claims(self, claims: AuthClaims, session_id: UUID) -> VoiceSession | None:
+        session = self.get(claims.tenant_id, session_id)
+        if session is None or session.user_id != claims.user_id:
+            return None
+        return session
+
     def save(self, session: VoiceSession) -> datetime:
         session.last_interaction_ts = datetime.now(UTC)
         key = self._key(session.tenant_id, session.session_id)

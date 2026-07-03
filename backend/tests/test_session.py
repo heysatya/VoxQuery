@@ -47,6 +47,13 @@ def claims() -> AuthClaims:
     )
 
 
+def other_user_claims() -> AuthClaims:
+    return AuthClaims(
+        user_id=UUID("00000000-0000-0000-0000-000000000002"),
+        tenant_id=UUID("00000000-0000-0000-0000-000000000101"),
+    )
+
+
 def result_shape() -> ResultShape:
     return ResultShape(
         columns=["customer_segment", "total_net_revenue"],
@@ -74,6 +81,14 @@ def test_session_create_and_context_preserves_resolved_entities():
     context = store.context_block(session)
     assert context.resolved_entities["revenue"].resolution == "net_revenue"
     assert context.truncated is True
+
+
+def test_session_lookup_requires_matching_user_within_tenant():
+    store = InMemorySessionStore(Settings(APP_ENV="test", AUTH_MODE="fake"))
+    session, _ = store.create(claims())
+
+    assert store.get_for_claims(claims(), session.session_id) is not None
+    assert store.get_for_claims(other_user_claims(), session.session_id) is None
 
 
 def test_redis_session_roundtrip_key_format_and_ttl_refresh():

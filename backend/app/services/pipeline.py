@@ -56,7 +56,7 @@ class PipelineOrchestrator:
         self._in_flight: set[UUID] = set()
 
     async def submit_query(self, request: QueryRequest, claims: AuthClaims) -> TurnRecord:
-        session = self.sessions.get(claims.tenant_id, request.session_id)
+        session = self.sessions.get_for_claims(claims, request.session_id)
         if session is None:
             raise ApiError(ErrorCode.session_not_found, status_code=404)
         await self.expire_pending_clarification_if_needed(session.session_id, claims)
@@ -88,7 +88,7 @@ class PipelineOrchestrator:
         resolution_type: ClarificationResolutionType,
         claims: AuthClaims,
     ) -> TurnRecord | None:
-        session = self.sessions.get(claims.tenant_id, session_id)
+        session = self.sessions.get_for_claims(claims, session_id)
         if session is None:
             raise ApiError(ErrorCode.session_not_found, status_code=404)
         state = session.clarification_state
@@ -128,7 +128,7 @@ class PipelineOrchestrator:
         return turn
 
     async def force_timeout(self, session_id: UUID, claims: AuthClaims) -> TurnRecord:
-        session = self.sessions.get(claims.tenant_id, session_id)
+        session = self.sessions.get_for_claims(claims, session_id)
         if session is None or session.clarification_state is None:
             raise ApiError(ErrorCode.clarification_not_found, status_code=404)
         return await self._complete_pending_timeout(session)
@@ -136,7 +136,7 @@ class PipelineOrchestrator:
     async def expire_pending_clarification_if_needed(
         self, session_id: UUID, claims: AuthClaims
     ) -> TurnRecord | None:
-        session = self.sessions.get(claims.tenant_id, session_id)
+        session = self.sessions.get_for_claims(claims, session_id)
         if session is None or session.clarification_state is None:
             return None
         elapsed = datetime.now(UTC) - session.clarification_state.issued_at
