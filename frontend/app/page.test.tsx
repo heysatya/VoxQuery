@@ -176,7 +176,7 @@ describe("HomePage", () => {
 
     await waitFor(() => expect(window.sessionStorage.getItem("voxquery_session_id")).toBe("session-2"));
     expect(input).toHaveValue("");
-    expect(await screen.findByText("New local conversation started.")).toBeInTheDocument();
+    expect(await screen.findByText("New conversation started.")).toBeInTheDocument();
   });
 
   it("fake voice uses the audio stream and fills an editable transcript", async () => {

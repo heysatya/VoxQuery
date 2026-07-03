@@ -39,6 +39,22 @@ button:disabled {
   padding: 32px;
 }
 
+.auth-shell {
+  display: grid;
+  place-items: center;
+}
+
+.account-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 32px 0;
+}
+
+.primary-button {
+  background: #1d2430;
+  color: #ffffff;
+}
+
 .workbench {
   max-width: 1040px;
   margin: 0 auto;

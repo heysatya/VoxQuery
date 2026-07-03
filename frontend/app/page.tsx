@@ -1,5 +1,6 @@
 "use client";
 
+import { SignInButton, UserButton, useAuth } from "@clerk/nextjs";
 import React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -22,9 +23,74 @@ import type {
 } from "../lib/types";
 
 const tenantId =
-  process.env.NEXT_PUBLIC_FAKE_TENANT_ID ?? "00000000-0000-0000-0000-000000000101";
+  process.env.NEXT_PUBLIC_VOXQUERY_TENANT_ID ??
+  process.env.NEXT_PUBLIC_FAKE_TENANT_ID ??
+  "00000000-0000-0000-0000-000000000101";
+
+const authMode = process.env.NEXT_PUBLIC_AUTH_MODE ?? "fake";
+
+type AuthRelay = {
+  mode: "fake" | "clerk";
+  ready: boolean;
+  signedIn: boolean;
+  getToken: () => Promise<string | null>;
+};
 
 export default function HomePage() {
+  if (authMode === "clerk") {
+    return <ClerkHomePage />;
+  }
+  return <VoxQueryApp auth={fakeAuthRelay} />;
+}
+
+function ClerkHomePage() {
+  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const auth = useMemo<AuthRelay>(
+    () => ({
+      mode: "clerk",
+      ready: isLoaded,
+      signedIn: Boolean(isSignedIn),
+      getToken
+    }),
+    [getToken, isLoaded, isSignedIn]
+  );
+
+  if (!isLoaded) {
+    return <main className="page-shell">Loading authentication...</main>;
+  }
+
+  if (!isSignedIn) {
+    return (
+      <main className="page-shell auth-shell">
+        <section>
+          <h1>VoxQuery</h1>
+          <p>Sign in to start a secure voice analytics session.</p>
+          <SignInButton mode="modal">
+            <button className="primary-button">Sign in</button>
+          </SignInButton>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <>
+      <div className="account-bar">
+        <UserButton />
+      </div>
+      <VoxQueryApp auth={auth} />
+    </>
+  );
+}
+
+const fakeAuthRelay: AuthRelay = {
+  mode: "fake",
+  ready: true,
+  signedIn: true,
+  getToken: async () => "fake"
+};
+
+function VoxQueryApp({ auth }: { auth: AuthRelay }) {
   const [session, setSession] = useState<SessionState>({ sessionId: null, conversationId: null });
   const [recordingState, setRecordingState] = useState<RecordingState>("idle");
   const [partialTranscript, setPartialTranscript] = useState("");
@@ -40,11 +106,22 @@ export default function HomePage() {
     secondsRemaining: 30
   });
   const [lastResult, setLastResult] = useState<LastResult | null>(null);
-  const [notice, setNotice] = useState("Local fake mode active. No external credentials are required.");
+  const [notice, setNotice] = useState(
+    auth.mode === "clerk"
+      ? "Clerk auth mode active. Requests use the signed-in session token."
+      : "Local fake mode active. No external credentials are required."
+  );
+  const modeLabel = auth.mode === "clerk" ? "clerk auth mode" : "local fake mode";
 
-  const apiReady = useMemo(() => Boolean(session.sessionId), [session.sessionId]);
+  const apiReady = useMemo(
+    () => auth.ready && auth.signedIn && Boolean(session.sessionId),
+    [auth.ready, auth.signedIn, session.sessionId]
+  );
 
   const ensureSession = useCallback(async () => {
+    if (!auth.ready || !auth.signedIn) {
+      return;
+    }
     const existingSessionId =
       typeof window !== "undefined" ? window.sessionStorage.getItem("voxquery_session_id") : null;
     if (existingSessionId) {
@@ -53,10 +130,10 @@ export default function HomePage() {
       }
       return;
     }
-    const created = await createSession(tenantId);
+    const created = await createSession(tenantId, await auth.getToken());
     window.sessionStorage.setItem("voxquery_session_id", created.session_id);
     setSession({ sessionId: created.session_id, conversationId: created.conversation_id });
-  }, [session.sessionId]);
+  }, [auth, session.sessionId]);
 
   const startNewConversation = useCallback(async () => {
     setPipelineInFlight(false);
@@ -73,85 +150,98 @@ export default function HomePage() {
     }
     setSession({ sessionId: null, conversationId: null });
     try {
-      const created = await createSession(tenantId);
+      const created = await createSession(tenantId, await auth.getToken());
       window.sessionStorage.setItem("voxquery_session_id", created.session_id);
       setSession({ sessionId: created.session_id, conversationId: created.conversation_id });
-      setNotice("New local conversation started.");
+      setNotice("New conversation started.");
     } catch (error) {
       setNotice(errorMessage(error, "Could not create a new local conversation."));
     }
-  }, []);
+  }, [auth]);
 
   useEffect(() => {
     ensureSession().catch(() => setNotice("Could not create a local session. Is the backend running?"));
   }, [ensureSession]);
 
   useEffect(() => {
-    if (!session.sessionId) {
+    if (!session.sessionId || !auth.ready || !auth.signedIn) {
       return;
     }
-    const socket = new WebSocket(pipelineSocketUrl(session.sessionId));
-    socket.onmessage = (message) => {
-      const event = parseSocketEvent<PipelineEvent>(message.data);
-      if (!event) {
-        return;
-      }
-      if (event.type === "pipeline_progress") {
-        setPipelineStage(event.stage);
-        return;
-      }
-      if (event.type === "clarification_request") {
-        setCurrentTurnId(event.turn_id);
-        setClarification({
-          pending: true,
-          question: event.question,
-          options: event.options,
-          secondsRemaining: event.timeout_seconds
-        });
-        setPipelineInFlight(false);
-        setPipelineStage("clarification_pending");
-        setNotice("Clarification required before executing the query.");
-        return;
-      }
-      if (event.type === "clarification_timeout_warning") {
-        setClarification((current) => ({
-          ...current,
-          secondsRemaining: event.seconds_remaining
-        }));
-        setNotice("Clarification will time out soon. Choose an option or rephrase.");
-        return;
-      }
-      if (event.type === "result_ready") {
-        setCurrentTurnId(event.turn_id);
-        setPipelineInFlight(false);
-        void loadResult(event.turn_id).catch((error) =>
-          setNotice(errorMessage(error, "Result is ready, but could not be loaded."))
-        );
-        return;
-      }
-      if (event.type === "pipeline_error") {
-        setPipelineInFlight(false);
-        setPipelineStage(null);
-        setNotice(event.message);
-      }
+    let socket: WebSocket | null = null;
+    let cancelled = false;
+    auth
+      .getToken()
+      .then((token) => {
+        if (cancelled || !session.sessionId) {
+          return;
+        }
+        socket = new WebSocket(pipelineSocketUrl(session.sessionId, token));
+        socket.onmessage = (message) => {
+          const event = parseSocketEvent<PipelineEvent>(message.data);
+          if (!event) {
+            return;
+          }
+          if (event.type === "pipeline_progress") {
+            setPipelineStage(event.stage);
+            return;
+          }
+          if (event.type === "clarification_request") {
+            setCurrentTurnId(event.turn_id);
+            setClarification({
+              pending: true,
+              question: event.question,
+              options: event.options,
+              secondsRemaining: event.timeout_seconds
+            });
+            setPipelineInFlight(false);
+            setPipelineStage("clarification_pending");
+            setNotice("Clarification required before executing the query.");
+            return;
+          }
+          if (event.type === "clarification_timeout_warning") {
+            setClarification((current) => ({
+              ...current,
+              secondsRemaining: event.seconds_remaining
+            }));
+            setNotice("Clarification will time out soon. Choose an option or rephrase.");
+            return;
+          }
+          if (event.type === "result_ready") {
+            setCurrentTurnId(event.turn_id);
+            setPipelineInFlight(false);
+            void loadResult(event.turn_id).catch((error) =>
+              setNotice(errorMessage(error, "Result is ready, but could not be loaded."))
+            );
+            return;
+          }
+          if (event.type === "pipeline_error") {
+            setPipelineInFlight(false);
+            setPipelineStage(null);
+            setNotice(event.message);
+          }
+        };
+        socket.onerror = () => setNotice("Pipeline event stream unavailable. Check that the backend is running.");
+        socket.onclose = (event) => {
+          if (event.code !== 4002) {
+            return;
+          }
+          window.sessionStorage.removeItem("voxquery_session_id");
+          setSession({ sessionId: null, conversationId: null });
+          createSession(tenantId, token)
+            .then((created) => {
+              window.sessionStorage.setItem("voxquery_session_id", created.session_id);
+              setSession({ sessionId: created.session_id, conversationId: created.conversation_id });
+          setNotice("Stored session expired. New conversation started.");
+            })
+            .catch(() => setNotice("Stored session expired, and a new local session could not be created."));
+        };
+      })
+      .catch(() => setNotice("Could not get an auth token for the pipeline stream."));
+    return () => {
+      cancelled = true;
+      socket?.close();
     };
-    socket.onerror = () => setNotice("Pipeline event stream unavailable. Check that the backend is running.");
-    socket.onclose = (event) => {
-      if (event.code !== 4002) {
-        return;
-      }
-      window.sessionStorage.removeItem("voxquery_session_id");
-      setSession({ sessionId: null, conversationId: null });
-      createSession(tenantId)
-        .then((created) => {
-          window.sessionStorage.setItem("voxquery_session_id", created.session_id);
-          setSession({ sessionId: created.session_id, conversationId: created.conversation_id });
-          setNotice("Stored session expired. New local conversation started.");
-        })
-        .catch(() => setNotice("Stored session expired, and a new local session could not be created."));
-    };
-    return () => socket.close();
-  }, [session.sessionId]);
+  }, [auth, session.sessionId]);
 
   async function handleFakeVoice() {
     if (!session.sessionId) {
@@ -164,7 +254,7 @@ export default function HomePage() {
     }
     setRecordingState("connecting");
     setNotice("Connecting to local fake STT WebSocket.");
-    const socket = new WebSocket(audioSocketUrl(session.sessionId));
+    const socket = new WebSocket(audioSocketUrl(session.sessionId, await auth.getToken()));
     socket.onopen = () => {
       setRecordingState("recording");
       socket.send(new Uint8Array([1, 2, 3]));
@@ -215,13 +305,16 @@ export default function HomePage() {
     setFeedbackSubmitted(false);
     setClarification({ pending: false, question: null, options: [], secondsRemaining: 30 });
     try {
-      const accepted = await submitQuery({
-        session_id: session.sessionId,
-        submitted_text: submittedText,
-        input_modality: "text",
-        raw_transcript: null,
-        stt_confidence: null
-      });
+      const accepted = await submitQuery(
+        {
+          session_id: session.sessionId,
+          submitted_text: submittedText,
+          input_modality: "text",
+          raw_transcript: null,
+          stt_confidence: null
+        },
+        await auth.getToken()
+      );
       setCurrentTurnId(accepted.turn_id);
       setFeedbackSubmitted(false);
       setNotice("Query submitted. Waiting for pipeline events.");
@@ -237,12 +330,15 @@ export default function HomePage() {
     }
     if (selection === null) {
       try {
-        await postClarification({
-          session_id: session.sessionId,
-          turn_id: currentTurnId,
-          selection: null,
-          resolution_type: "escaped"
-        });
+        await postClarification(
+          {
+            session_id: session.sessionId,
+            turn_id: currentTurnId,
+            selection: null,
+            resolution_type: "escaped"
+          },
+          await auth.getToken()
+        );
         setClarification({ pending: false, question: null, options: [], secondsRemaining: 30 });
         setPipelineStage(null);
         setCurrentTurnId(null);
@@ -256,12 +352,15 @@ export default function HomePage() {
     setPipelineInFlight(true);
     setPipelineStage("snowflake_executing");
     try {
-      await postClarification({
-        session_id: session.sessionId,
-        turn_id: currentTurnId,
-        selection,
-        resolution_type: "option_selected"
-      });
+      await postClarification(
+        {
+          session_id: session.sessionId,
+          turn_id: currentTurnId,
+          selection,
+          resolution_type: "option_selected"
+        },
+        await auth.getToken()
+      );
       setClarification({ pending: false, question: null, options: [], secondsRemaining: 30 });
       setNotice("Clarification submitted. Waiting for pipeline result.");
     } catch (error) {
@@ -272,7 +371,7 @@ export default function HomePage() {
 
   async function loadResult(turnId: string) {
     setPipelineStage("rendering");
-    const result = await fetchResult(turnId);
+    const result = await fetchResult(turnId, await auth.getToken());
     setLastResult({
       turnId,
       confidenceTier: result.confidence_tier,
@@ -299,7 +398,10 @@ export default function HomePage() {
       return;
     }
     try {
-      await postFeedback({ session_id: session.sessionId, turn_id: lastResult.turnId, rating: -1 });
+      await postFeedback(
+        { session_id: session.sessionId, turn_id: lastResult.turnId, rating: -1 },
+        await auth.getToken()
+      );
       setFeedbackSubmitted(true);
       setNotice("Feedback recorded for threshold tuning.");
     } catch (error) {
@@ -324,7 +426,7 @@ export default function HomePage() {
           <span>Session {apiReady ? "active" : "starting"}</span>
           <span>{recordingState}</span>
           <span>{pipelineStage ?? "idle"}</span>
-          <span>local fake mode</span>
+          <span>{modeLabel}</span>
         </div>
 
         <section className="input-panel">

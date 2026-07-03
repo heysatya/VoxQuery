@@ -33,10 +33,20 @@ CLERK_ISSUER=https://...
 CLERK_JWKS_URL=https://...
 ```
 
+Required by the frontend when `NEXT_PUBLIC_AUTH_MODE=clerk`:
+
+```env
+NEXT_PUBLIC_AUTH_MODE=clerk
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...
+NEXT_PUBLIC_VOXQUERY_TENANT_ID=<tenant UUID matching vox_tenant_id>
+```
+
 Optional but recommended for staging/production:
 
 ```env
 CLERK_AUDIENCE=https://api.voxquery.com
 ```
 
-Frontend Clerk token relay is a separate Gate 3 slice. Do not commit Clerk secrets or local `.env` files.
+The frontend sends Clerk tokens as REST `Authorization: Bearer <jwt>` headers and as
+`token=<jwt>` query params for `/ws/audio` and `/ws/pipeline`. Do not commit Clerk secrets
+or local `.env` files.

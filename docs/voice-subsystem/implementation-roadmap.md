@@ -45,7 +45,7 @@ Acceptance criteria:
 
 ## Gate 3 - Clerk Auth
 
-Status: backend JWT enforcement foundation implemented; frontend Clerk login/token relay and real Clerk project validation pending. Clerk dashboard setup notes are in `docs/voice-subsystem/clerk-auth-setup.md`.
+Status: backend JWT enforcement and frontend Clerk login/token relay implemented locally; real Clerk project validation pending. Clerk dashboard setup notes are in `docs/voice-subsystem/clerk-auth-setup.md`.
 
 Acceptance criteria:
 
