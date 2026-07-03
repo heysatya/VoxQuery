@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import logging
 from types import SimpleNamespace
 from uuid import UUID
 from time import perf_counter
@@ -12,7 +13,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from app.config import Settings, get_settings
-from app.main import app, redact_token_query_params
+from app.main import AccessTokenRedactionFilter, app, redact_token_query_params
 from app.middleware import auth
 from app.middleware.auth import ClerkJwtVerifier, get_clerk_verifier, get_current_user
 from app.models.contracts import ApiError
@@ -116,6 +117,14 @@ def test_access_log_redacts_websocket_token_query_param():
     assert "header.payload.signature" not in redacted
     assert "token=<redacted>" in redacted
     assert "session_id=session-1" in redacted
+
+
+def test_uvicorn_loggers_have_token_redaction_filter():
+    for logger_name in ("uvicorn.access", "uvicorn.error"):
+        assert any(
+            isinstance(log_filter, AccessTokenRedactionFilter)
+            for log_filter in logging.getLogger(logger_name).filters
+        )
 
 
 def test_clerk_verifier_rejects_invalid_issuer(key_pair, clerk_settings):

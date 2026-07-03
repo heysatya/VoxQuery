@@ -42,7 +42,8 @@ class AccessTokenRedactionFilter(logging.Filter):
         return True
 
 
-logging.getLogger("uvicorn.access").addFilter(AccessTokenRedactionFilter())
+for logger_name in ("uvicorn.access", "uvicorn.error"):
+    logging.getLogger(logger_name).addFilter(AccessTokenRedactionFilter())
 
 app = FastAPI(title="VoxQuery Voice Subsystem", version="0.1.0")
 app.add_middleware(
