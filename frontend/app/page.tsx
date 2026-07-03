@@ -17,6 +17,7 @@ import type {
   AudioEvent,
   ClarificationState,
   LastResult,
+  MicPermission,
   PipelineEvent,
   RecordingState,
   SessionState
@@ -92,6 +93,7 @@ const fakeAuthRelay: AuthRelay = {
 
 function VoxQueryApp({ auth }: { auth: AuthRelay }) {
   const [session, setSession] = useState<SessionState>({ sessionId: null, conversationId: null });
+  const [micPermission, setMicPermission] = useState<MicPermission>("unknown");
   const [recordingState, setRecordingState] = useState<RecordingState>("idle");
   const [partialTranscript, setPartialTranscript] = useState("");
   const [submittedText, setSubmittedText] = useState("");
@@ -162,6 +164,26 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
   useEffect(() => {
     ensureSession().catch(() => setNotice("Could not create a local session. Is the backend running?"));
   }, [ensureSession]);
+
+  // Probe microphone permission status on mount (read-only; does not prompt the user).
+  // The Permissions API is absent in some environments (jsdom, old browsers, HTTP contexts)
+  // so all access is guarded. Failures are silent — the user can still use text input.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.permissions) {
+      return;
+    }
+    navigator.permissions
+      .query({ name: "microphone" as PermissionName })
+      .then((status) => {
+        setMicPermission(status.state as MicPermission);
+        status.onchange = () => {
+          setMicPermission(status.state as MicPermission);
+        };
+      })
+      .catch(() => {
+        // Permissions API may throw in some environments; leave state as 'unknown'.
+      });
+  }, []);
 
   useEffect(() => {
     if (!session.sessionId || !auth.ready || !auth.signedIn) {
@@ -242,6 +264,55 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
       socket?.close();
     };
   }, [auth, session.sessionId]);
+
+  async function handleStartRecording() {
+    // Guard: browser API unavailable (HTTP context, old browser, jsdom).
+    if (
+      typeof navigator === "undefined" ||
+      !navigator.mediaDevices ||
+      typeof navigator.mediaDevices.getUserMedia !== "function"
+    ) {
+      setNotice(
+        "Microphone is unavailable in this context. Use text input or Fake voice."
+      );
+      return;
+    }
+    // Guard: permission already known to be denied.
+    if (micPermission === "denied") {
+      setNotice(
+        "Microphone access denied. Allow access in browser settings or use text input."
+      );
+      return;
+    }
+
+    try {
+      // This call may prompt the user. On grant, permission is 'granted'.
+      await navigator.mediaDevices.getUserMedia({ audio: true });
+      setMicPermission("granted");
+      // Transition to 'connecting'. Slice 2 will open the WS and MediaRecorder here.
+      setRecordingState("connecting");
+      setNotice("Microphone access granted. Connecting...");
+    } catch (err) {
+      const domErr = err as { name?: string };
+      if (domErr?.name === "NotAllowedError" || domErr?.name === "PermissionDeniedError") {
+        setMicPermission("denied");
+        setNotice(
+          "Microphone access denied. Allow access in browser settings or use text input."
+        );
+        setRecordingState("idle");
+      } else {
+        setNotice("Could not access microphone. Try again or use text input.");
+        setRecordingState("idle");
+      }
+    }
+  }
+
+  function handleStopRecording() {
+    // Slice 2 will close the MediaRecorder and send stop_recording over the WS.
+    // For now, return to idle so the UI is consistent.
+    setRecordingState("idle");
+    setNotice("Recording stopped.");
+  }
 
   async function handleFakeVoice() {
     if (!session.sessionId) {
@@ -440,6 +511,23 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
           />
           {partialTranscript ? <p className="partial">Raw transcript: {partialTranscript}</p> : null}
           <div className="actions">
+            {recordingState === "recording" ? (
+              <button type="button" onClick={handleStopRecording} disabled={pipelineInFlight}>
+                Stop recording
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleStartRecording}
+                disabled={
+                  pipelineInFlight ||
+                  recordingState === "connecting" ||
+                  recordingState === "processing"
+                }
+              >
+                Start recording
+              </button>
+            )}
             <button type="button" onClick={handleFakeVoice} disabled={pipelineInFlight}>
               Fake voice
             </button>

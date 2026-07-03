@@ -1,5 +1,7 @@
 export type InputModality = "voice" | "text";
 
+export type MicPermission = "unknown" | "prompt" | "granted" | "denied";
+
 export type SessionState = {
   sessionId: string | null;
   conversationId: string | null;

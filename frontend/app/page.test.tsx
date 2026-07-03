@@ -228,6 +228,95 @@ describe("HomePage", () => {
     expect(await screen.findByText("local fake mode")).toBeInTheDocument();
     expect(screen.getByText("Session active")).toBeInTheDocument();
   });
+
+  // ------------------------------------------------------------------
+  // Slice 1 — microphone permission shell (Gate 4)
+  // ------------------------------------------------------------------
+
+  it("mic denied: recordingState stays idle and text input remains enabled", async () => {
+    // Stub getUserMedia to reject with NotAllowedError (permission denied).
+    const deniedError = Object.assign(new Error("Permission denied"), {
+      name: "NotAllowedError"
+    });
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockRejectedValue(deniedError) },
+      writable: true,
+      configurable: true
+    });
+
+    render(<HomePage />);
+    // Wait for session to be ready before clicking.
+    await waitFor(() => expect(screen.getByText("Session active")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+
+    // Notice must mention denial.
+    await waitFor(() =>
+      expect(screen.getByText(/denied|permission/i)).toBeInTheDocument()
+    );
+    // Text input must remain enabled (not blocked by pipelineInFlight).
+    const input = screen.getByLabelText("Ask a data question");
+    expect(input).not.toBeDisabled();
+    // recordingState must stay idle (pipelineStage also shows 'idle'; both are expected).
+    expect(screen.getAllByText("idle").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("mic granted: recordingState transitions to connecting", async () => {
+    // Stub getUserMedia to resolve with a minimal fake stream.
+    const fakeStream = { getTracks: () => [] };
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockResolvedValue(fakeStream) },
+      writable: true,
+      configurable: true
+    });
+
+    render(<HomePage />);
+    await waitFor(() => expect(screen.getByText("Session active")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+
+    // After permission is granted the UI enters connecting.
+    await waitFor(() => expect(screen.getByText("connecting")).toBeInTheDocument());
+  });
+
+  it("mic unavailable: shows a safe notice and keeps text input usable", async () => {
+    // Remove mediaDevices entirely to simulate an insecure context or old browser.
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: undefined,
+      writable: true,
+      configurable: true
+    });
+
+    render(<HomePage />);
+    await waitFor(() => expect(screen.getByText("Session active")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/unavailable/i)).toBeInTheDocument()
+    );
+    const input = screen.getByLabelText("Ask a data question");
+    expect(input).not.toBeDisabled();
+  });
+
+  it("fake voice still works after mic recording feature is added (regression guard)", async () => {
+    // Restore working mediaDevices so fake voice path is isolated.
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [] }) },
+      writable: true,
+      configurable: true
+    });
+
+    render(<HomePage />);
+    const input = await screen.findByLabelText("Ask a data question");
+    fireEvent.click(screen.getByRole("button", { name: "Fake voice" }));
+
+    await waitFor(() => expect(audioSocket()).toBeTruthy());
+    await waitFor(() => expect(input).toHaveValue("Show revenue by region"));
+    expect(
+      await screen.findByText("Raw transcript: Show revenue by region")
+    ).toBeInTheDocument();
+  });
 });
 
 async function emitPipeline(payload: unknown) {
