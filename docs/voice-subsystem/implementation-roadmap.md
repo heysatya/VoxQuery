@@ -45,6 +45,8 @@ Acceptance criteria:
 
 ## Gate 3 - Clerk Auth
 
+Status: backend JWT enforcement foundation implemented; frontend Clerk login/token relay and real Clerk project validation pending.
+
 Acceptance criteria:
 
 - `AUTH_MODE=fake` remains development/test only.

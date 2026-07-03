@@ -680,6 +680,11 @@ SNOWFLAKE_DSN=            # AES-256 encrypted at rest
 # Auth
 CLERK_SECRET_KEY=
 CLERK_PUBLISHABLE_KEY=    # Vercel env var (public)
+CLERK_ISSUER=             # Clerk issuer used for JWT validation
+CLERK_JWKS_URL=           # Clerk JWKS endpoint used for JWT signature validation
+CLERK_AUDIENCE=           # Optional audience check
+CLERK_USER_ID_CLAIM=vox_user_id
+CLERK_TENANT_ID_CLAIM=vox_tenant_id
 
 # Observability
 LANGFUSE_SECRET_KEY=

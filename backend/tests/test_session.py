@@ -194,6 +194,8 @@ def test_redis_mode_requires_tls_in_staging_and_production():
         AUTH_MODE="clerk",
         SESSION_STORE="redis",
         UPSTASH_REDIS_URL="redis://example.com:6379",
+        CLERK_ISSUER="https://clerk.voxquery.test",
+        CLERK_JWKS_URL="https://clerk.voxquery.test/.well-known/jwks.json",
     )
     with pytest.raises(RuntimeError, match="rediss://"):
         staging.validate_startup()
@@ -203,6 +205,8 @@ def test_redis_mode_requires_tls_in_staging_and_production():
         AUTH_MODE="clerk",
         SESSION_STORE="redis",
         UPSTASH_REDIS_URL="rediss://example.com:6379",
+        CLERK_ISSUER="https://clerk.voxquery.test",
+        CLERK_JWKS_URL="https://clerk.voxquery.test/.well-known/jwks.json",
     )
     production.validate_startup()
 
