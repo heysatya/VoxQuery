@@ -14,6 +14,7 @@ from app.core.session import build_session_store
 from app.models.contracts import ApiError, ErrorCode, ErrorEnvelope, ERROR_MESSAGES
 from app.services.events import PipelineEventBus
 from app.services.pipeline import PipelineOrchestrator
+from app.services.telemetry import StructuredLogger
 
 settings = get_settings()
 settings.validate_startup()
@@ -61,6 +62,9 @@ app.state.pipeline = PipelineOrchestrator(
     events=app.state.events,
     settings=settings,
 )
+# Root telemetry logger — unbound. Route handlers call .bind(session_id=..., tenant_id=...)
+# to create a request-scoped child logger. See services/telemetry.py.
+app.state.telemetry = StructuredLogger()
 
 
 @app.exception_handler(ApiError)
