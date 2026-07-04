@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from app.api.rest import router as rest_router
 from app.api.ws_audio import router as ws_audio_router
 from app.api.ws_pipeline import router as ws_pipeline_router
+from app.api.telemetry import router as telemetry_router
 from app.config import get_settings
 from app.core.session import build_session_store
 from app.models.contracts import ApiError, ErrorCode, ErrorEnvelope, ERROR_MESSAGES
@@ -118,3 +119,4 @@ async def health() -> dict[str, str]:
 app.include_router(rest_router)
 app.include_router(ws_pipeline_router)
 app.include_router(ws_audio_router)
+app.include_router(telemetry_router)

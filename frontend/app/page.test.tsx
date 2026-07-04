@@ -70,27 +70,33 @@ class FakeWebSocket {
   }
 }
 
-class MockMediaRecorder {
-  state: string = "inactive";
-  stream: MediaStream;
-  ondataavailable: ((e: { data: Blob }) => void) | null = null;
-  onstop: (() => void) | null = null;
-
-  static instances: MockMediaRecorder[] = [];
-  static isTypeSupported = vi.fn().mockReturnValue(true);
-
-  constructor(stream: MediaStream) {
-    this.stream = stream;
-    MockMediaRecorder.instances.push(this);
+class MockAudioWorkletNode {
+  port = { onmessage: null as any };
+  connect = vi.fn();
+  disconnect = vi.fn();
+  
+  static instances: MockAudioWorkletNode[] = [];
+  
+  constructor() {
+    MockAudioWorkletNode.instances.push(this);
   }
+}
 
-  start(timeslice?: number) {
-    this.state = "recording";
-  }
-
-  stop() {
-    this.state = "inactive";
-    this.onstop?.();
+class MockAudioContext {
+  state = "running";
+  audioWorklet = {
+    addModule: vi.fn().mockResolvedValue(undefined)
+  };
+  destination = {};
+  
+  createMediaStreamSource = vi.fn().mockReturnValue({ connect: vi.fn() });
+  close = vi.fn().mockResolvedValue(undefined);
+  suspend = vi.fn().mockResolvedValue(undefined);
+  
+  static instances: MockAudioContext[] = [];
+  
+  constructor() {
+    MockAudioContext.instances.push(this);
   }
 }
 
@@ -101,11 +107,14 @@ describe("HomePage", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
     FakeWebSocket.instances = [];
-    MockMediaRecorder.instances = [];
+    MockAudioContext.instances = [];
+    MockAudioWorkletNode.instances = [];
     sessionCalls = 0;
     feedbackCalls = 0;
     vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
-    vi.stubGlobal("MediaRecorder", MockMediaRecorder);
+    vi.stubGlobal("AudioContext", MockAudioContext);
+    vi.stubGlobal("webkitAudioContext", MockAudioContext);
+    vi.stubGlobal("AudioWorkletNode", MockAudioWorkletNode);
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -348,7 +357,7 @@ describe("HomePage", () => {
   // Slice 2 — PCM capture + binary streaming
   // ------------------------------------------------------------------
 
-  it("'Start recording' opens audio WS and starts MediaRecorder when permission is granted", async () => {
+  it("'Start recording' opens audio WS and starts AudioWorklet when permission is granted", async () => {
     const fakeStream = { getTracks: () => [] };
     Object.defineProperty(navigator, "mediaDevices", {
       value: { getUserMedia: vi.fn().mockResolvedValue(fakeStream) },
@@ -361,10 +370,10 @@ describe("HomePage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
 
-    // Wait for the WS to be opened and MediaRecorder to start
+    // Wait for the WS to be opened and AudioWorklet to start
     await waitFor(() => expect(audioSocket()).toBeTruthy());
-    expect(MockMediaRecorder.instances).toHaveLength(1);
-    expect(MockMediaRecorder.instances[0].state).toBe("recording");
+    await waitFor(() => expect(MockAudioContext.instances).toHaveLength(1));
+    expect(MockAudioWorkletNode.instances).toHaveLength(1);
     
     // Assert WS URL contains session and token
     const wsUrl = audioSocket()!.url;
@@ -386,16 +395,18 @@ describe("HomePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
 
     await waitFor(() => expect(audioSocket()).toBeTruthy());
-    const recorder = MockMediaRecorder.instances[0];
+    await waitFor(() => expect(MockAudioWorkletNode.instances).toHaveLength(1));
+    
+    const worklet = MockAudioWorkletNode.instances[0];
     const ws = audioSocket()!;
     ws.send = vi.fn(); // Mock send
 
-    const testBlob = new Blob(["test_audio_data"]);
+    const testBuffer = new ArrayBuffer(3200);
     act(() => {
-      recorder.ondataavailable?.({ data: testBlob });
+      worklet.port.onmessage?.({ data: testBuffer });
     });
 
-    expect(ws.send).toHaveBeenCalledWith(testBlob);
+    expect(ws.send).toHaveBeenCalledWith(testBuffer);
   });
 
   it("stop recording sends stop_recording JSON and transitions to idle after final transcript", async () => {

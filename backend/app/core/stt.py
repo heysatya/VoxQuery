@@ -70,7 +70,7 @@ class DeepgramSttProvider(SttProvider):
         import websockets
         from websockets.exceptions import ConnectionClosed
 
-        url = "wss://api.deepgram.com/v1/listen?model=nova-2&smart_format=true"
+        url = "wss://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&encoding=linear16&sample_rate=16000&channels=1&interim_results=true"
         headers = {"Authorization": f"Token {self._api_key}"}
 
         self._logger.emit("stt.ws.lifecycle", tier=2, action="opened", provider="deepgram")
@@ -111,12 +111,16 @@ class DeepgramSttProvider(SttProvider):
                             alts = channel.get("alternatives", [])
                             if alts:
                                 transcript = alts[0].get("transcript", "")
-                                confidence = alts[0].get("confidence", 0.0)
+                                words = alts[0].get("words", [])
+                                if words:
+                                    confidence = sum(w.get("confidence", 0.0) for w in words) / len(words)
+                                else:
+                                    confidence = alts[0].get("confidence", 0.0)
                                 is_final = data.get("is_final", False)
                                 
                                 if transcript.strip():
                                     if is_final:
-                                        self._logger.emit("stt.transcript.final", tier=3, provider="deepgram", confidence=confidence)
+                                        self._logger.emit("stt.transcript.final", tier=2, provider="deepgram", confidence=confidence)
                                         yield FinalTranscriptEvent(text=transcript, confidence=confidence)
                                     else:
                                         yield InterimTranscriptEvent(text=transcript)

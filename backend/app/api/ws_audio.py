@@ -90,7 +90,12 @@ async def audio_socket(
     await websocket.accept()
 
     settings = get_settings()
-    provider = build_stt_provider(settings, logger=app.state.telemetry)
+    telemetry = app.state.telemetry.bind(
+        session_id=str(session_id),
+        tenant_id=str(claims.tenant_id),
+        user_id=str(claims.user_id),
+    )
+    provider = build_stt_provider(settings, logger=telemetry)
 
     try:
         async for event in provider.stream(_frame_generator(websocket)):
@@ -103,8 +108,17 @@ async def audio_socket(
         return
     except NotImplementedError:
         # Deepgram provider skeleton activated without implementation (Slice 4 gap).
-        logger.error("STT provider not implemented; check STT_PROVIDER setting.")
+        telemetry.error("STT provider not implemented; check STT_PROVIDER setting.")
         await websocket.send_json(
             {"type": "error", "code": "relay_error", "message": "STT provider not available."}
         )
         await websocket.close(code=1011)
+    except Exception as e:
+        telemetry.exception(f"Unexpected error during STT stream: {e}")
+        try:
+            await websocket.send_json(
+                {"type": "error", "code": "stt_error", "message": "An unexpected error occurred during audio processing."}
+            )
+            await websocket.close(code=1011)
+        except Exception:
+            pass

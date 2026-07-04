@@ -11,6 +11,7 @@ import {
   pipelineSocketUrl,
   postClarification,
   postFeedback,
+  postTelemetry,
   submitQuery
 } from "../lib/api";
 import type {
@@ -116,7 +117,9 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
   const modeLabel = auth.mode === "clerk" ? "clerk auth mode" : "local fake mode";
 
   const audioSocketRef = useRef<WebSocket | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioWorkletRef = useRef<AudioWorkletNode | null>(null);
 
   const apiReady = useMemo(
     () => auth.ready && auth.signedIn && Boolean(session.sessionId),
@@ -275,16 +278,17 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
       !navigator.mediaDevices ||
       typeof navigator.mediaDevices.getUserMedia !== "function"
     ) {
-      setNotice(
-        "Microphone is unavailable in this context. Use text input or Fake voice."
-      );
+      setNotice("Microphone is unavailable in this context. Use text input or Fake voice.");
       return;
     }
     // Guard: permission already known to be denied.
     if (micPermission === "denied") {
-      setNotice(
-        "Microphone access denied. Allow access in browser settings or use text input."
-      );
+      setNotice("Microphone access denied. Allow access in browser settings or use text input.");
+      return;
+    }
+    // Guard: ensure session exists before prompting for mic.
+    if (!session.sessionId) {
+      setNotice("Session is not ready. Cannot start recording.");
       return;
     }
 
@@ -293,38 +297,45 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       setMicPermission("granted");
       
-      // Emit stt.mic.permission to browser console
-      console.log(JSON.stringify({ event: "stt.mic.permission", tier: 3, outcome: "granted", ts: new Date().toISOString() }));
+      const token = await auth.getToken();
       
-      // Transition to 'connecting'.
+      // Emit stt.mic.permission via telemetry endpoint
+      await postTelemetry({ event: "stt.mic.permission", outcome: "granted", session_id: session.sessionId }, token).catch(console.error);
+      
       setRecordingState("connecting");
       setNotice("Microphone access granted. Connecting...");
       
-      const token = await auth.getToken();
-      if (!session.sessionId) return;
-      
       const socket = new WebSocket(audioSocketUrl(session.sessionId, token));
       audioSocketRef.current = socket;
+      mediaStreamRef.current = stream;
       
-      socket.onopen = () => {
-        const mimeType = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-          ? "audio/webm;codecs=opus"
-          : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported("audio/webm")
-          ? "audio/webm"
-          : "";
+      socket.onopen = async () => {
+        try {
+          const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+          audioContextRef.current = audioContext;
           
-        const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-        mediaRecorderRef.current = recorder;
-        
-        recorder.ondataavailable = (e) => {
-          if (e.data.size > 0 && socket.readyState === WebSocket.OPEN) {
-            socket.send(e.data);
-          }
-        };
-        
-        recorder.start(250); // emit chunks every 250ms
-        setRecordingState("recording");
-        setNotice("Recording...");
+          await audioContext.audioWorklet.addModule('/audio-processor.js');
+          
+          const source = audioContext.createMediaStreamSource(stream);
+          const worklet = new AudioWorkletNode(audioContext, 'pcm-audio-processor');
+          audioWorkletRef.current = worklet;
+          
+          worklet.port.onmessage = (e) => {
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.send(e.data);
+            }
+          };
+          
+          source.connect(worklet);
+          worklet.connect(audioContext.destination); // Required for worklet to run in some browsers
+          
+          setRecordingState("recording");
+          setNotice("Recording...");
+        } catch (error) {
+          setRecordingState("idle");
+          setNotice("Failed to initialize audio processing.");
+          recorderCleanup();
+        }
       };
       
       socket.onmessage = (message) => {
@@ -338,7 +349,8 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
           setSubmittedText(event.text);
           setRecordingState("idle");
           setNotice("Transcript received. Review or edit before submitting.");
-          socket.close();
+          // We can safely close here, final is received.
+          recorderCleanup();
         } else if (event.type === "error") {
           setRecordingState("idle");
           setNotice(event.message);
@@ -354,6 +366,9 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
       
       socket.onclose = () => {
         setRecordingState((prev) => (prev === "recording" || prev === "processing" ? "idle" : prev));
+        if (audioSocketRef.current === socket) {
+          audioSocketRef.current = null;
+        }
         recorderCleanup();
       };
       
@@ -361,10 +376,11 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
       const domErr = err as { name?: string };
       if (domErr?.name === "NotAllowedError" || domErr?.name === "PermissionDeniedError") {
         setMicPermission("denied");
-        console.log(JSON.stringify({ event: "stt.mic.permission", tier: 3, outcome: "denied", ts: new Date().toISOString() }));
-        setNotice(
-          "Microphone access denied. Allow access in browser settings or use text input."
-        );
+        const token = await auth.getToken();
+        if (session.sessionId) {
+          await postTelemetry({ event: "stt.mic.permission", outcome: "denied", session_id: session.sessionId }, token).catch(console.error);
+        }
+        setNotice("Microphone access denied. Allow access in browser settings or use text input.");
         setRecordingState("idle");
       } else {
         setNotice("Could not access microphone. Try again or use text input.");
@@ -374,23 +390,45 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
   }
   
   function recorderCleanup() {
-    if (mediaRecorderRef.current) {
-      if (mediaRecorderRef.current.state !== "inactive") {
-        mediaRecorderRef.current.stop();
+    if (audioWorkletRef.current) {
+      audioWorkletRef.current.disconnect();
+      audioWorkletRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
+    if (audioContextRef.current) {
+      if (audioContextRef.current.state !== "closed") {
+        audioContextRef.current.close().catch(console.error);
       }
-      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
-      mediaRecorderRef.current = null;
+      audioContextRef.current = null;
+    }
+    if (audioSocketRef.current) {
+      const socket = audioSocketRef.current;
+      audioSocketRef.current = null;
+      // Remove onclose handler to prevent infinite recursion
+      socket.onclose = null;
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+        socket.close();
+      }
     }
   }
 
   function handleStopRecording() {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+    // 1. Stop mic tracks
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
     }
+    // 2. Suspend/Close audio context
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      audioContextRef.current.suspend().catch(console.error);
+    }
+    // 3. Send stop_recording JSON, but keep WS open for final transcript
     if (audioSocketRef.current && audioSocketRef.current.readyState === WebSocket.OPEN) {
       audioSocketRef.current.send(JSON.stringify({ type: "stop_recording" }));
     }
+    
     setRecordingState("processing");
     setNotice("Recording stopped. Processing transcript...");
   }

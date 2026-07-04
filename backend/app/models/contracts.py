@@ -200,6 +200,14 @@ class StatusResponse(BaseModel):
     status: str
 
 
+class TelemetryRequest(BaseModel):
+    session_id: UUID | None = None
+    event: str
+    outcome: str | None = None
+    latency_ms: int | None = None
+    error_code: str | None = None
+
+
 class ResultShape(BaseModel):
     columns: list[str]
     chart_type: ChartType

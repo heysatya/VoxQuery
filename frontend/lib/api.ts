@@ -93,6 +93,16 @@ export async function postFeedback(payload: {
   }, authToken);
 }
 
+export async function postTelemetry(
+  payload: { event: string; outcome: string; session_id?: string },
+  authToken?: string | null
+): Promise<void> {
+  await request("/api/telemetry", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }, authToken);
+}
+
 export function pipelineSocketUrl(sessionId: string, authToken: string | null = fakeToken): string {
   return socketUrl(
     `/ws/pipeline?session_id=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(authToken ?? "")}`
