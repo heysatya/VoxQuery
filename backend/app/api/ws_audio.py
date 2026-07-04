@@ -90,7 +90,7 @@ async def audio_socket(
     await websocket.accept()
 
     settings = get_settings()
-    provider = build_stt_provider(settings)
+    provider = build_stt_provider(settings, logger=app.state.telemetry)
 
     try:
         async for event in provider.stream(_frame_generator(websocket)):

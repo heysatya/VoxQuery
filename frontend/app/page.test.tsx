@@ -70,6 +70,30 @@ class FakeWebSocket {
   }
 }
 
+class MockMediaRecorder {
+  state: string = "inactive";
+  stream: MediaStream;
+  ondataavailable: ((e: { data: Blob }) => void) | null = null;
+  onstop: (() => void) | null = null;
+
+  static instances: MockMediaRecorder[] = [];
+  static isTypeSupported = vi.fn().mockReturnValue(true);
+
+  constructor(stream: MediaStream) {
+    this.stream = stream;
+    MockMediaRecorder.instances.push(this);
+  }
+
+  start(timeslice?: number) {
+    this.state = "recording";
+  }
+
+  stop() {
+    this.state = "inactive";
+    this.onstop?.();
+  }
+}
+
 describe("HomePage", () => {
   let sessionCalls = 0;
   let feedbackCalls = 0;
@@ -77,9 +101,11 @@ describe("HomePage", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
     FakeWebSocket.instances = [];
+    MockMediaRecorder.instances = [];
     sessionCalls = 0;
     feedbackCalls = 0;
     vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal("MediaRecorder", MockMediaRecorder);
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -316,6 +342,114 @@ describe("HomePage", () => {
     expect(
       await screen.findByText("Raw transcript: Show revenue by region")
     ).toBeInTheDocument();
+  });
+
+  // ------------------------------------------------------------------
+  // Slice 2 — PCM capture + binary streaming
+  // ------------------------------------------------------------------
+
+  it("'Start recording' opens audio WS and starts MediaRecorder when permission is granted", async () => {
+    const fakeStream = { getTracks: () => [] };
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockResolvedValue(fakeStream) },
+      writable: true,
+      configurable: true
+    });
+
+    render(<HomePage />);
+    await waitFor(() => expect(screen.getByText("Session active")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+
+    // Wait for the WS to be opened and MediaRecorder to start
+    await waitFor(() => expect(audioSocket()).toBeTruthy());
+    expect(MockMediaRecorder.instances).toHaveLength(1);
+    expect(MockMediaRecorder.instances[0].state).toBe("recording");
+    
+    // Assert WS URL contains session and token
+    const wsUrl = audioSocket()!.url;
+    expect(wsUrl).toContain("session_id=session-1");
+    expect(wsUrl).toContain("token=fake");
+  });
+
+  it("audio chunks are sent as binary frames over the WS", async () => {
+    const fakeStream = { getTracks: () => [] };
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockResolvedValue(fakeStream) },
+      writable: true,
+      configurable: true
+    });
+
+    render(<HomePage />);
+    await waitFor(() => expect(screen.getByText("Session active")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+
+    await waitFor(() => expect(audioSocket()).toBeTruthy());
+    const recorder = MockMediaRecorder.instances[0];
+    const ws = audioSocket()!;
+    ws.send = vi.fn(); // Mock send
+
+    const testBlob = new Blob(["test_audio_data"]);
+    act(() => {
+      recorder.ondataavailable?.({ data: testBlob });
+    });
+
+    expect(ws.send).toHaveBeenCalledWith(testBlob);
+  });
+
+  it("stop recording sends stop_recording JSON and transitions to idle after final transcript", async () => {
+    const fakeStream = { getTracks: () => [] };
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockResolvedValue(fakeStream) },
+      writable: true,
+      configurable: true
+    });
+
+    render(<HomePage />);
+    await waitFor(() => expect(screen.getByText("Session active")).toBeInTheDocument());
+    const input = screen.getByLabelText("Ask a data question");
+
+    fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+    await waitFor(() => expect(audioSocket()).toBeTruthy());
+    
+    const ws = audioSocket()!;
+    ws.send = vi.fn();
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop recording" }));
+    
+    expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ type: "stop_recording" }));
+    
+    // Simulate final transcript
+    act(() => {
+      ws.emit({ type: "final_transcript", text: "Show revenue by region", confidence: 0.97, is_final: true });
+    });
+
+    await waitFor(() => expect(input).toHaveValue("Show revenue by region"));
+    expect(screen.getAllByText("idle").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("WS error during recording shows notice and returns to idle", async () => {
+    const fakeStream = { getTracks: () => [] };
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockResolvedValue(fakeStream) },
+      writable: true,
+      configurable: true
+    });
+
+    render(<HomePage />);
+    await waitFor(() => expect(screen.getByText("Session active")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+    await waitFor(() => expect(audioSocket()).toBeTruthy());
+    
+    const ws = audioSocket()!;
+    act(() => {
+      ws.onerror?.();
+    });
+
+    await waitFor(() => expect(screen.getByText(/unavailable|error/i)).toBeInTheDocument());
+    expect(screen.getAllByText("idle").length).toBeGreaterThanOrEqual(1);
   });
 });
 

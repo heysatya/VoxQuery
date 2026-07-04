@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
 from app.models.contracts import FinalTranscriptEvent, InterimTranscriptEvent
+from app.services.telemetry import StructuredLogger
 
 if TYPE_CHECKING:
     from app.config import Settings
@@ -58,22 +59,85 @@ class DeepgramSttProvider(SttProvider):
     The API key is accepted at construction but never logged.
     """
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, logger: StructuredLogger | None = None) -> None:
         # Store privately; never log or expose this value.
         self._api_key = api_key
+        self._logger = logger or StructuredLogger()
 
     async def stream(self, audio_frames: AsyncIterator[bytes]) -> AsyncIterator[object]:
-        raise NotImplementedError(
-            "DeepgramSttProvider.stream() is not yet implemented. "
-            "Set STT_PROVIDER=fake to use the fake provider. "
-            "Real Deepgram relay will be added in Slice 4."
-        )
-        # unreachable; presence of yield makes this an async generator so the
-        # return type AsyncIterator[object] is satisfied by the type checker.
-        yield  # type: ignore[misc]
+        import json
+        import asyncio
+        import websockets
+        from websockets.exceptions import ConnectionClosed
+
+        url = "wss://api.deepgram.com/v1/listen?model=nova-2&smart_format=true"
+        headers = {"Authorization": f"Token {self._api_key}"}
+
+        self._logger.emit("stt.ws.lifecycle", tier=2, action="opened", provider="deepgram")
+
+        try:
+            async with websockets.connect(url, additional_headers=headers) as ws:
+                async def sender():
+                    try:
+                        async for frame in audio_frames:
+                            await ws.send(frame)
+                        await ws.send(json.dumps({"type": "CloseStream"}))
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass
+
+                sender_task = asyncio.create_task(sender())
+
+                try:
+                    while True:
+                        try:
+                            msg = await asyncio.wait_for(ws.recv(), timeout=15.0)
+                        except asyncio.TimeoutError:
+                            self._logger.emit("stt.error", tier=2, error_type="idle_timeout", details="No messages received from Deepgram for 15s")
+                            sender_task.cancel()
+                            break
+
+                        if isinstance(msg, bytes):
+                            continue
+
+                        data = json.loads(msg)
+
+                        if data.get("type") == "Error":
+                            continue
+
+                        if data.get("type") == "Results":
+                            channel = data.get("channel", {})
+                            alts = channel.get("alternatives", [])
+                            if alts:
+                                transcript = alts[0].get("transcript", "")
+                                confidence = alts[0].get("confidence", 0.0)
+                                is_final = data.get("is_final", False)
+                                
+                                if transcript.strip():
+                                    if is_final:
+                                        self._logger.emit("stt.transcript.final", tier=3, provider="deepgram", confidence=confidence)
+                                        yield FinalTranscriptEvent(text=transcript, confidence=confidence)
+                                    else:
+                                        yield InterimTranscriptEvent(text=transcript)
+                except websockets.exceptions.ConnectionClosedOK:
+                    pass
+                except websockets.exceptions.ConnectionClosedError as e:
+                    raise e
+                finally:
+                    sender_task.cancel()
+
+        except Exception as e:
+            err_msg = str(e)
+            if self._api_key in err_msg:
+                err_msg = err_msg.replace(self._api_key, "[REDACTED]")
+            self._logger.emit("stt.error", tier=2, error_type="deepgram_connection", details=err_msg)
+            raise Exception("Deepgram connection error") from e
+        finally:
+            self._logger.emit("stt.ws.lifecycle", tier=2, action="closed", provider="deepgram")
 
 
-def build_stt_provider(settings: Settings) -> SttProvider:
+def build_stt_provider(settings: Settings, logger: StructuredLogger | None = None) -> SttProvider:
     """
     Factory that maps Settings → SttProvider.
 
@@ -89,5 +153,5 @@ def build_stt_provider(settings: Settings) -> SttProvider:
             # Defensive guard: validate_startup() should catch this first,
             # but guard here too so the factory is safe if called independently.
             raise RuntimeError("DEEPGRAM_API_KEY is required when STT_PROVIDER=deepgram.")
-        return DeepgramSttProvider(api_key=settings.deepgram_api_key)
+        return DeepgramSttProvider(api_key=settings.deepgram_api_key, logger=logger)
     return FakeSttProvider()

@@ -137,21 +137,175 @@ async def test_fake_provider_emits_single_interim_across_multiple_frames():
 
 
 # ---------------------------------------------------------------------------
-# DeepgramSttProvider skeleton safety
+# DeepgramSttProvider Slice 4 behaviour
 # ---------------------------------------------------------------------------
 
+from unittest.mock import AsyncMock, patch
+import asyncio
+import json
+from app.services.telemetry import StructuredLogger
 
-async def test_deepgram_provider_stream_raises_not_implemented():
-    """
-    The Slice 3 DeepgramSttProvider skeleton must raise NotImplementedError
-    on the first iteration — it must never attempt a network call.
-    """
-    provider = DeepgramSttProvider(api_key="sk-test-placeholder")
+class MockDeepgramWS:
+    def __init__(self, messages_to_yield, throw_on_close=False):
+        self.messages = messages_to_yield
+        self.throw_on_close = throw_on_close
+        self.closed = False
+        self.send = AsyncMock()
+        self.close = AsyncMock()
+        self._msg_iter = iter(self.messages)
 
-    async def empty_frames():
-        return
-        yield  # make it an async generator
+    async def recv(self):
+        try:
+            return next(self._msg_iter)
+        except StopIteration:
+            from websockets.exceptions import ConnectionClosedOK
+            import websockets.frames
+            raise ConnectionClosedOK(websockets.frames.Close(1000, ""), None)
 
-    with pytest.raises(NotImplementedError, match="Slice 4"):
-        async for _ in provider.stream(empty_frames()):
-            pass  # pragma: no cover
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self.throw_on_close and not exc_type:
+            from websockets.exceptions import ConnectionClosed
+            raise ConnectionClosed(None, None)
+        self.closed = True
+
+@pytest.fixture
+def mock_logger():
+    class TestLogger(StructuredLogger):
+        def __init__(self):
+            super().__init__()
+            self.emitted = []
+        def emit(self, event, tier=2, **payload):
+            self.emitted.append({"event": event, "tier": tier, **payload})
+    return TestLogger()
+
+async def test_deepgram_provider_happy_path_interim_then_final(mock_logger):
+    interim_resp = json.dumps({"type": "Results", "channel": {"alternatives": [{"transcript": "show revenue", "confidence": 0.89}]}, "is_final": False, "speech_final": False})
+    final_resp = json.dumps({"type": "Results", "channel": {"alternatives": [{"transcript": "show revenue by region", "confidence": 0.94}]}, "is_final": True, "speech_final": True})
+    
+    mock_ws = MockDeepgramWS([interim_resp, final_resp])
+    
+    async def fake_frames():
+        yield b"chunk"
+        await asyncio.sleep(0.01)
+
+    provider = DeepgramSttProvider(api_key="sk-test-placeholder", logger=mock_logger)
+    
+    with patch("websockets.connect", return_value=mock_ws):
+        events = []
+        async for evt in provider.stream(fake_frames()):
+            events.append(evt)
+
+    assert len(events) == 2
+    assert isinstance(events[0], InterimTranscriptEvent)
+    assert events[0].text == "show revenue"
+    assert isinstance(events[1], FinalTranscriptEvent)
+    assert events[1].text == "show revenue by region"
+    
+    final_logs = [e for e in mock_logger.emitted if e["event"] == "stt.transcript.final"]
+    assert len(final_logs) == 1
+    assert final_logs[0]["confidence"] == 0.94
+    assert final_logs[0]["provider"] == "deepgram"
+
+async def test_deepgram_provider_client_disconnect_closes_upstream(mock_logger):
+    mock_ws = MockDeepgramWS([])
+    
+    async def disconnect_frames():
+        yield b"chunk"
+        raise StopAsyncIteration()
+
+    provider = DeepgramSttProvider(api_key="sk-test-placeholder", logger=mock_logger)
+    
+    with patch("websockets.connect", return_value=mock_ws):
+        async for evt in provider.stream(disconnect_frames()):
+            pass
+
+    assert mock_ws.closed is True
+
+async def test_deepgram_provider_deepgram_close_yields_safe_error(mock_logger):
+    from websockets.exceptions import ConnectionClosedError
+    import websockets.frames
+    
+    class ThrowingWS(MockDeepgramWS):
+        def __init__(self):
+            super().__init__([])
+            self.count = 0
+            
+        async def recv(self):
+            if self.count == 0:
+                self.count += 1
+                return json.dumps({"type": "Metadata"})
+            raise ConnectionClosedError(websockets.frames.Close(1011, ""), None)
+
+    mock_ws = ThrowingWS()
+
+    async def fake_frames():
+        yield b"chunk"
+        await asyncio.sleep(0.05)
+
+    provider = DeepgramSttProvider(api_key="sk-test-placeholder", logger=mock_logger)
+    
+    with patch("websockets.connect", return_value=mock_ws):
+        with pytest.raises(Exception):
+            async for evt in provider.stream(fake_frames()):
+                pass
+
+    err_logs = [e for e in mock_logger.emitted if e["event"] == "stt.error"]
+    assert len(err_logs) > 0
+    assert err_logs[0]["error_type"] == "deepgram_connection"
+    assert "sk-test-placeholder" not in str(err_logs[0])
+
+async def test_deepgram_provider_idle_timeout_closes_both_sides(mock_logger):
+    mock_ws = MockDeepgramWS([])
+    
+    async def hanging_frames():
+        await asyncio.sleep(20.0) # More than 15s timeout
+        yield b"chunk"
+
+    provider = DeepgramSttProvider(api_key="sk-test-placeholder", logger=mock_logger)
+    
+    with patch("websockets.connect", return_value=mock_ws):
+        with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
+            async for evt in provider.stream(hanging_frames()):
+                pass
+
+    err_logs = [e for e in mock_logger.emitted if e["event"] == "stt.error"]
+    assert len(err_logs) > 0
+    assert err_logs[0]["error_type"] == "idle_timeout"
+
+async def test_deepgram_provider_api_key_never_appears_in_telemetry_events(mock_logger):
+    mock_ws = MockDeepgramWS([json.dumps({"type": "Error", "message": "sk-test-abc123"})])
+    
+    async def fake_frames():
+        yield b"chunk"
+        
+    provider = DeepgramSttProvider(api_key="sk-test-abc123", logger=mock_logger)
+    
+    with patch("websockets.connect", return_value=mock_ws):
+        try:
+            async for evt in provider.stream(fake_frames()):
+                pass
+        except Exception:
+            pass
+
+    for log in mock_logger.emitted:
+        assert "sk-test-abc123" not in str(log)
+
+async def test_deepgram_provider_emits_ws_lifecycle_opened_and_closed(mock_logger):
+    mock_ws = MockDeepgramWS([])
+    
+    async def fake_frames():
+        yield b"chunk"
+        # ensure we yield a single frame, then exit
+
+    provider = DeepgramSttProvider(api_key="sk-test-placeholder", logger=mock_logger)
+    
+    with patch("websockets.connect", return_value=mock_ws):
+        async for evt in provider.stream(fake_frames()):
+            pass
+
+    lifecycle_logs = [e for e in mock_logger.emitted if e["event"] == "stt.ws.lifecycle"]
+    assert any(log["action"] == "opened" for log in lifecycle_logs)
+    assert any(log["action"] == "closed" for log in lifecycle_logs)

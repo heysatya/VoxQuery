@@ -2,7 +2,7 @@
 
 import { SignInButton, UserButton, useAuth } from "@clerk/nextjs";
 import React from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiRequestError,
   audioSocketUrl,
@@ -114,6 +114,9 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
       : "Local fake mode active. No external credentials are required."
   );
   const modeLabel = auth.mode === "clerk" ? "clerk auth mode" : "local fake mode";
+
+  const audioSocketRef = useRef<WebSocket | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
 
   const apiReady = useMemo(
     () => auth.ready && auth.signedIn && Boolean(session.sessionId),
@@ -287,15 +290,78 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
 
     try {
       // This call may prompt the user. On grant, permission is 'granted'.
-      await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       setMicPermission("granted");
-      // Transition to 'connecting'. Slice 2 will open the WS and MediaRecorder here.
+      
+      // Emit stt.mic.permission to browser console
+      console.log(JSON.stringify({ event: "stt.mic.permission", tier: 3, outcome: "granted", ts: new Date().toISOString() }));
+      
+      // Transition to 'connecting'.
       setRecordingState("connecting");
       setNotice("Microphone access granted. Connecting...");
+      
+      const token = await auth.getToken();
+      if (!session.sessionId) return;
+      
+      const socket = new WebSocket(audioSocketUrl(session.sessionId, token));
+      audioSocketRef.current = socket;
+      
+      socket.onopen = () => {
+        const mimeType = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported("audio/webm")
+          ? "audio/webm"
+          : "";
+          
+        const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+        mediaRecorderRef.current = recorder;
+        
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0 && socket.readyState === WebSocket.OPEN) {
+            socket.send(e.data);
+          }
+        };
+        
+        recorder.start(250); // emit chunks every 250ms
+        setRecordingState("recording");
+        setNotice("Recording...");
+      };
+      
+      socket.onmessage = (message) => {
+        const event = parseSocketEvent<AudioEvent>(message.data);
+        if (!event) return;
+        
+        if (event.type === "interim_transcript") {
+          setPartialTranscript(event.text);
+        } else if (event.type === "final_transcript") {
+          setPartialTranscript(event.text);
+          setSubmittedText(event.text);
+          setRecordingState("idle");
+          setNotice("Transcript received. Review or edit before submitting.");
+          socket.close();
+        } else if (event.type === "error") {
+          setRecordingState("idle");
+          setNotice(event.message);
+          recorderCleanup();
+        }
+      };
+      
+      socket.onerror = () => {
+        setRecordingState("idle");
+        setNotice("Audio WebSocket unavailable or error occurred.");
+        recorderCleanup();
+      };
+      
+      socket.onclose = () => {
+        setRecordingState((prev) => (prev === "recording" || prev === "processing" ? "idle" : prev));
+        recorderCleanup();
+      };
+      
     } catch (err) {
       const domErr = err as { name?: string };
       if (domErr?.name === "NotAllowedError" || domErr?.name === "PermissionDeniedError") {
         setMicPermission("denied");
+        console.log(JSON.stringify({ event: "stt.mic.permission", tier: 3, outcome: "denied", ts: new Date().toISOString() }));
         setNotice(
           "Microphone access denied. Allow access in browser settings or use text input."
         );
@@ -306,12 +372,27 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
       }
     }
   }
+  
+  function recorderCleanup() {
+    if (mediaRecorderRef.current) {
+      if (mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      mediaRecorderRef.current = null;
+    }
+  }
 
   function handleStopRecording() {
-    // Slice 2 will close the MediaRecorder and send stop_recording over the WS.
-    // For now, return to idle so the UI is consistent.
-    setRecordingState("idle");
-    setNotice("Recording stopped.");
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+    }
+    if (audioSocketRef.current && audioSocketRef.current.readyState === WebSocket.OPEN) {
+      audioSocketRef.current.send(JSON.stringify({ type: "stop_recording" }));
+    }
+    setRecordingState("processing");
+    setNotice("Recording stopped. Processing transcript...");
   }
 
   async function handleFakeVoice() {
