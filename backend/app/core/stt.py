@@ -79,24 +79,42 @@ class DeepgramSttProvider(SttProvider):
 
         try:
             async with websockets.connect(url, additional_headers=headers) as ws:
+                sender_exception = None
                 async def sender():
+                    nonlocal sender_exception
                     try:
                         async for frame in audio_frames:
                             await ws.send(frame)
                         await ws.send(json.dumps({"type": "CloseStream"}))
                     except asyncio.CancelledError:
                         pass
-                    except Exception:
+                    except websockets.exceptions.ConnectionClosed:
+                        # Upstream closed, recv loop will catch the same closure
                         pass
+                    except Exception as e:
+                        from starlette.websockets import WebSocketDisconnect
+                        if isinstance(e, WebSocketDisconnect):
+                            sender_exception = e
+                        else:
+                            sender_exception = DeepgramUnavailableError("Deepgram send failed")
+                        # Unblock the recv loop
+                        try:
+                            await ws.close()
+                        except Exception:
+                            pass
 
                 sender_task = asyncio.create_task(sender())
 
                 try:
                     while True:
+                        if sender_exception:
+                            raise sender_exception
                         try:
                             msg = await asyncio.wait_for(ws.recv(), timeout=15.0)
                         except asyncio.TimeoutError:
                             sender_task.cancel()
+                            if sender_exception:
+                                raise sender_exception
                             raise DeepgramUnavailableError("No messages received from Deepgram for 15s (idle timeout)")
 
                         if isinstance(msg, bytes):
@@ -128,8 +146,11 @@ class DeepgramSttProvider(SttProvider):
                                     else:
                                         yield InterimTranscriptEvent(text=transcript)
                 except websockets.exceptions.ConnectionClosedOK:
-                    pass
+                    if sender_exception:
+                        raise sender_exception
                 except websockets.exceptions.ConnectionClosedError as e:
+                    if sender_exception:
+                        raise sender_exception
                     raise e
                 finally:
                     sender_task.cancel()
@@ -137,6 +158,9 @@ class DeepgramSttProvider(SttProvider):
         except DeepgramUnavailableError:
             raise
         except Exception as e:
+            from starlette.websockets import WebSocketDisconnect
+            if isinstance(e, WebSocketDisconnect):
+                raise
             err_msg = str(e)
             if self._api_key in err_msg:
                 err_msg = err_msg.replace(self._api_key, "[REDACTED]")

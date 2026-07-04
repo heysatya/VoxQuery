@@ -25,9 +25,8 @@ async def post_telemetry(
         session = app.state.sessions.get_for_claims(claims, request.session_id)
         if session is None:
             # Re-use existing session error pattern
-            from fastapi import HTTPException
-            from app.models.contracts import ErrorCode
-            raise HTTPException(status_code=403, detail=ErrorCode.session_not_found)
+            from app.models.contracts import ApiError, ErrorCode
+            raise ApiError(ErrorCode.session_not_found, status_code=403)
         payload["session_id"] = str(request.session_id)
     else:
         payload["session_id"] = "none"
