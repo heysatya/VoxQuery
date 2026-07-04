@@ -103,6 +103,7 @@ class MockAudioContext {
 describe("HomePage", () => {
   let sessionCalls = 0;
   let feedbackCalls = 0;
+  let telemetryCalls: any[] = [];
 
   beforeEach(() => {
     window.sessionStorage.clear();
@@ -111,6 +112,7 @@ describe("HomePage", () => {
     MockAudioWorkletNode.instances = [];
     sessionCalls = 0;
     feedbackCalls = 0;
+    telemetryCalls = [];
     vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
     vi.stubGlobal("AudioContext", MockAudioContext);
     vi.stubGlobal("webkitAudioContext", MockAudioContext);
@@ -146,6 +148,10 @@ describe("HomePage", () => {
               409
             );
           }
+          return jsonResponse({ status: "recorded" });
+        }
+        if (url.endsWith("/api/telemetry")) {
+          telemetryCalls.push(init?.body);
           return jsonResponse({ status: "recorded" });
         }
         return jsonResponse({}, 404);
@@ -294,6 +300,12 @@ describe("HomePage", () => {
     expect(input).not.toBeDisabled();
     // recordingState must stay idle (pipelineStage also shows 'idle'; both are expected).
     expect(screen.getAllByText("idle").length).toBeGreaterThanOrEqual(1);
+    
+    // Assert telemetry POST
+    expect(telemetryCalls.length).toBeGreaterThan(0);
+    const lastCall = JSON.parse(telemetryCalls[telemetryCalls.length - 1]);
+    expect(lastCall.event).toBe("stt.mic.permission");
+    expect(lastCall.outcome).toBe("denied");
   });
 
   it("mic granted: recordingState transitions to connecting", async () => {
@@ -312,6 +324,12 @@ describe("HomePage", () => {
 
     // After permission is granted the UI enters connecting.
     await waitFor(() => expect(screen.getByText("connecting")).toBeInTheDocument());
+    
+    // Assert telemetry POST
+    expect(telemetryCalls.length).toBeGreaterThan(0);
+    const lastCall = JSON.parse(telemetryCalls[telemetryCalls.length - 1]);
+    expect(lastCall.event).toBe("stt.mic.permission");
+    expect(lastCall.outcome).toBe("granted");
   });
 
   it("mic unavailable: shows a safe notice and keeps text input usable", async () => {

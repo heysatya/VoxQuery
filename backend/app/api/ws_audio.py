@@ -95,30 +95,62 @@ async def audio_socket(
         tenant_id=str(claims.tenant_id),
         user_id=str(claims.user_id),
     )
+    import time
+    from app.core.stt import DeepgramUnavailableError
+    from app.models.contracts import FinalTranscriptEvent
+    
+    start_time = time.monotonic()
+    
+    telemetry.emit("stt.ws.lifecycle", tier=2, action="opened")
     provider = build_stt_provider(settings, logger=telemetry)
+    provider_name = "deepgram" if settings.stt_provider == "deepgram" else "fake"
 
+    close_code = 1000
     try:
         async for event in provider.stream(_frame_generator(websocket)):
+            if isinstance(event, FinalTranscriptEvent):
+                latency_ms = int((time.monotonic() - start_time) * 1000)
+                telemetry.emit(
+                    "stt.transcript.final", 
+                    tier=2, 
+                    provider=provider_name, 
+                    confidence=event.confidence, 
+                    latency_ms=latency_ms
+                )
             await websocket.send_json(event.model_dump(mode="json"))
         # Stream exhausted (stop_recording received and final transcript emitted)
-        await websocket.close(code=1000)
+        await websocket.close(code=close_code)
     except WebSocketDisconnect:
-        # Browser disconnected mid-stream; upstream cleanup is the provider's
-        # responsibility in Slice 4. FakeSttProvider has no upstream to clean.
+        # Browser disconnected mid-stream
+        close_code = 1006
         return
     except NotImplementedError:
         # Deepgram provider skeleton activated without implementation (Slice 4 gap).
-        telemetry.error("STT provider not implemented; check STT_PROVIDER setting.")
+        telemetry.emit("stt.error", tier=2, error_type="relay")
+        close_code = 1011
         await websocket.send_json(
             {"type": "error", "code": "relay_error", "message": "STT provider not available."}
         )
-        await websocket.close(code=1011)
-    except Exception as e:
-        telemetry.exception(f"Unexpected error during STT stream: {e}")
+        await websocket.close(code=close_code)
+    except DeepgramUnavailableError:
+        telemetry.emit("stt.error", tier=2, error_type="deepgram_connection")
+        close_code = 1011
         try:
             await websocket.send_json(
-                {"type": "error", "code": "stt_error", "message": "An unexpected error occurred during audio processing."}
+                {"type": "error", "code": "deepgram_unavailable", "message": "Speech-to-text service is temporarily unavailable."}
             )
-            await websocket.close(code=1011)
+            await websocket.close(code=close_code)
         except Exception:
             pass
+    except Exception:
+        telemetry.emit("stt.error", tier=2, error_type="relay")
+        close_code = 1011
+        try:
+            await websocket.send_json(
+                {"type": "error", "code": "relay_error", "message": "An unexpected error occurred during audio processing."}
+            )
+            await websocket.close(code=close_code)
+        except Exception:
+            pass
+    finally:
+        telemetry.emit("stt.ws.lifecycle", tier=2, action="closed", close_code=close_code)

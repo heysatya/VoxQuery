@@ -202,8 +202,8 @@ class StatusResponse(BaseModel):
 
 class TelemetryRequest(BaseModel):
     session_id: UUID | None = None
-    event: str
-    outcome: str | None = None
+    event: Literal["stt.mic.permission"]
+    outcome: Literal["granted", "denied", "unavailable"] | None = None
     latency_ms: int | None = None
     error_code: str | None = None
 

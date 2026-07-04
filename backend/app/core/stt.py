@@ -23,6 +23,10 @@ if TYPE_CHECKING:
     from app.config import Settings
 
 
+class DeepgramUnavailableError(Exception):
+    pass
+
+
 class SttProvider(ABC):
     @abstractmethod
     async def stream(self, audio_frames: AsyncIterator[bytes]) -> AsyncIterator[object]:
@@ -73,8 +77,6 @@ class DeepgramSttProvider(SttProvider):
         url = "wss://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&encoding=linear16&sample_rate=16000&channels=1&interim_results=true"
         headers = {"Authorization": f"Token {self._api_key}"}
 
-        self._logger.emit("stt.ws.lifecycle", tier=2, action="opened", provider="deepgram")
-
         try:
             async with websockets.connect(url, additional_headers=headers) as ws:
                 async def sender():
@@ -94,9 +96,8 @@ class DeepgramSttProvider(SttProvider):
                         try:
                             msg = await asyncio.wait_for(ws.recv(), timeout=15.0)
                         except asyncio.TimeoutError:
-                            self._logger.emit("stt.error", tier=2, error_type="idle_timeout", details="No messages received from Deepgram for 15s")
                             sender_task.cancel()
-                            break
+                            raise DeepgramUnavailableError("No messages received from Deepgram for 15s (idle timeout)")
 
                         if isinstance(msg, bytes):
                             continue
@@ -104,7 +105,10 @@ class DeepgramSttProvider(SttProvider):
                         data = json.loads(msg)
 
                         if data.get("type") == "Error":
-                            continue
+                            err_msg = data.get("err_msg", "Unknown error")
+                            if self._api_key in err_msg:
+                                err_msg = err_msg.replace(self._api_key, "[REDACTED]")
+                            raise DeepgramUnavailableError(f"Deepgram returned error frame: {err_msg}")
 
                         if data.get("type") == "Results":
                             channel = data.get("channel", {})
@@ -120,7 +124,6 @@ class DeepgramSttProvider(SttProvider):
                                 
                                 if transcript.strip():
                                     if is_final:
-                                        self._logger.emit("stt.transcript.final", tier=2, provider="deepgram", confidence=confidence)
                                         yield FinalTranscriptEvent(text=transcript, confidence=confidence)
                                     else:
                                         yield InterimTranscriptEvent(text=transcript)
@@ -131,14 +134,13 @@ class DeepgramSttProvider(SttProvider):
                 finally:
                     sender_task.cancel()
 
+        except DeepgramUnavailableError:
+            raise
         except Exception as e:
             err_msg = str(e)
             if self._api_key in err_msg:
                 err_msg = err_msg.replace(self._api_key, "[REDACTED]")
-            self._logger.emit("stt.error", tier=2, error_type="deepgram_connection", details=err_msg)
-            raise Exception("Deepgram connection error") from e
-        finally:
-            self._logger.emit("stt.ws.lifecycle", tier=2, action="closed", provider="deepgram")
+            raise DeepgramUnavailableError(f"Deepgram connection error: {err_msg}") from e
 
 
 def build_stt_provider(settings: Settings, logger: StructuredLogger | None = None) -> SttProvider:

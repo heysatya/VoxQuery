@@ -14,22 +14,26 @@ async def post_telemetry(
     claims: AuthClaims = Depends(get_current_user),
     telemetry = Depends(get_telemetry_logger)
 ) -> StatusResponse:
-    # Build payload ensuring it only contains properties from the request
-    # and explicitly binds tenant_id from AuthClaims to prevent injection.
     payload = {
-        "event": request.event,
+        "event": "stt.mic.permission",
         "tenant_id": str(claims.tenant_id),
         "user_id": str(claims.user_id),
     }
     
     if request.session_id:
+        from app.main import app
+        session = app.state.sessions.get_for_claims(claims, request.session_id)
+        if session is None:
+            # Re-use existing session error pattern
+            from fastapi import HTTPException
+            from app.models.contracts import ErrorCode
+            raise HTTPException(status_code=403, detail=ErrorCode.session_not_found)
         payload["session_id"] = str(request.session_id)
+    else:
+        payload["session_id"] = "none"
+
     if request.outcome:
         payload["outcome"] = request.outcome
-    if request.latency_ms is not None:
-        payload["latency_ms"] = request.latency_ms
-    if request.error_code:
-        payload["error_code"] = request.error_code
 
-    telemetry.info(f"Frontend telemetry: {request.event}", **payload)
+    telemetry.emit(tier=3, **payload)
     return StatusResponse(status="recorded")

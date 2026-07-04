@@ -628,6 +628,7 @@ dependencies = [
     { name = "pytest-asyncio" },
     { name = "redis" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -641,6 +642,7 @@ requires-dist = [
     { name = "pytest-asyncio", specifier = ">=0.23.0" },
     { name = "redis", specifier = ">=5.0.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
+    { name = "websockets", specifier = ">=16.0" },
 ]
 
 [[package]]
