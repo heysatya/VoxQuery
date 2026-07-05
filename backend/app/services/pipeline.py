@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from time import perf_counter
 from uuid import UUID
 
+from app.audit.store import AuditStore, AuditIdentity, AuditClarification
 from app.config import Settings, get_settings
 from app.core.ambiguity import detect_ambiguity
 from app.core.confidence import compute_confidence
@@ -42,10 +43,12 @@ class PipelineOrchestrator:
         self,
         sessions: InMemorySessionStore,
         events: PipelineEventBus,
+        audit: AuditStore,
         settings: Settings | None = None,
     ) -> None:
         self.sessions = sessions
         self.events = events
+        self.audit = audit
         self.settings = settings or get_settings()
         self.schema = FakeSchemaRetriever()
         self.sql = FakeSqlGenerator()
@@ -76,7 +79,7 @@ class PipelineOrchestrator:
         self.turns[turn.turn_id] = turn
 
         self._in_flight.add(request.session_id)
-        self._schedule_pipeline_task(self._run_turn_background(session, turn), session.session_id)
+        self._schedule_pipeline_task(self._run_turn_background(session, turn, claims), session.session_id)
         return turn
 
     async def resolve_clarification(
@@ -116,12 +119,20 @@ class PipelineOrchestrator:
         turn = self.turns[turn_id]
         turn.user_input = f"{state.original_query} ({selection})"
         self._in_flight.add(session.session_id)
+        clarification = AuditClarification(
+            turn_id=turn_id,
+            prompt_sent=state.question,
+            user_choice=selection,
+            resolution_type=resolution_type
+        )
         self._schedule_pipeline_task(
             self._complete_turn_background(
                 session,
                 turn,
+                claims,
                 resolved_metric=selection,
                 clarification_triggered=True,
+                clarification=clarification
             ),
             session.session_id,
         )
@@ -131,7 +142,7 @@ class PipelineOrchestrator:
         session = self.sessions.get_for_claims(claims, session_id)
         if session is None or session.clarification_state is None:
             raise ApiError(ErrorCode.clarification_not_found, status_code=404)
-        return await self._complete_pending_timeout(session)
+        return await self._complete_pending_timeout(session, claims)
 
     async def expire_pending_clarification_if_needed(
         self, session_id: UUID, claims: AuthClaims
@@ -142,16 +153,23 @@ class PipelineOrchestrator:
         elapsed = datetime.now(UTC) - session.clarification_state.issued_at
         if elapsed.total_seconds() < self.settings.clarification_timeout_seconds:
             return None
-        return await self._complete_pending_timeout(session)
+        return await self._complete_pending_timeout(session, claims)
 
-    async def _complete_pending_timeout(self, session) -> TurnRecord:
+    async def _complete_pending_timeout(self, session, claims: AuthClaims) -> TurnRecord:
         state = session.clarification_state
         if state.turn_id not in self.turns:
             self.sessions.clear_pending_clarification(session)
             raise ApiError(ErrorCode.clarification_not_found, status_code=404)
         self.sessions.clear_pending_clarification(session)
         turn = self.turns[state.turn_id]
-        await self._complete_turn(session, turn, clarification_triggered=True)
+        
+        clarification = AuditClarification(
+            turn_id=state.turn_id,
+            prompt_sent=state.question,
+            user_choice=None,
+            resolution_type="timeout"
+        )
+        await self._complete_turn(session, turn, claims, clarification_triggered=True, clarification=clarification)
         return turn
 
     def get_turn_for_user(self, turn_id: UUID, claims: AuthClaims) -> TurnRecord:
@@ -170,10 +188,10 @@ class PipelineOrchestrator:
         )
         thread.start()
 
-    async def _run_turn_background(self, session, turn: TurnRecord) -> None:
+    async def _run_turn_background(self, session, turn: TurnRecord, claims: AuthClaims) -> None:
         await asyncio.sleep(0.05)
         try:
-            await self._run_until_confidence_or_result(session, turn)
+            await self._run_until_confidence_or_result(session, turn, claims)
         except Exception as exc:
             await self.events.publish(
                 session.session_id,
@@ -191,17 +209,21 @@ class PipelineOrchestrator:
         self,
         session,
         turn: TurnRecord,
+        claims: AuthClaims,
         *,
         resolved_metric: str | None = None,
         clarification_triggered: bool,
+        clarification: AuditClarification | None = None
     ) -> None:
         await asyncio.sleep(0.05)
         try:
             await self._complete_turn(
                 session,
                 turn,
+                claims,
                 resolved_metric=resolved_metric,
                 clarification_triggered=clarification_triggered,
+                clarification=clarification
             )
         except Exception as exc:
             await self.events.publish(
@@ -216,7 +238,7 @@ class PipelineOrchestrator:
         finally:
             self._in_flight.discard(session.session_id)
 
-    async def _run_until_confidence_or_result(self, session, turn: TurnRecord) -> None:
+    async def _run_until_confidence_or_result(self, session, turn: TurnRecord, claims: AuthClaims) -> None:
         started = perf_counter()
         await self._publish_stage(session.session_id, turn.turn_id, PipelineStage.rag_retrieval, started)
         schema_chunks, rag_score = await self.schema.retrieve(turn.user_input)
@@ -270,20 +292,22 @@ class PipelineOrchestrator:
                     ),
                 )
                 self._schedule_pipeline_task(
-                    self._run_clarification_timer(session, turn.turn_id),
+                    self._run_clarification_timer(session, turn.turn_id, claims),
                     session.session_id,
                 )
                 return
 
-        await self._complete_turn(session, turn, clarification_triggered=False)
+        await self._complete_turn(session, turn, claims, clarification_triggered=False)
 
     async def _complete_turn(
         self,
         session,
         turn: TurnRecord,
+        claims: AuthClaims,
         *,
         resolved_metric: str | None = None,
         clarification_triggered: bool,
+        clarification: AuditClarification | None = None
     ) -> None:
         started = perf_counter()
         await self._publish_stage(session.session_id, turn.turn_id, PipelineStage.snowflake_executing, started)
@@ -319,6 +343,18 @@ class PipelineOrchestrator:
         turn.latency_ms += int((perf_counter() - started) * 1000)
         turn.clarification_triggered = clarification_triggered or turn.clarification_triggered
 
+        identity = AuditIdentity(
+            tenant_id=claims.tenant_id,
+            tenant_name="Default Tenant",
+            user_id=claims.user_id,
+            email=claims.email,
+            role=claims.role,
+            snowflake_role=claims.snowflake_role,
+            conversation_id=session.conversation_id,
+            conversation_title="Voice Session"
+        )
+        self.audit.enqueue_turn(turn, identity, clarification)
+
         self.sessions.append_turn(
             session,
             turn_id=turn.turn_id,
@@ -350,7 +386,7 @@ class PipelineOrchestrator:
             ),
         )
 
-    async def _run_clarification_timer(self, session, turn_id: UUID) -> None:
+    async def _run_clarification_timer(self, session, turn_id: UUID, claims: AuthClaims) -> None:
         timeout_seconds = self.settings.clarification_timeout_seconds
         warning_delay = max(0, timeout_seconds - 10)
         await asyncio.sleep(warning_delay)
@@ -365,7 +401,7 @@ class PipelineOrchestrator:
         state = session.clarification_state
         if state is None or state.turn_id != turn_id:
             return
-        await self._complete_pending_timeout(session)
+        await self._complete_pending_timeout(session, claims)
 
     async def _publish_stage(
         self, session_id: UUID, turn_id: UUID, stage: PipelineStage, started: float

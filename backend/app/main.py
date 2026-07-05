@@ -1,6 +1,8 @@
 import logging
 import re
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,6 +12,10 @@ from app.api.rest import router as rest_router
 from app.api.ws_audio import router as ws_audio_router
 from app.api.ws_pipeline import router as ws_pipeline_router
 from app.api.telemetry import router as telemetry_router
+from app.audit.store import AuditStore
+from app.audit.noop import NoopAuditStore
+from app.audit.postgres import PostgresAuditStore
+from app.audit.migrations_runner import run_migrations
 from app.config import get_settings
 from app.core.session import build_session_store
 from app.models.contracts import ApiError, ErrorCode, ErrorEnvelope, ERROR_MESSAGES
@@ -47,7 +53,21 @@ class AccessTokenRedactionFilter(logging.Filter):
 for logger_name in ("uvicorn.access", "uvicorn.error"):
     logging.getLogger(logger_name).addFilter(AccessTokenRedactionFilter())
 
-app = FastAPI(title="VoxQuery Voice Subsystem", version="0.1.0")
+audit_store: AuditStore
+if settings.supabase_database_url:
+    audit_store = PostgresAuditStore(settings.supabase_database_url)
+else:
+    audit_store = NoopAuditStore()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if settings.supabase_database_url:
+        await run_migrations(settings.supabase_database_url)
+    await audit_store.start()
+    yield
+    await audit_store.stop()
+
+app = FastAPI(title="VoxQuery Voice Subsystem", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -56,11 +76,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.state.audit = audit_store
 app.state.sessions = build_session_store(settings=settings)
 app.state.events = PipelineEventBus()
 app.state.pipeline = PipelineOrchestrator(
     sessions=app.state.sessions,
     events=app.state.events,
+    audit=app.state.audit,
     settings=settings,
 )
 # Root telemetry logger — unbound. Route handlers call .bind(session_id=..., tenant_id=...)
@@ -108,10 +130,11 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 @app.get("/health")
 async def health() -> dict[str, str]:
+    audit_health = await app.state.audit.check_health()
     return {
         "status": "ok",
         "redis": app.state.sessions.health_status(),
-        "postgres": "not_configured",
+        "postgres": audit_health,
         "version": "local-dev",
     }
 

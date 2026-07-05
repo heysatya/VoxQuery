@@ -130,4 +130,5 @@ async def submit_feedback(
     sessions.mark_low_quality(session, request.turn_id)
     turn.feedback_submitted = True
     turn.quality_flag = "low"
+    pipeline.audit.enqueue_feedback(str(request.turn_id), "low")
     return StatusResponse(status="recorded")

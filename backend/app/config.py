@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     clarification_timeout_seconds: int = Field(default=30, alias="CLARIFICATION_TIMEOUT_SECONDS")
     session_store: str = Field(default="memory", alias="SESSION_STORE")
     upstash_redis_url: str | None = Field(default=None, alias="UPSTASH_REDIS_URL")
+    supabase_database_url: str | None = Field(default=None, alias="SUPABASE_DATABASE_URL")
     stt_provider: str = Field(default="fake", alias="STT_PROVIDER")
     deepgram_api_key: str | None = Field(default=None, alias="DEEPGRAM_API_KEY")
     clerk_issuer: str | None = Field(default=None, alias="CLERK_ISSUER")
