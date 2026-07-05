@@ -122,6 +122,30 @@ async def test_postgres_store_transactional_insert():
     assert "INSERT INTO turns" in args[0]
     assert args[1] == str(turn.turn_id)
     
+    # Verify user_snowflake_roles insertion has correct number of args (query + 3 parameters)
+    roles_args = mock_conn.execute.call_args_list[2][0]
+    assert "INSERT INTO user_snowflake_roles (user_id, tenant_id, snowflake_role)" in roles_args[0]
+    assert len(roles_args) == 4
+    
+    # Test clarification schema insertion
+    payload["clarification"] = {
+        "id": str(uuid.uuid4()),
+        "turn_id": str(turn.turn_id),
+        "prompt_sent": "ambiguous",
+        "user_choice": None,
+        "resolution_type": "timeout",
+        "created_at": "2026-07-05T00:00:00Z"
+    }
+    
+    mock_conn.execute.reset_mock()
+    await store._insert_turn(payload)
+    assert mock_conn.execute.call_count == 6
+    clarification_args = mock_conn.execute.call_args_list[-1][0]
+    assert "INSERT INTO clarifications" in clarification_args[0]
+    assert "id, turn_id, prompt_sent, user_choice, resolution_type, created_at" in clarification_args[0]
+    # Expect 5 elements: query + turn_id, prompt_sent, user_choice, resolution_type
+    assert len(clarification_args) == 5
+    
 @pytest.mark.asyncio
 async def test_worker_emits_telemetry_on_queue_failure():
     store = PostgresAuditStore("fake-dsn")

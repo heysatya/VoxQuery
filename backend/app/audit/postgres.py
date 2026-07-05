@@ -137,9 +137,9 @@ class PostgresAuditStore(AuditStore):
                 # 3. Upsert user_snowflake_roles
                 if identity.get("snowflake_role"):
                     await conn.execute("""
-                        INSERT INTO user_snowflake_roles (user_id, snowflake_role) VALUES ($1::uuid, $2)
-                        ON CONFLICT (user_id) DO UPDATE SET snowflake_role = EXCLUDED.snowflake_role
-                    """, identity["user_id"], identity["snowflake_role"])
+                        INSERT INTO user_snowflake_roles (user_id, tenant_id, snowflake_role) VALUES ($1::uuid, $2::uuid, $3)
+                        ON CONFLICT (user_id) DO UPDATE SET snowflake_role = EXCLUDED.snowflake_role, tenant_id = EXCLUDED.tenant_id
+                    """, identity["user_id"], identity["tenant_id"], identity["snowflake_role"])
                     
                 # 4. Upsert conversation
                 await conn.execute("""
@@ -171,13 +171,13 @@ class PostgresAuditStore(AuditStore):
                 if clarification:
                     await conn.execute("""
                         INSERT INTO clarifications (
-                            turn_id, status, requested_at, resolution_type, options_json
+                            id, turn_id, prompt_sent, user_choice, resolution_type, created_at
                         ) VALUES (
-                            $1::uuid, $2, $3::timestamptz, $4, $5::jsonb
-                        ) ON CONFLICT (turn_id) DO NOTHING
+                            gen_random_uuid(), $1::uuid, $2, $3, $4, now()
+                        )
                     """,
-                        clarification["turn_id"], clarification["status"], clarification["requested_at"],
-                        clarification["resolution_type"], json.dumps(clarification.get("options", []))
+                        clarification["turn_id"], clarification["prompt_sent"],
+                        clarification.get("user_choice"), clarification["resolution_type"]
                     )
             
     async def _update_feedback(self, turn_id: str, quality_flag: str) -> None:
