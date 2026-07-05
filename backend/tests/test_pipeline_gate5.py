@@ -31,7 +31,7 @@ async def test_pipeline_enqueues_turn_with_identity():
     
     chunk = SchemaChunk(content="chunk", source_ref="ref", score=0.9, table_name="t")
     
-    from app.services.providers import SqlGeneration
+    from app.llm.adapter import SqlGenerationResult
     
     # Mock RAG/Confidence/Snowflake so it completes
     pipeline.schema = MagicMock()
@@ -39,10 +39,10 @@ async def test_pipeline_enqueues_turn_with_identity():
     pipeline.warehouse = MagicMock()
     result = ResultPayload(columns=[], rows=[], row_count=0)
     shape = ResultShape(columns=[], chart_type=ChartType.stat, row_count=0, aggregate_summary="")
-    pipeline.warehouse.execute = AsyncMock(return_value=(result, shape))
-    pipeline.sql = MagicMock()
-    generation = SqlGeneration(sql="SELECT 1", llm_self_confidence=0.9, validation_passed=True)
-    pipeline.sql.generate = AsyncMock(return_value=generation)
+    pipeline.warehouse.execute_readonly = AsyncMock(return_value=(result, shape))
+    pipeline.llm = MagicMock()
+    generation = SqlGenerationResult(sql="SELECT 1", llm_self_confidence=0.9, validation_passed=True)
+    pipeline.llm.generate_sql = AsyncMock(return_value=generation)
     
     turn = await pipeline.submit_query(req, claims)
     await asyncio.sleep(0.1) # let background task finish
@@ -67,14 +67,14 @@ async def test_pipeline_timeout_enqueues_clarification():
     
     chunk = SchemaChunk(content="chunk", source_ref="ref", score=0.5, table_name="t")
     
-    from app.services.providers import SqlGeneration
+    from app.llm.adapter import SqlGenerationResult
     
     # Mock to force clarification
     pipeline.schema = MagicMock()
     pipeline.schema.retrieve = AsyncMock(return_value=([chunk], 0.5))
-    pipeline.sql = MagicMock()
-    generation = SqlGeneration(sql="SELECT 1", llm_self_confidence=0.5, validation_passed=True)
-    pipeline.sql.generate = AsyncMock(return_value=generation)
+    pipeline.llm = MagicMock()
+    generation = SqlGenerationResult(sql="SELECT 1", llm_self_confidence=0.5, validation_passed=True)
+    pipeline.llm.generate_sql = AsyncMock(return_value=generation)
     
     with patch("app.services.pipeline.detect_ambiguity") as mock_detect, \
          patch("app.services.pipeline.compute_confidence") as mock_conf:

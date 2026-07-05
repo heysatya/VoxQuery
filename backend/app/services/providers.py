@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from uuid import UUID
 
 from app.models.contracts import ChartType, ResultPayload, ResultShape, SchemaChunk
+from app.rag.retriever import SchemaRetriever
+from app.llm.adapter import LlmAdapter, SqlGenerationResult
+from app.warehouse.connector import WarehouseConnector
 
 
-class FakeSchemaRetriever:
-    async def retrieve(self, submitted_text: str) -> tuple[list[SchemaChunk], float]:
+class FakeSchemaRetriever(SchemaRetriever):
+    async def retrieve(self, submitted_text: str, tenant_id: UUID) -> tuple[list[SchemaChunk], float]:
         return [
             SchemaChunk(
                 source_ref="order_items.price",
@@ -67,32 +71,28 @@ class FakeSchemaRetriever:
         ], 0.86
 
 
-@dataclass(frozen=True)
-class SqlGeneration:
-    sql: str
-    llm_self_confidence: float
-    validation_passed: bool
-
-
-class FakeSqlGenerator:
-    async def generate(
+class FakeSqlGenerator(LlmAdapter):
+    async def generate_sql(
         self,
         submitted_text: str,
         *,
         resolved_metric: str | None = None,
-    ) -> SqlGeneration:
+    ) -> SqlGenerationResult:
         metric = _metric_column(resolved_metric or submitted_text)
         dimension = _dimension_column(submitted_text)
         confidence = 0.87 if resolved_metric or "revenue" not in submitted_text.lower() else 0.58
-        return SqlGeneration(
+        return SqlGenerationResult(
             sql=_revenue_sql(metric, dimension),
             llm_self_confidence=confidence,
             validation_passed=True,
         )
 
+    async def generate_clarification(self, dominant_signal: str) -> tuple[str, list[str]]:
+        return clarification_options_for_signal()
 
-class FakeWarehouseConnector:
-    async def execute(self, sql: str) -> tuple[ResultPayload, ResultShape]:
+
+class FakeWarehouseConnector(WarehouseConnector):
+    async def execute_readonly(self, sql: str, *, snowflake_role: str) -> tuple[ResultPayload, ResultShape]:
         if "customer_segment" in sql:
             columns = ["customer_segment", "total_net_revenue"]
             rows = [["Enterprise", 1240000], ["Consumer", 830000], ["Small Business", 410000]]

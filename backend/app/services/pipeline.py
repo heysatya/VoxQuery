@@ -28,6 +28,9 @@ from app.models.contracts import (
     TurnRecord,
 )
 from app.services.events import PipelineEventBus
+from app.rag.retriever import SchemaRetriever
+from app.llm.adapter import LlmAdapter
+from app.warehouse.connector import WarehouseConnector
 from app.services.providers import (
     FakeChartSelector,
     FakeSchemaRetriever,
@@ -46,14 +49,17 @@ class PipelineOrchestrator:
         events: PipelineEventBus,
         audit: AuditStore,
         settings: Settings | None = None,
+        schema: SchemaRetriever | None = None,
+        llm: LlmAdapter | None = None,
+        warehouse: WarehouseConnector | None = None,
     ) -> None:
         self.sessions = sessions
         self.events = events
         self.audit = audit
         self.settings = settings or get_settings()
-        self.schema = FakeSchemaRetriever()
-        self.sql = FakeSqlGenerator()
-        self.warehouse = FakeWarehouseConnector()
+        self.schema = schema or FakeSchemaRetriever()
+        self.llm = llm or FakeSqlGenerator()
+        self.warehouse = warehouse or FakeWarehouseConnector()
         self.chart = FakeChartSelector()
         self.story = FakeStoryteller()
         self.turns: dict[UUID, TurnRecord] = {}
@@ -247,13 +253,13 @@ class PipelineOrchestrator:
 
         started = perf_counter()
         await self._publish_stage(session.session_id, turn.turn_id, PipelineStage.rag_retrieval, started)
-        schema_chunks, rag_score = await self.schema.retrieve(turn.user_input)
+        schema_chunks, rag_score = await self.schema.retrieve(turn.user_input, tenant_id=claims.tenant_id)
         
         # We stub memory retrieval values for now, but use session info if available
         tracer.span_memory_retrieval(trace, truncated=False, turns_dropped=0, token_count=100)
         
         await self._publish_stage(session.session_id, turn.turn_id, PipelineStage.sql_generation, started)
-        generation = await self.sql.generate(turn.user_input)
+        generation = await self.llm.generate_sql(turn.user_input)
         
         tracer.span_history_injection(trace, total_prompt_tokens=150)
         
@@ -335,8 +341,8 @@ class PipelineOrchestrator:
     ) -> None:
         started = perf_counter()
         await self._publish_stage(session.session_id, turn.turn_id, PipelineStage.snowflake_executing, started)
-        generation = await self.sql.generate(turn.user_input, resolved_metric=resolved_metric)
-        result, shape = await self.warehouse.execute(generation.sql)
+        generation = await self.llm.generate_sql(turn.user_input, resolved_metric=resolved_metric)
+        result, shape = await self.warehouse.execute_readonly(generation.sql, snowflake_role=claims.snowflake_role)
         chart_type, rationale = self.chart.select(result)
         shape.chart_type = chart_type
         summary = await self.story.summarize(shape, turn.user_input)
