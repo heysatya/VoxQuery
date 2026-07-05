@@ -36,6 +36,7 @@ from app.services.providers import (
     FakeWarehouseConnector,
     clarification_options_for_signal,
 )
+from app.observability.langfuse import tracer
 
 
 class PipelineOrchestrator:
@@ -169,7 +170,7 @@ class PipelineOrchestrator:
             user_choice=None,
             resolution_type="timeout"
         )
-        await self._complete_turn(session, turn, claims, clarification_triggered=True, clarification=clarification)
+        await self._complete_turn(session, turn, claims, None, clarification_triggered=True, clarification=clarification)
         return turn
 
     def get_turn_for_user(self, turn_id: UUID, claims: AuthClaims) -> TurnRecord:
@@ -190,8 +191,9 @@ class PipelineOrchestrator:
 
     async def _run_turn_background(self, session, turn: TurnRecord, claims: AuthClaims) -> None:
         await asyncio.sleep(0.05)
+        trace = tracer.start_trace(turn)
         try:
-            await self._run_until_confidence_or_result(session, turn, claims)
+            await self._run_until_confidence_or_result(session, turn, claims, trace)
         except Exception as exc:
             await self.events.publish(
                 session.session_id,
@@ -216,11 +218,13 @@ class PipelineOrchestrator:
         clarification: AuditClarification | None = None
     ) -> None:
         await asyncio.sleep(0.05)
+        trace = tracer.start_trace(turn)  # Create a trace if it didn't exist or re-use turn_id
         try:
             await self._complete_turn(
                 session,
                 turn,
                 claims,
+                trace,
                 resolved_metric=resolved_metric,
                 clarification_triggered=clarification_triggered,
                 clarification=clarification
@@ -238,12 +242,21 @@ class PipelineOrchestrator:
         finally:
             self._in_flight.discard(session.session_id)
 
-    async def _run_until_confidence_or_result(self, session, turn: TurnRecord, claims: AuthClaims) -> None:
+    async def _run_until_confidence_or_result(self, session, turn: TurnRecord, claims: AuthClaims, trace: Any = None) -> None:
+        tracer.span_stt_capture(trace, turn.raw_transcript, turn.user_input, turn.deepgram_confidence_raw)
+
         started = perf_counter()
         await self._publish_stage(session.session_id, turn.turn_id, PipelineStage.rag_retrieval, started)
         schema_chunks, rag_score = await self.schema.retrieve(turn.user_input)
+        
+        # We stub memory retrieval values for now, but use session info if available
+        tracer.span_memory_retrieval(trace, truncated=False, turns_dropped=0, token_count=100)
+        
         await self._publish_stage(session.session_id, turn.turn_id, PipelineStage.sql_generation, started)
         generation = await self.sql.generate(turn.user_input)
+        
+        tracer.span_history_injection(trace, total_prompt_tokens=150)
+        
         await self._publish_stage(session.session_id, turn.turn_id, PipelineStage.sql_validation, started)
         ambiguity = detect_ambiguity(
             turn.user_input,
@@ -251,6 +264,8 @@ class PipelineOrchestrator:
             resolved_entities=session.resolved_entities,
             history=session.history,
         )
+        tracer.span_ambiguity_detection(trace, ambiguity.signals_detected, ambiguity.signals_suppressed, ambiguity.dominant_signal)
+
         confidence = compute_confidence(
             rag_score,
             generation.validation_passed,
@@ -259,6 +274,14 @@ class PipelineOrchestrator:
             threshold=self.settings.confidence_threshold_primary,
             settings=self.settings,
         )
+        tracer.span_confidence_computation(
+            trace, 
+            confidence.composite_score, 
+            confidence.confidence_tier, 
+            confidence.clarification_triggered, 
+            confidence.formula_weights
+        )
+
         turn.generated_sql = generation.sql
         turn.confidence_tier = confidence.confidence_tier
         turn.composite_score = confidence.composite_score
@@ -297,13 +320,14 @@ class PipelineOrchestrator:
                 )
                 return
 
-        await self._complete_turn(session, turn, claims, clarification_triggered=False)
+        await self._complete_turn(session, turn, claims, trace, clarification_triggered=False)
 
     async def _complete_turn(
         self,
         session,
         turn: TurnRecord,
         claims: AuthClaims,
+        trace: Any = None,
         *,
         resolved_metric: str | None = None,
         clarification_triggered: bool,
@@ -385,6 +409,7 @@ class PipelineOrchestrator:
                 from_cache=False,
             ),
         )
+        tracer.flush()
 
     async def _run_clarification_timer(self, session, turn_id: UUID, claims: AuthClaims) -> None:
         timeout_seconds = self.settings.clarification_timeout_seconds

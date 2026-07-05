@@ -127,8 +127,27 @@ async def submit_feedback(
     session = sessions.get_for_claims(claims, request.session_id)
     if session is None:
         raise ApiError(ErrorCode.session_not_found, status_code=404)
+    from app.observability.langfuse import tracer
+    
     sessions.mark_low_quality(session, request.turn_id)
     turn.feedback_submitted = True
     turn.quality_flag = "low"
     pipeline.audit.enqueue_feedback(str(request.turn_id), "low")
+    
+    # Optional option_selected resolution for the metadata
+    option_selected = None
+    if turn.clarification_triggered:
+        for entity_value in session.resolved_entities.values():
+            if hasattr(entity_value, "raw_text") and entity_value.raw_text:
+                option_selected = entity_value.raw_text
+                break
+    
+    tracer.score_feedback(
+        request.turn_id,
+        turn.composite_score,
+        turn.confidence_tier,
+        turn.clarification_triggered,
+        option_selected
+    )
+    
     return StatusResponse(status="recorded")
