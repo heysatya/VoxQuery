@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>Voxquery</h1>
+  <p class="sub">Sign in to ask a question about your data.</p>
+
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+  <form method="post" action="/login">
+    <div class="row">
+      <input type="email" name="email" placeholder="you@company.com" required>
+    </div>
+    <div class="row">
+      <input type="password" name="password" placeholder="Password" required>
+      <button type="submit">Sign in</button>
+    </div>
+  </form>
+{% endblock %}

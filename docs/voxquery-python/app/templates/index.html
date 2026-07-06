@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>Voxquery</h1>
+  <p class="sub">Ask a question about your data.</p>
+
+  <form method="post" action="/ask">
+    <div class="row">
+      <input type="text" name="question" placeholder="e.g. what were our top sellers last quarter" value="{{ question or '' }}" required>
+      <button type="submit">Ask</button>
+    </div>
+  </form>
+
+  <form method="get" action="/ask-predetermined" style="margin-bottom: 1.5rem;">
+    <label class="sub" for="predetermined_id">Or run a saved query:</label>
+    <div class="row">
+      <select name="predetermined_id" id="predetermined_id">
+        {% for q in predetermined_queries %}
+          <option value="{{ q.id }}">{{ q.label }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Run</button>
+    </div>
+  </form>
+
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+  {% if dedup_warning %}<div class="warning">{{ dedup_warning }}</div>{% endif %}
+
+  {% if chart_html %}
+    <div>{{ chart_html | safe }}</div>
+    <p class="rationale">{{ rationale }}</p>
+
+    <div class="toolbar">
+      <a href="/csv">Download CSV</a>
+      <a href="/sql">Show SQL</a>
+    </div>
+  {% endif %}
+
+  {% if summary_text %}
+    <p>{{ summary_text }}</p>
+    {% if audio_data_uri %}
+      <audio controls autoplay src="{{ audio_data_uri }}"></audio>
+    {% endif %}
+  {% endif %}
+
+  <p class="sub" style="margin-top: 2rem;"><a href="/logout">Sign out</a></p>
+{% endblock %}
