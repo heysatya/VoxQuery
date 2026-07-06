@@ -153,7 +153,7 @@ async def test_worker_emits_telemetry_on_queue_failure():
     store._queue.get = AsyncMock(side_effect=[Exception("queue dead"), asyncio.CancelledError()])
     
     with patch("app.audit.postgres.emit") as mock_emit, \
-         patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_pool:
+         patch("asyncpg.create_pool", new_callable=AsyncMock):
         # Run worker briefly
         task = asyncio.create_task(store._async_worker_loop())
         await asyncio.sleep(0.01)

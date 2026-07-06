@@ -124,9 +124,9 @@ def test_structured_logger_bind_returns_new_instance(capsys):
     child = parent.bind(tenant_id="child-tenant")
     parent.emit("test.parent")
     child.emit("test.child")
-    lines = [json.loads(l) for l in capsys.readouterr().out.strip().splitlines()]
-    parent_line = next(l for l in lines if l["event"] == "test.parent")
-    child_line = next(l for l in lines if l["event"] == "test.child")
+    lines = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
+    parent_line = next(line for line in lines if line["event"] == "test.parent")
+    child_line = next(line for line in lines if line["event"] == "test.child")
     # Parent must not have child's extra context.
     assert "tenant_id" not in parent_line
     assert child_line["tenant_id"] == "child-tenant"

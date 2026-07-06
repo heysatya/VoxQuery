@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from typing import Any
 import asyncio
 import threading
 from datetime import UTC, datetime
@@ -188,30 +188,25 @@ class PipelineOrchestrator:
         return turn
 
     def _schedule_pipeline_task(self, coroutine, session_id: UUID) -> None:
-        thread = threading.Thread(
-            target=lambda: asyncio.run(coroutine),
-            name=f"pipeline-{session_id}",
-            daemon=True,
-        )
-        thread.start()
+        asyncio.create_task(coroutine, name=f"pipeline-{session_id}")
 
     async def _run_turn_background(self, session, turn: TurnRecord, claims: AuthClaims) -> None:
         await asyncio.sleep(0.05)
-        trace = tracer.start_trace(turn)
-        try:
-            await self._run_until_confidence_or_result(session, turn, claims, trace)
-        except Exception as exc:
-            await self.events.publish(
-                session.session_id,
-                PipelineErrorEvent(
-                    turn_id=turn.turn_id,
-                    code=ErrorCode.internal_error.value,
-                    message=ERROR_MESSAGES[ErrorCode.internal_error],
-                ),
-            )
-            raise exc
-        finally:
-            self._in_flight.discard(session.session_id)
+        with tracer.start_trace(turn) as trace:
+            try:
+                await self._run_until_confidence_or_result(session, turn, claims, trace)
+            except Exception as exc:
+                await self.events.publish(
+                    session.session_id,
+                    PipelineErrorEvent(
+                        turn_id=turn.turn_id,
+                        code=ErrorCode.internal_error.value,
+                        message=ERROR_MESSAGES[ErrorCode.internal_error],
+                    ),
+                )
+                raise exc
+            finally:
+                self._in_flight.discard(session.session_id)
 
     async def _complete_turn_background(
         self,
@@ -224,29 +219,29 @@ class PipelineOrchestrator:
         clarification: AuditClarification | None = None
     ) -> None:
         await asyncio.sleep(0.05)
-        trace = tracer.start_trace(turn)  # Create a trace if it didn't exist or re-use turn_id
-        try:
-            await self._complete_turn(
-                session,
-                turn,
-                claims,
-                trace,
-                resolved_metric=resolved_metric,
-                clarification_triggered=clarification_triggered,
-                clarification=clarification
-            )
-        except Exception as exc:
-            await self.events.publish(
-                session.session_id,
-                PipelineErrorEvent(
-                    turn_id=turn.turn_id,
-                    code=ErrorCode.internal_error.value,
-                    message=ERROR_MESSAGES[ErrorCode.internal_error],
-                ),
-            )
-            raise exc
-        finally:
-            self._in_flight.discard(session.session_id)
+        with tracer.start_trace(turn) as trace:  # Create a trace if it didn't exist or re-use turn_id
+            try:
+                await self._complete_turn(
+                    session,
+                    turn,
+                    claims,
+                    trace,
+                    resolved_metric=resolved_metric,
+                    clarification_triggered=clarification_triggered,
+                    clarification=clarification
+                )
+            except Exception as exc:
+                await self.events.publish(
+                    session.session_id,
+                    PipelineErrorEvent(
+                        turn_id=turn.turn_id,
+                        code=ErrorCode.internal_error.value,
+                        message=ERROR_MESSAGES[ErrorCode.internal_error],
+                    ),
+                )
+                raise exc
+            finally:
+                self._in_flight.discard(session.session_id)
 
     async def _run_until_confidence_or_result(self, session, turn: TurnRecord, claims: AuthClaims, trace: Any = None) -> None:
         tracer.span_stt_capture(trace, turn.raw_transcript, turn.user_input, turn.deepgram_confidence_raw)

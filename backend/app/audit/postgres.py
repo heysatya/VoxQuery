@@ -86,7 +86,7 @@ class PostgresAuditStore(AuditStore):
             self._queue = asyncio.Queue()
         
         try:
-            self._pool = await asyncpg.create_pool(self.dsn, min_size=1, max_size=5)
+            self._pool = await asyncpg.create_pool(self.dsn, min_size=1, max_size=5, statement_cache_size=0)
         except Exception as e:
             logger.error(f"Failed to create asyncpg pool for audit store: {e}")
             return

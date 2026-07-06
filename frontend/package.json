@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "lint": "next lint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "start": "next start"
   },
   "engines": {
     "node": ">=20.9.0 <21"

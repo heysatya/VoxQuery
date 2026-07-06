@@ -36,7 +36,13 @@ class Settings(BaseSettings):
         default="http://localhost:3000,http://127.0.0.1:3000",
         alias="BACKEND_CORS_ORIGINS",
     )
-    canonical_sql_model: str = "claude-sonnet-4-20250514"
+    canonical_sql_model: str = Field(default="claude-haiku-4-5-20251001", alias="CANONICAL_SQL_MODEL")
+    llm_provider: str = Field(default="fake", alias="LLM_PROVIDER")
+    anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
+    rag_provider: str = Field(default="fake", alias="RAG_PROVIDER")
+    openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    warehouse_provider: str = Field(default="fake", alias="WAREHOUSE_PROVIDER")
+
 
     @field_validator("auth_mode")
     @classmethod

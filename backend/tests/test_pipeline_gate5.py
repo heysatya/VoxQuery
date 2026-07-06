@@ -3,7 +3,11 @@ from app.services.pipeline import PipelineOrchestrator
 from app.core.session import InMemorySessionStore
 from app.services.events import PipelineEventBus
 from app.audit.store import AuditStore
-
+import uuid
+import pytest
+from unittest.mock import patch
+from app.models.contracts import AuthClaims, QueryRequest, SchemaChunk, ResultPayload, ResultShape, ChartType
+import asyncio
 def test_pipeline_injects_audit_store():
     sessions = InMemorySessionStore()
     events = PipelineEventBus()
@@ -11,12 +15,6 @@ def test_pipeline_injects_audit_store():
     
     pipeline = PipelineOrchestrator(sessions, events, audit)
     assert pipeline.audit == audit
-
-import uuid
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
-from app.models.contracts import AuthClaims, TurnRecord, QueryRequest, SchemaChunk, ResultPayload, ResultShape, ChartType
-import asyncio
 
 @pytest.mark.asyncio
 async def test_pipeline_enqueues_turn_with_identity():

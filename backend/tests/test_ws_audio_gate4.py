@@ -1,12 +1,11 @@
 import json
 from uuid import uuid4
-import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.config import get_settings
 from app.core.stt import DeepgramUnavailableError
-from app.models.contracts import FinalTranscriptEvent, InterimTranscriptEvent
+from app.models.contracts import InterimTranscriptEvent
 
 client = TestClient(app)
 TENANT_ID = "00000000-0000-0000-0000-000000000101"

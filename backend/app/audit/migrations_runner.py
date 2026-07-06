@@ -6,7 +6,7 @@ import asyncpg
 MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "db" / "migrations"
 
 async def run_migrations(dsn: str) -> None:
-    conn = await asyncpg.connect(dsn)
+    conn = await asyncpg.connect(dsn, statement_cache_size=0)
     try:
         await conn.execute(
             """

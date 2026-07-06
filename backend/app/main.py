@@ -22,7 +22,12 @@ from app.models.contracts import ApiError, ErrorCode, ErrorEnvelope, ERROR_MESSA
 from app.services.events import PipelineEventBus
 from app.services.pipeline import PipelineOrchestrator
 from app.services.telemetry import StructuredLogger
-
+from app.llm.claude import ClaudeAdapter
+from app.rag.pgvector import PgVectorSchemaRetriever
+from app.warehouse.snowflake import SnowflakeWarehouseConnector
+import asyncpg
+from anthropic import AsyncAnthropic
+from langfuse.openai import AsyncOpenAI
 settings = get_settings()
 settings.validate_startup()
 logger = logging.getLogger("voxquery.api")
@@ -59,13 +64,48 @@ if settings.supabase_database_url:
 else:
     audit_store = NoopAuditStore()
 
+schema_retriever = None
+llm_adapter = None
+warehouse_connector = None
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if settings.supabase_database_url:
         await run_migrations(settings.supabase_database_url)
+    
+    global schema_retriever, llm_adapter, warehouse_connector
+    
+    if settings.rag_provider == "pgvector" and settings.supabase_database_url:
+        pool = await asyncpg.create_pool(settings.supabase_database_url, min_size=1, max_size=4, statement_cache_size=0)
+        openai_client = AsyncOpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else AsyncOpenAI()
+        schema_retriever = PgVectorSchemaRetriever(openai_client=openai_client, db_pool=pool)
+        
+    if settings.llm_provider == "claude":
+        anthropic_client = AsyncAnthropic(api_key=settings.anthropic_api_key) if settings.anthropic_api_key else AsyncAnthropic()
+        llm_adapter = ClaudeAdapter(client=anthropic_client)
+        
+    if settings.warehouse_provider == "snowflake":
+        # Snowflake doesn't need an async initialization pool for this MVP slice
+        # The connector will handle it during execute_readonly
+        warehouse_connector = SnowflakeWarehouseConnector(dsn="dummy_dsn")
+        
     await audit_store.start()
+    
+    # Update pipeline with initialized providers
+    app.state.pipeline = PipelineOrchestrator(
+        sessions=app.state.sessions,
+        events=app.state.events,
+        audit=app.state.audit,
+        settings=settings,
+        schema=schema_retriever,
+        llm=llm_adapter,
+        warehouse=warehouse_connector,
+    )
+    
     yield
     await audit_store.stop()
+    if schema_retriever and getattr(schema_retriever, "pool", None):
+        await schema_retriever.pool.close()
 
 app = FastAPI(title="VoxQuery Voice Subsystem", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
@@ -79,6 +119,7 @@ app.add_middleware(
 app.state.audit = audit_store
 app.state.sessions = build_session_store(settings=settings)
 app.state.events = PipelineEventBus()
+# The pipeline is fully initialized in the lifespan context now.
 app.state.pipeline = PipelineOrchestrator(
     sessions=app.state.sessions,
     events=app.state.events,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from uuid import UUID
 
 from app.models.contracts import ChartType, ResultPayload, ResultShape, SchemaChunk

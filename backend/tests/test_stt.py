@@ -16,6 +16,10 @@ import pytest
 from app.config import Settings
 from app.core.stt import DeepgramSttProvider, FakeSttProvider, build_stt_provider
 from app.models.contracts import FinalTranscriptEvent, InterimTranscriptEvent
+from unittest.mock import AsyncMock, patch
+import asyncio
+import json
+from app.services.telemetry import StructuredLogger
 
 
 # ---------------------------------------------------------------------------
@@ -139,11 +143,6 @@ async def test_fake_provider_emits_single_interim_across_multiple_frames():
 # ---------------------------------------------------------------------------
 # DeepgramSttProvider Slice 4 behaviour
 # ---------------------------------------------------------------------------
-
-from unittest.mock import AsyncMock, patch
-import asyncio
-import json
-from app.services.telemetry import StructuredLogger
 
 class MockDeepgramWS:
     def __init__(self, messages_to_yield, throw_on_close=False):

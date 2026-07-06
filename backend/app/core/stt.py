@@ -72,7 +72,6 @@ class DeepgramSttProvider(SttProvider):
         import json
         import asyncio
         import websockets
-        from websockets.exceptions import ConnectionClosed
 
         url = "wss://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&encoding=linear16&sample_rate=16000&channels=1&interim_results=true"
         headers = {"Authorization": f"Token {self._api_key}"}

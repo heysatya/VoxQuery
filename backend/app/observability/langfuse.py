@@ -1,8 +1,7 @@
-import json
-import logging
 from uuid import UUID
 from typing import Any
 
+import contextlib
 from langfuse import Langfuse, propagate_attributes
 from app.services.telemetry import emit
 from app.models.contracts import TurnRecord
@@ -27,12 +26,15 @@ class LangfuseTracer:
             emit("langfuse.error", tier=2, error=str(e), func=func.__name__)
             return None
 
+    @contextlib.contextmanager
     def start_trace(self, turn: TurnRecord) -> Any:
         # Create root trace. trace.id = str(turn.turn_id)
         if self.langfuse is None:
-            return None
+            yield None
+            return
         
-        def _create_trace():
+        is_yielded = False
+        try:
             with propagate_attributes(
                 user_id=str(turn.user_id) if turn.user_id else None,
                 session_id=str(turn.session_id) if turn.session_id else None,
@@ -42,15 +44,22 @@ class LangfuseTracer:
                     "input_modality": turn.input_modality,
                 }
             ):
-                return self.langfuse.start_observation(
+                with self.langfuse.start_as_current_observation(
                     name="voice_turn",
                     as_type="span",
                     trace_context={"trace_id": turn.turn_id.hex}
-                )
-        return self._safe_call(_create_trace)
+                ) as trace:
+                    is_yielded = True
+                    yield trace
+        except Exception as e:
+            if is_yielded:
+                raise
+            emit("langfuse.error", tier=2, error=str(e), func="start_trace")
+            yield None
 
     def span_stt_capture(self, trace, raw_transcript: str | None, submitted_text: str, confidence: float | None):
-        if not trace: return
+        if not trace:
+            return
         import difflib
         edit_distance_ratio = None
         if raw_transcript and submitted_text:
@@ -71,7 +80,8 @@ class LangfuseTracer:
         self._safe_call(_span)
 
     def span_memory_retrieval(self, trace, truncated: bool, turns_dropped: int, token_count: int):
-        if not trace: return
+        if not trace:
+            return
         def _span():
             child = trace.start_observation(
                 name="memory_retrieval",
@@ -86,7 +96,8 @@ class LangfuseTracer:
         self._safe_call(_span)
 
     def span_history_injection(self, trace, total_prompt_tokens: int):
-        if not trace: return
+        if not trace:
+            return
         def _span():
             child = trace.start_observation(
                 name="history_injection",
@@ -99,7 +110,8 @@ class LangfuseTracer:
         self._safe_call(_span)
 
     def span_ambiguity_detection(self, trace, signals_detected: list, signals_suppressed: list, dominant_signal: str | None):
-        if not trace: return
+        if not trace:
+            return
         def _span():
             child = trace.start_observation(
                 name="ambiguity_detection",
@@ -114,7 +126,8 @@ class LangfuseTracer:
         self._safe_call(_span)
 
     def span_confidence_computation(self, trace, composite_score: float, confidence_tier: str, clarification_triggered: bool, formula_weights: dict):
-        if not trace: return
+        if not trace:
+            return
         def _span():
             child = trace.start_observation(
                 name="confidence_computation",
