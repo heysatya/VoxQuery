@@ -327,7 +327,11 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
           };
           
           source.connect(worklet);
-          worklet.connect(audioContext.destination); // Required for worklet to run in some browsers
+          
+          const zeroGain = audioContext.createGain();
+          zeroGain.gain.value = 0;
+          worklet.connect(zeroGain);
+          zeroGain.connect(audioContext.destination); // Required for worklet to run in some browsers
           
           setRecordingState("recording");
           setNotice("Recording...");

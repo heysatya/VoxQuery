@@ -90,6 +90,7 @@ class MockAudioContext {
   destination = {};
   
   createMediaStreamSource = vi.fn().mockReturnValue({ connect: vi.fn() });
+  createGain = vi.fn().mockReturnValue({ gain: { value: 1 }, connect: vi.fn() });
   close = vi.fn().mockResolvedValue(undefined);
   suspend = vi.fn().mockResolvedValue(undefined);
   
@@ -479,6 +480,33 @@ describe("HomePage", () => {
 
     await waitFor(() => expect(screen.getByText(/unavailable|error/i)).toBeInTheDocument());
     expect(screen.getAllByText("idle").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("prevents audio echo by routing through a zero-gain node before the destination", async () => {
+    const fakeStream = { getTracks: () => [] };
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockResolvedValue(fakeStream) },
+      writable: true,
+      configurable: true
+    });
+
+    render(<HomePage />);
+    await waitFor(() => expect(screen.getByText("Session active")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+
+    await waitFor(() => expect(audioSocket()).toBeTruthy());
+    await waitFor(() => expect(MockAudioWorkletNode.instances).toHaveLength(1));
+    
+    const context = MockAudioContext.instances[0];
+    const worklet = MockAudioWorkletNode.instances[0];
+    
+    expect(context.createGain).toHaveBeenCalled();
+    const mockGainNode = context.createGain.mock.results[0].value;
+    
+    expect(mockGainNode.gain.value).toBe(0);
+    expect(worklet.connect).toHaveBeenCalledWith(mockGainNode);
+    expect(mockGainNode.connect).toHaveBeenCalledWith(context.destination);
   });
 });
 

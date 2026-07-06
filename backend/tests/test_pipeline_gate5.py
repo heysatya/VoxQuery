@@ -73,6 +73,7 @@ async def test_pipeline_timeout_enqueues_clarification():
     pipeline.llm = MagicMock()
     generation = SqlGenerationResult(sql="SELECT 1", llm_self_confidence=0.5, validation_passed=True)
     pipeline.llm.generate_sql = AsyncMock(return_value=generation)
+    pipeline.llm.generate_clarification = AsyncMock(return_value=("Could you clarify?", ["A", "B"]))
     
     with patch("app.services.pipeline.detect_ambiguity") as mock_detect, \
          patch("app.services.pipeline.compute_confidence") as mock_conf:

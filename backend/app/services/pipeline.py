@@ -289,7 +289,7 @@ class PipelineOrchestrator:
         turn.latency_ms = int((perf_counter() - started) * 1000)
 
         if confidence.clarification_triggered and ambiguity.dominant_signal is not None:
-            question, options = clarification_options_for_signal()
+            question, options = await self.llm.generate_clarification(ambiguity.dominant_signal)
             if len(options) >= 2:
                 turn.clarification_triggered = True
                 self.sessions.set_pending_clarification(
