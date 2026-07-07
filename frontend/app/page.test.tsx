@@ -97,6 +97,12 @@ class MockAudioContext {
   
   createMediaStreamSource = vi.fn().mockReturnValue({ connect: vi.fn() });
   createGain = vi.fn().mockReturnValue({ gain: { value: 1 }, connect: vi.fn() });
+  createAnalyser = vi.fn().mockReturnValue({ 
+    fftSize: 256, 
+    frequencyBinCount: 128, 
+    connect: vi.fn(), 
+    getByteFrequencyData: vi.fn() 
+  });
   close = vi.fn().mockResolvedValue(undefined);
   suspend = vi.fn().mockResolvedValue(undefined);
   
@@ -123,6 +129,8 @@ describe("HomePage", () => {
     vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
     vi.stubGlobal("AudioContext", MockAudioContext);
     vi.stubGlobal("webkitAudioContext", MockAudioContext);
+    (window as any).AudioContext = MockAudioContext;
+    (window as any).webkitAudioContext = MockAudioContext;
     vi.stubGlobal("AudioWorkletNode", MockAudioWorkletNode);
     vi.stubGlobal(
       "fetch",
@@ -187,7 +195,7 @@ describe("HomePage", () => {
     await waitFor(() => expect(pipelineSocket()).toBeTruthy());
     expect(pipelineSocket()?.url).toContain("session_id=stored-session");
     expect(sessionCalls).toBe(0);
-    expect(screen.getByText("Session active")).toBeInTheDocument();
+    expect(screen.getByLabelText("Ask a data question")).not.toBeDisabled();
   });
 
   it("keeps transcript editable and renders clarification from the pipeline event", async () => {
@@ -233,11 +241,10 @@ describe("HomePage", () => {
   it("fake voice uses the audio stream and fills an editable transcript", async () => {
     render(<HomePage />);
     const input = await screen.findByLabelText("Ask a data question");
-    fireEvent.click(screen.getByRole("button", { name: "Fake voice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Demo voice" }));
 
     await waitFor(() => expect(audioSocket()).toBeTruthy());
     await waitFor(() => expect(input).toHaveValue("Show revenue by region"));
-    expect(await screen.findByText("Raw transcript: Show revenue by region")).toBeInTheDocument();
   });
 
   it("clarification escape returns to edit flow without a result", async () => {
@@ -254,10 +261,10 @@ describe("HomePage", () => {
     });
 
     expect(await screen.findByText("Which revenue metric did you mean?")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "None of these - let me rephrase" }));
+    fireEvent.click(screen.getByRole("button", { name: "None of these — let me rephrase" }));
 
     expect(await screen.findByText("Clarification escaped. Edit your question and submit again.")).toBeInTheDocument();
-    expect(screen.queryByText("Result")).not.toBeInTheDocument();
+    expect(screen.queryByText("Enterprise leads net revenue.")).not.toBeInTheDocument();
   });
 
   it("shows a result after result_ready and handles duplicate feedback as a notice", async () => {
@@ -267,8 +274,8 @@ describe("HomePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Submit" }));
     await emitPipeline({ type: "result_ready", turn_id: "turn-1" });
 
-    expect(await screen.findByText("Result")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Thumbs down" }));
+    expect(await screen.findByText("Enterprise leads net revenue.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Flag this result" }));
     expect(await screen.findByText("Feedback recorded for threshold tuning.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Feedback recorded" }));
     expect(await screen.findByText("Feedback already recorded for this query.")).toBeInTheDocument();
@@ -276,8 +283,8 @@ describe("HomePage", () => {
 
   it("renders four stable status cells including local fake mode", async () => {
     render(<HomePage />);
-    expect(await screen.findByText("local fake mode")).toBeInTheDocument();
-    expect(screen.getByText("Session active")).toBeInTheDocument();
+    expect(await screen.findByText("Local fake mode active. No external credentials are required.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Ask a data question")).not.toBeDisabled();
   });
 
   // ------------------------------------------------------------------
@@ -297,7 +304,7 @@ describe("HomePage", () => {
 
     render(<HomePage />);
     // Wait for session to be ready before clicking.
-    await waitFor(() => expect(screen.getByText("Session active")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Ask a data question")).not.toBeDisabled());
 
     fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
 
@@ -309,7 +316,7 @@ describe("HomePage", () => {
     const input = screen.getByLabelText("Ask a data question");
     expect(input).not.toBeDisabled();
     // recordingState must stay idle (pipelineStage also shows 'idle'; both are expected).
-    expect(screen.getAllByText("idle").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole("button", { name: "Start recording" })).not.toBeDisabled();
     
     // Assert telemetry POST
     expect(telemetryCalls.length).toBeGreaterThan(0);
@@ -328,12 +335,12 @@ describe("HomePage", () => {
     });
 
     render(<HomePage />);
-    await waitFor(() => expect(screen.getByText("Session active")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Ask a data question")).not.toBeDisabled());
 
     fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
 
-    // After permission is granted the UI enters connecting.
-    await waitFor(() => expect(screen.getByText("connecting")).toBeInTheDocument());
+    // After permission is granted the UI enters connecting, then recording.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Stop recording" })).toBeInTheDocument());
     
     // Assert telemetry POST
     expect(telemetryCalls.length).toBeGreaterThan(0);
@@ -351,7 +358,7 @@ describe("HomePage", () => {
     });
 
     render(<HomePage />);
-    await waitFor(() => expect(screen.getByText("Session active")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Ask a data question")).not.toBeDisabled());
 
     fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
 
@@ -372,13 +379,10 @@ describe("HomePage", () => {
 
     render(<HomePage />);
     const input = await screen.findByLabelText("Ask a data question");
-    fireEvent.click(screen.getByRole("button", { name: "Fake voice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Demo voice" }));
 
     await waitFor(() => expect(audioSocket()).toBeTruthy());
     await waitFor(() => expect(input).toHaveValue("Show revenue by region"));
-    expect(
-      await screen.findByText("Raw transcript: Show revenue by region")
-    ).toBeInTheDocument();
   });
 
   // ------------------------------------------------------------------
@@ -394,13 +398,13 @@ describe("HomePage", () => {
     });
 
     render(<HomePage />);
-    await waitFor(() => expect(screen.getByText("Session active")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Ask a data question")).not.toBeDisabled());
 
     fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
 
     // Wait for the WS to be opened and AudioWorklet to start
     await waitFor(() => expect(audioSocket()).toBeTruthy());
-    await waitFor(() => expect(MockAudioContext.instances).toHaveLength(1));
+    await waitFor(() => expect(MockAudioContext.instances.length).toBeGreaterThanOrEqual(1));
     expect(MockAudioWorkletNode.instances).toHaveLength(1);
     
     // Assert WS URL contains session and token
@@ -418,7 +422,7 @@ describe("HomePage", () => {
     });
 
     render(<HomePage />);
-    await waitFor(() => expect(screen.getByText("Session active")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Ask a data question")).not.toBeDisabled());
 
     fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
 
@@ -446,7 +450,7 @@ describe("HomePage", () => {
     });
 
     render(<HomePage />);
-    await waitFor(() => expect(screen.getByText("Session active")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Ask a data question")).not.toBeDisabled());
     const input = screen.getByLabelText("Ask a data question");
 
     fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
@@ -455,7 +459,8 @@ describe("HomePage", () => {
     const ws = audioSocket()!;
     ws.send = vi.fn();
 
-    fireEvent.click(screen.getByRole("button", { name: "Stop recording" }));
+    const stopButton = await screen.findByRole("button", { name: "Stop recording" });
+    fireEvent.click(stopButton);
     
     expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ type: "stop_recording" }));
     
@@ -465,7 +470,7 @@ describe("HomePage", () => {
     });
 
     await waitFor(() => expect(input).toHaveValue("Show revenue by region"));
-    expect(screen.getAllByText("idle").length).toBeGreaterThanOrEqual(1);
+    await waitFor(() => expect(screen.getByText("Transcript received. Review or edit before submitting.")).toBeInTheDocument());
   });
 
   it("WS error during recording shows notice and returns to idle", async () => {
@@ -477,7 +482,7 @@ describe("HomePage", () => {
     });
 
     render(<HomePage />);
-    await waitFor(() => expect(screen.getByText("Session active")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Ask a data question")).not.toBeDisabled());
 
     fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
     await waitFor(() => expect(audioSocket()).toBeTruthy());
@@ -488,7 +493,7 @@ describe("HomePage", () => {
     });
 
     await waitFor(() => expect(screen.getByText(/unavailable|error/i)).toBeInTheDocument());
-    expect(screen.getAllByText("idle").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole("button", { name: "Start recording" })).not.toBeDisabled();
   });
 
   it("prevents audio echo by routing through a zero-gain node before the destination", async () => {
@@ -500,14 +505,14 @@ describe("HomePage", () => {
     });
 
     render(<HomePage />);
-    await waitFor(() => expect(screen.getByText("Session active")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Ask a data question")).not.toBeDisabled());
 
     fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
 
     await waitFor(() => expect(audioSocket()).toBeTruthy());
     await waitFor(() => expect(MockAudioWorkletNode.instances).toHaveLength(1));
     
-    const context = MockAudioContext.instances[0];
+    const context = MockAudioContext.instances[MockAudioContext.instances.length - 1];
     const worklet = MockAudioWorkletNode.instances[0];
     
     expect(context.createGain).toHaveBeenCalled();
@@ -529,10 +534,10 @@ describe("HomePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Submit" }));
     await emitPipeline({ type: "result_ready", turn_id: "turn-1" });
 
-    expect(await screen.findByText("Result")).toBeInTheDocument();
+    expect(await screen.findByText("Enterprise leads net revenue.")).toBeInTheDocument();
     
     // The dropdown should be initialized with the LLM's recommended chart type ("bar")
-    const dropdown = screen.getByLabelText("Chart Type:") as HTMLSelectElement;
+    const dropdown = screen.getByLabelText("Chart Type") as HTMLSelectElement;
     expect(dropdown).toBeInTheDocument();
     expect(dropdown.value).toBe("bar");
 
@@ -553,7 +558,7 @@ describe("HomePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Submit" }));
     await emitPipeline({ type: "result_ready", turn_id: "turn-1" });
 
-    expect(await screen.findByText("Result")).toBeInTheDocument();
+    expect(await screen.findByText("Enterprise leads net revenue.")).toBeInTheDocument();
     
     const downloadBtn = screen.getByRole("button", { name: "Download CSV" });
     fireEvent.click(downloadBtn);
@@ -583,9 +588,9 @@ describe("HomePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Submit" }));
     await emitPipeline({ type: "result_ready", turn_id: "turn-medium" });
 
-    expect(await screen.findByText("Medium")).toBeInTheDocument();
+    expect(await screen.findByText("Medium confidence")).toBeInTheDocument();
     expect(
-      screen.getByText("I'm moderately confident — the query joined tables I'm less familiar with. Review the SQL before actioning.")
+      screen.getByText("I'm moderately confident — the query joined tables I'm less familiar with. You may want to review the SQL below.")
     ).toBeInTheDocument();
   });
 });

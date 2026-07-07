@@ -269,6 +269,7 @@ class ClarificationState(BaseModel):
     raw_transcript: str | None = None
     stt_confidence: float | None = None
     input_modality: InputModality = InputModality.text
+    ambiguous_term: str | None = None
 
 
 class VoiceSession(BaseModel):

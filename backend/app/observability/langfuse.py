@@ -142,6 +142,56 @@ class LangfuseTracer:
             child.end()
         self._safe_call(_span)
         
+    def span_rag_retrieval(self, trace, rag_score: float, chunk_count: int):
+        if not trace:
+            return
+        def _span():
+            child = trace.start_observation(
+                name="rag_retrieval",
+                as_type="span",
+                output={
+                    "rag_score": rag_score,
+                    "chunk_count": chunk_count
+                }
+            )
+            child.end()
+        self._safe_call(_span)
+
+    def span_clarification_issued(self, trace, question: str, options: list[str]):
+        if not trace:
+            return
+        def _span():
+            child = trace.start_observation(
+                name="clarification_issued",
+                as_type="span",
+                output={
+                    "question": question,
+                    "options": options
+                }
+            )
+            child.end()
+        self._safe_call(_span)
+
+    def span_turn_completed(self, trace, latency_ms: int, success: bool = True):
+        if not trace:
+            return
+        def _span():
+            trace.update(metadata={
+                **(trace.metadata or {}),
+                "latency_ms": latency_ms,
+                "success": success
+            })
+            child = trace.start_observation(
+                name="turn_completed",
+                as_type="span",
+                output={
+                    "latency_ms": latency_ms,
+                    "success": success
+                }
+            )
+            child.end()
+        self._safe_call(_span)
+        
     def score_feedback(self, turn_id: UUID, composite_score: float, confidence_tier: str, clarification_triggered: bool, option_selected: str | None):
         if self.langfuse is None:
             return

@@ -15,10 +15,10 @@ class ClaudeAdapter(LlmAdapter):
         self.model_name = get_settings().canonical_sql_model
 
     @observe(as_type="generation", capture_input=False, capture_output=False)
-    async def generate_sql(self, submitted_text: str, *, resolved_metric: str | None = None) -> SqlGenerationResult:
+    async def generate_sql(self, submitted_text: str, *, resolved_metric: str | None = None, feedback: str | None = None) -> SqlGenerationResult:
         get_client().update_current_generation(
             name="claude-sql-generation",
-            input={"submitted_text": submitted_text, "resolved_metric": resolved_metric},
+            input={"submitted_text": submitted_text, "resolved_metric": resolved_metric, "feedback": feedback},
             model=self.model_name
         )
         prompt = f"""
@@ -30,6 +30,8 @@ class ClaudeAdapter(LlmAdapter):
         """
         if resolved_metric:
             prompt += f"\nNote: The user clarified they want the '{resolved_metric}' metric."
+        if feedback:
+            prompt += f"\nFeedback from previous attempt (FIX THIS): {feedback}"
 
         response = await self.client.messages.create(
             model=self.model_name,
@@ -50,6 +52,7 @@ class ClaudeAdapter(LlmAdapter):
 
         # Validate with sqlglot
         validation_passed = True
+        validation_error = None
         try:
             # Parse as snowflake dialect
             parsed = sqlglot.parse_one(sql, read="snowflake")
@@ -57,15 +60,17 @@ class ClaudeAdapter(LlmAdapter):
             # Simple check for read-only
             if not isinstance(parsed, sqlglot.exp.Select):
                 validation_passed = False
+                validation_error = "Generated SQL is not a SELECT statement."
                 
         except Exception as e:
             logger.warning(f"SQL validation failed: {e}")
             validation_passed = False
+            validation_error = f"SQL parsing failed: {e}"
 
         # In a real app we might ask Claude for confidence score, here we fake 0.95 if it passed validation
         confidence = 0.95 if validation_passed else 0.4
         
-        result = SqlGenerationResult(sql=sql, llm_self_confidence=confidence, validation_passed=validation_passed)
+        result = SqlGenerationResult(sql=sql, llm_self_confidence=confidence, validation_passed=validation_passed, validation_error=validation_error)
         get_client().update_current_generation(output={"sql": result.sql, "confidence": result.llm_self_confidence, "validation_passed": validation_passed})
         return result
 

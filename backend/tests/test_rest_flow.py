@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.config import get_settings
 from app.main import app
+from unittest.mock import patch
 
 
 client = TestClient(app)
@@ -39,13 +40,12 @@ def test_delete_session_success():
     assert query.json()["error"]["code"] == "session_not_found"
 
 def test_delete_session_not_found():
-    response = client.delete(f"/api/session/00000000-0000-0000-0000-000000000999")
+    response = client.delete("/api/session/00000000-0000-0000-0000-000000000999")
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "session_not_found"
 
 
 
-from unittest.mock import patch
 
 @patch("app.observability.langfuse.LangfuseTracer.score_feedback")
 def test_text_query_clarification_then_result_and_feedback(mock_score_feedback):

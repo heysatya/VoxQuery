@@ -1,5 +1,14 @@
 import logging
 import re
+import warnings
+
+from dotenv import load_dotenv
+load_dotenv()
+
+warnings.filterwarnings(
+    "ignore",
+    message="Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater."
+)
 
 from contextlib import asynccontextmanager
 

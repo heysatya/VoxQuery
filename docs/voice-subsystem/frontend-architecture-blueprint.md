@@ -12,7 +12,7 @@ The refactor must split that monolith into:
 2. Pure presentation components that render state and emit user intent.
 3. A lightweight page shell that handles auth gating and animated layout composition.
 
-The redesign must feel like a ground-up voice-first interface, but it must not discard working MVP capabilities.
+The redesign must feel like a ground-up voice-first interface following the **"Ambient Intelligence"** philosophy. It must look premium, discarding technical dashboards, sidebars, and explicit pipeline trackers in favor of a clean, narrative-driven 3-state flow (Ready → Thinking → Insight). It must not discard working MVP capabilities.
 
 ## Current Repo Reality
 
@@ -35,6 +35,30 @@ The existing frontend already includes important behavior that must survive:
 
 The redesign is not allowed to treat these as disposable MVP details. They are part of the product contract unless explicitly replaced by equivalent behavior.
 
+## The Three States of VoxQuery
+
+The UI is driven by three distinct visual states with graceful animated transitions between them.
+
+1. **State 1: "Ready" — The Listening Concierge**
+   - The Orb is large, centered, and breathing with a subtle gradient.
+   - A warm, human prompt: "What would you like to know?"
+   - 3 pre-seeded starter questions as pill buttons.
+   - Minimal text input floating at the bottom as a fallback.
+   - Tiny status bar at the bottom: connection status, voice toggle, reset.
+
+2. **State 2: "Thinking" — The Processing State**
+   - The Orb shifts to a purposeful, directional animation and an amber color.
+   - The user's question (transcript) is displayed prominently.
+   - A human-readable status line replaces the technical pipeline tracker (e.g., "Analyzing your data...").
+
+3. **State 3: "Insight" — The Answer**
+   - Question Echo with a miniaturized orb anchored at the top.
+   - **InsightNarrative**: The most important element. Large, beautiful typography for the storytelling text, with a TTS indicator.
+   - **DataGlassPanel**: Clean Recharts visualization in a frosted glass card below the narrative.
+   - Trust Layer inside the chart card: Confidence tier, chart rationale, collapsed "View SQL" toggle, CSV download.
+   - **FollowUpSuggestions**: 2-3 proactive next questions as pill buttons.
+   - Persistent text input at the bottom.
+
 ## Target Directory Structure
 
 ```text
@@ -52,6 +76,9 @@ frontend/
 │       │   └── ClarificationOverlay.tsx
 │       ├── query/
 │       │   └── QueryDock.tsx
+│       ├── insight/
+│       │   ├── InsightNarrative.tsx
+│       │   └── FollowUpSuggestions.tsx
 │       └── ui/
 │           └── local shadcn/ui-style primitives
 ├── lib/
@@ -62,357 +89,109 @@ frontend/
 
 `page.tsx` must become a composition shell. It may handle auth gating and layout state, but it must not contain backend calls, WebSocket setup, Web Audio setup, session lifecycle code, or backend payload construction.
 
-## UI Foundation
+## UI Foundation & Visual Design Language
 
 The frontend must use:
 
 - TailwindCSS for styling.
 - Framer Motion for animation and spatial layout transitions.
+- React Markdown for narrative text formatting.
 - shadcn/ui-style local primitives for common controls.
 - Lucide icons where icons improve clarity.
 
-If missing, add:
-
-- Tailwind config.
-- PostCSS config.
-- Tailwind directives in the global stylesheet.
-- `components.json` if using the shadcn CLI.
-- A `cn` utility, typically backed by `clsx` and `tailwind-merge`.
-- Minimal local primitives under `frontend/app/components/ui`.
-
-Do not install a runtime package named `shadcn`.
+**Design Aesthetics ("Private members' club" dark mode):**
+- **Backgrounds:** Near-black base (`#0C0D11`) with elevated surfaces (`#161822`, `#1E2030`).
+- **Typography:** `Inter` for standard text and data, `JetBrains Mono` for SQL. High contrast for primary text, softer for secondary.
+- **Glassmorphism:** Frosted glass effect for cards and panels.
+- **Accents:** Blue for idle/listening, Amber for thinking, Green for success, Rose for recording/errors.
+- **Micro-Animations:** Slow breathing for idle orb, directional animations for thinking, staggered fade-ins for charts and follow-ups.
 
 ## Headless Engine Hook
 
-Create:
-
-```text
-frontend/app/hooks/useVoxQuerySession.ts
-```
-
-The hook owns all stateful behavior and all backend interaction.
-
-It must export:
-
-```ts
-import type {
-  ClarificationState,
-  LastResult,
-  MicPermission,
-  RecordingState,
-  SessionState
-} from "../../lib/types";
-
-export type VoxQueryAuthMode = "fake" | "clerk";
-
-export type VoxQueryAuthRelay = {
-  mode: VoxQueryAuthMode;
-  ready: boolean;
-  signedIn: boolean;
-  getToken: () => Promise<string | null>;
-};
-
-export type VoxQueryEngine = {
-  authMode: VoxQueryAuthMode;
-  modeLabel: string;
-  isReady: boolean;
-  session: SessionState;
-
-  submittedText: string;
-  partialTranscript: string;
-  pipelineInFlight: boolean;
-  pipelineStage: string | null;
-  lastResult: LastResult | null;
-  clarification: ClarificationState;
-  notice: string;
-
-  micPermission: MicPermission;
-  recordingState: RecordingState;
-  audioAnalyserNode: AnalyserNode | null;
-  isMuted: boolean;
-
-  feedbackSubmitted: boolean;
-
-  setSubmittedText: (value: string) => void;
-  startRecording: () => Promise<void>;
-  stopRecording: () => void;
-  toggleRecording: () => Promise<void>;
-  startFakeVoice: () => Promise<void>;
-  submitCurrentQuery: () => Promise<void>;
-  submitQuery: (text: string) => Promise<void>;
-  submitClarification: (selection: string | null) => Promise<void>;
-  submitFeedback: (rating?: -1) => Promise<void>;
-  resetConversation: () => Promise<void>;
-  muteTTS: () => void;
-  unmuteTTS: () => void;
-};
-
-export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine;
-```
+Create `frontend/app/hooks/useVoxQuerySession.ts`.
+The hook owns all stateful behavior and all backend interaction. It exposes state variables (`recordingState`, `pipelineStage`, `lastResult`, etc.) and actions (`startRecording`, `submitQuery`, `muteTTS`, etc.).
 
 ## Required Engine Behavior
 
 The hook must preserve these behaviors:
-
 - Create a session through the existing session API.
 - Resume a stored session from `window.sessionStorage.getItem("voxquery_session_id")`.
 - Store only `voxquery_session_id`, not `conversation_id`.
 - Open the pipeline WebSocket when auth and session are ready.
-- On pipeline close code `4002`, clear the stored session and create a new one.
-- Probe microphone permission when supported.
-- Send existing mic permission telemetry on grant or denial.
+- Probe microphone permission when supported and send telemetry.
 - Use the existing AudioWorklet path for PCM streaming.
 - Send binary PCM frames over the audio WebSocket.
-- Send `{ type: "stop_recording" }` when recording stops.
-- Keep the audio WebSocket open long enough to receive the final transcript.
-- Set both `partialTranscript` and `submittedText` from the final transcript.
-- Preserve fake voice through the existing audio WebSocket path.
-- Submit text queries through the existing query API.
-- Handle pipeline progress events.
-- Handle clarification request events.
-- Handle clarification timeout warning events.
-- Handle result-ready events by fetching the result through the existing result API.
+- Handle pipeline progress, clarification, and result-ready events.
+- Fetch the result through the existing result API.
 - Start TTS playback after result load using the existing TTS WebSocket.
-- Close TTS playback resources when muted.
-- Submit clarification choices through the existing clarification API.
-- Submit feedback through the existing feedback API using `rating: -1`.
-- Prevent duplicate feedback submission from the UI.
-
-## Audio Visualizer Contract
-
-The hook must expose a live `AnalyserNode` during real microphone recording.
-
-The analyser must not break PCM streaming.
-
-A valid audio graph is:
-
-```text
-MediaStreamAudioSourceNode
-├── AnalyserNode
-└── AudioWorkletNode
-    └── zero-gain GainNode
-        └── audioContext.destination
-```
-
-Cleanup must:
-
-- Stop media tracks.
-- Disconnect the AudioWorklet.
-- Close or suspend the AudioContext as appropriate.
-- Close the audio WebSocket when appropriate.
-- Clear `audioAnalyserNode`.
+- Submit text queries, clarifications, and feedback (rating: -1) through existing APIs.
 
 ## Presentation Components
 
-Presentation components must receive props and callbacks only.
-
-They must not import `frontend/lib/api.ts`.
-They must not create sessions.
-They must not open WebSockets.
-They must not create AudioContexts.
-They must not construct backend payloads.
+Presentation components must receive props and callbacks only. They must not own backend lifecycles.
 
 ### VoiceVisualizer
+- Renders the primary hero voice orb.
+- Displays idle, connecting, recording, and processing states.
+- Uses `AnalyserNode` for live visualization.
+- Resizes dynamically based on the application state (large in Ready/Thinking, small in Insight).
 
-Purpose: primary hero voice orb.
-
-Props:
-
-```ts
-type VoiceVisualizerProps = {
-  state: RecordingState;
-  analyser: AnalyserNode | null;
-  disabled: boolean;
-  pipelineStage: string | null;
-  partialTranscript: string;
-  onPrimaryAction: () => void | Promise<void>;
-  onStop: () => void;
-};
-```
-
-Requirements:
-
-- Render as the visual and interaction center of the app.
-- Display idle, connecting, recording, and processing states.
-- Use the provided analyser for live visualization when available.
-- In recording state, the primary action should stop recording.
-- Otherwise, the primary action should start recording.
-- Never own backend or browser audio lifecycle.
+### InsightNarrative (NEW)
+- Renders the storytelling text returned by the backend.
+- Formats text using `react-markdown` with appropriate typography.
+- Displays TTS playing state.
 
 ### DataGlassPanel
+- Renders the data visualization (Chart or Table).
+- Includes Trust Layer: Confidence tier, chart rationale.
+- Includes Collapsed SQL View and CSV Download.
+- Incorporates feedback controls.
 
-Purpose: result display and result-level actions.
-
-Props:
-
-```ts
-type DataGlassPanelProps = {
-  result: LastResult;
-  feedbackSubmitted: boolean;
-  isMuted: boolean;
-  onFeedback: () => void | Promise<void>;
-  onMute: () => void;
-  onUnmute: () => void;
-};
-```
-
-Requirements:
-
-- Render confidence tier.
-- Render chart rationale.
-- Render result rows and columns reliably.
-- Render generated SQL behind a disclosure.
-- Render feedback control.
-- Render compact TTS mute/unmute control.
-- If no chart library exists, table rendering is sufficient and preferred over inventing new chart behavior.
+### FollowUpSuggestions (NEW)
+- Renders proactive follow-up questions as pill buttons.
+- On click, fires a new query.
 
 ### ClarificationOverlay
-
-Purpose: interruptive clarification state.
-
-Props:
-
-```ts
-type ClarificationOverlayProps = {
-  clarification: ClarificationState;
-  onResolve: (selection: string | null) => void | Promise<void>;
-};
-```
-
-Requirements:
-
-- Render question.
-- Render options.
-- Render countdown.
-- Render escape/rephrase action.
-- Escape action must call `onResolve(null)`.
+- Interruptive clarification state rendered as a dark glass card.
+- Renders conversational question, options, countdown, and escape action.
 
 ### QueryDock
-
-Purpose: secondary reliability controls.
-
-Props:
-
-```ts
-type QueryDockProps = {
-  value: string;
-  disabled: boolean;
-  isReady: boolean;
-  recordingState: RecordingState;
-  notice: string;
-  modeLabel: string;
-  onChange: (value: string) => void;
-  onSubmit: () => void | Promise<void>;
-  onFakeVoice: () => void | Promise<void>;
-  onResetConversation: () => void | Promise<void>;
-};
-```
-
-Requirements:
-
-- Provide editable text fallback.
-- Provide fake voice.
-- Provide reset/new conversation.
-- Show current notice.
-- Show compact readiness and auth-mode state.
-- Stay visually secondary to the orb.
+- Secondary reliability controls.
+- Provides editable text fallback, fake voice (for testing), and conversation reset.
+- Minimal and visually secondary to the main interface.
 
 ## Page Composition
 
-`frontend/app/page.tsx` must preserve the auth split:
-
-- In fake mode, pass a fake auth relay with token `"fake"`.
-- In Clerk mode, use `useAuth`.
-- If Clerk is loading, show an auth-loading state.
-- If Clerk is signed out, show sign-in UI.
-- If auth is ready and signed in, render the voice-first app shell.
-
-The voice-first shell must use Framer Motion for these states:
-
-- Idle: orb centered, QueryDock secondary.
-- Recording: orb active, transcript visible near orb.
-- Processing: orb remains central with pipeline stage visible.
-- Clarification: overlay appears above the main layout.
-- Result ready: orb shifts left and DataGlassPanel slides in from the right.
-- Reset: result, clarification, transcript, feedback, and pipeline state clear.
-
-The layout must include mobile fallbacks. Do not rely only on `50vw` desktop panels.
+`frontend/app/page.tsx` must preserve the auth split (Fake vs Clerk).
+The voice-first shell uses Framer Motion for transitioning between the 3 core states.
+The layout must include mobile fallbacks and not rely solely on desktop panels. Sidebars, technical pipeline trackers, and morning briefings from the original MVP are strictly removed.
 
 ## Backend Compatibility
 
 Do not change the behavior of:
-
-- `/api/session`
-- `/api/query`
-- `/api/clarification`
-- `/api/result/{turnId}`
-- `/api/feedback`
-- `/api/telemetry`
-- `/ws/pipeline`
-- `/ws/audio`
-- `/ws/tts`
+- `/api/session`, `/api/query`, `/api/clarification`, `/api/result/{turnId}`, `/api/feedback`, `/api/telemetry`
+- `/ws/pipeline`, `/ws/audio`, `/ws/tts`
 
 Do not change existing request or response shapes.
 
-In particular:
-
-- Feedback remains `rating: -1`.
-- Session storage key remains `voxquery_session_id`.
-- Stop recording message remains `{ type: "stop_recording" }`.
-- Fake token remains `"fake"` in fake mode.
-
 ## Test Requirements
 
-The refactor must update or add tests covering equivalent behavior.
-
-Required coverage:
-
-- Session creation stores only `voxquery_session_id`.
-- Stored session resumes without creating a replacement session.
-- Pipeline WebSocket opens with session and token.
-- Pipeline close code `4002` creates a new session.
-- Text fallback remains editable.
-- Fake voice fills the editable transcript.
-- Mic unavailable keeps text input usable.
-- Mic denied records telemetry and returns to idle.
-- Mic granted records telemetry and starts recording flow.
-- AudioWorklet starts when permission is granted.
-- Binary PCM frames are sent over the audio WebSocket.
-- Stop recording sends `{ type: "stop_recording" }`.
-- Final transcript updates both partial transcript and editable submitted text.
-- Clarification renders question, options, countdown, and escape action.
-- Clarification escape submits `null`.
-- Result-ready event fetches and renders result data.
-- TTS WebSocket opens after result load.
-- Mute closes TTS playback resources.
-- Feedback submits once and duplicate feedback is reflected in UI state.
-- `audioAnalyserNode` exists during real recording and clears on cleanup.
+The refactor must update or add tests covering equivalent behavior in `frontend/app/page.test.tsx`.
+Required coverage includes session persistence, WebSocket behaviors, text fallback, mic permissions, stop recording sequence, clarification flows, and rendering of new components (DataGlassPanel, FollowUpSuggestions, InsightNarrative).
 
 Required verification commands:
-
 ```bash
 npm test
 npm run build
 ```
 
-Run `npm run lint` if valid for the installed Next.js version.
-
 ## Acceptance Criteria
 
 The refactor is complete only when:
-
 - `page.tsx` is no longer a monolithic behavior container.
 - `useVoxQuerySession` owns backend, session, WebSocket, audio, TTS, telemetry, clarification, and feedback behavior.
 - Presentation components are pure and backend-agnostic.
-- The UI is genuinely voice-first.
-- Text and fake voice remain available as secondary fallback controls.
+- The UI is genuinely voice-first (Ambient Intelligence).
 - Fake auth and Clerk auth both still work.
 - Existing backend contracts are unchanged.
-- Tests and build pass, or any non-passing command is documented with a concrete reason.
-
-## Locked Decisions
-
-- Text fallback and fake voice stay available in a secondary `QueryDock`.
-- TTS remains automatic after result load and uses a compact mute/unmute control.
-- `shadcn/ui` means local copied primitives, not a runtime `shadcn` package.
-- The redesign may add frontend dependencies/configuration, but it may not change backend contracts.
+- Tests and build pass.

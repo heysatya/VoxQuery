@@ -1,4 +1,7 @@
 import logging
+import asyncio
+import snowflake.connector
+import sqlglot
 from app.models.contracts import ChartType, ResultPayload, ResultShape
 from app.warehouse.connector import WarehouseConnector
 
@@ -9,11 +12,58 @@ class SnowflakeWarehouseConnector(WarehouseConnector):
         self.dsn = dsn
         self.last_sql: str | None = None
 
-    async def execute_readonly(self, sql: str, *, snowflake_role: str) -> tuple[ResultPayload, ResultShape]:
-        # Connect to Snowflake using self.dsn and snowflake_role
-        # For MVP we will stub the connection but validate the query limit requirement is met
+    def _parse_dsn(self):
+        dsn = self.dsn.replace("snowflake://", "")
+        parts = dsn.split("@")
+        if len(parts) != 2:
+            return {"user": "", "password": "", "account": dsn, "database": None, "schema": None}
+        user_pass, rest = parts
+        up_parts = user_pass.split(":")
+        user = up_parts[0]
+        password = up_parts[1] if len(up_parts) > 1 else ""
         
-        import sqlglot
+        path_parts = rest.split("/")
+        account = path_parts[0]
+        database = path_parts[1] if len(path_parts) > 1 else None
+        schema = path_parts[2] if len(path_parts) > 2 else None
+        
+        return {
+            "user": user,
+            "password": password,
+            "account": account,
+            "database": database,
+            "schema": schema
+        }
+
+    def _execute_sync(self, sql: str, snowflake_role: str):
+        if self.dsn == "dummy_dsn":
+            return (
+                [("North America", 1500000.00), ("Europe", 1200000.00), ("Asia", 900000.00)],
+                ["region", "net_revenue"],
+                3
+            )
+            
+        conn_params = self._parse_dsn()
+        kwargs = {
+            "user": conn_params["user"],
+            "password": conn_params["password"],
+            "account": conn_params["account"],
+            "role": snowflake_role
+        }
+        if conn_params["database"]:
+            kwargs["database"] = conn_params["database"]
+        if conn_params["schema"]:
+            kwargs["schema"] = conn_params["schema"]
+            
+        with snowflake.connector.connect(**kwargs) as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+                rows = cur.fetchall()
+                columns = [desc[0].lower() for desc in cur.description] if cur.description else []
+                row_count = cur.rowcount
+                return rows, columns, row_count
+
+    async def execute_readonly(self, sql: str, *, snowflake_role: str) -> tuple[ResultPayload, ResultShape]:
         try:
             parsed = sqlglot.parse_one(sql, read="snowflake")
             limit_exp = parsed.args.get("limit")
@@ -33,30 +83,28 @@ class SnowflakeWarehouseConnector(WarehouseConnector):
                 sql += " LIMIT 10000"
                 
         self.last_sql = sql
+        
+        # Execute in thread to avoid blocking event loop
+        rows, columns, row_count = await asyncio.to_thread(self._execute_sync, sql, snowflake_role)
+        
+        list_rows = [list(r) for r in rows]
+        
+        chart_type = ChartType.table
+        if len(columns) == 2:
+            chart_type = ChartType.bar
             
-        # Dynamically extract the first column after SELECT to fix the UI data binding anomaly
-        # e.g. "SELECT REGION, SUM(REVENUE)..." -> "REGION"
-        import re
-        dimension = "customer_segment"
-        match = re.search(r'SELECT\s+([a-zA-Z0-9_]+)', sql, re.IGNORECASE)
-        if match:
-            dimension = match.group(1).lower()
+        summary = f"Result returned {row_count} rows."
+        if list_rows and len(columns) >= 1:
+            summary = f"Returned {row_count} rows, first row {columns[0]} is {list_rows[0][0]}."
 
-        rows = [["Enterprise", 1240000], ["Consumer", 830000], ["Small Business", 410000]]
-        # We replace the stubbed string values with something that fits the dimension
-        if dimension == "region":
-             rows = [["North America", 1240000], ["EMEA", 830000], ["APAC", 410000]]
-        elif "date" in dimension or "time" in dimension:
-             rows = [["2025-Q1", 1240000], ["2025-Q2", 830000], ["2025-Q3", 410000]]
-             
         result = ResultPayload(
-            columns=[dimension.lower(), "total_net_revenue"],
-            rows=rows,
-            row_count=len(rows),
+            columns=columns,
+            rows=list_rows,
+            row_count=row_count,
         )
         return result, ResultShape(
             columns=result.columns,
-            chart_type=ChartType.bar,
+            chart_type=chart_type,
             row_count=result.row_count,
-            aggregate_summary=f"{rows[0][0]} leads net revenue in the stubbed e-commerce result set.",
+            aggregate_summary=summary,
         )

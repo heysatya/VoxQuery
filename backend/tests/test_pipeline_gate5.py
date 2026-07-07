@@ -78,7 +78,7 @@ async def test_pipeline_timeout_enqueues_clarification():
     with patch("app.services.pipeline.detect_ambiguity") as mock_detect, \
          patch("app.services.pipeline.compute_confidence") as mock_conf:
          
-        mock_detect.return_value = MagicMock(dominant_signal="test", signals_detected=True)
+        mock_detect.return_value = MagicMock(dominant_signal="test", signals_detected=["test"], ambiguous_terms=["test_term"], signals_suppressed=[])
         mock_conf.return_value = MagicMock(clarification_triggered=True, confidence_tier="low", composite_score=0.4)
         
         turn = await pipeline.submit_query(req, claims)
@@ -95,3 +95,51 @@ async def test_pipeline_timeout_enqueues_clarification():
     args = audit.enqueue_turn.call_args[0]
     assert args[0] == turn
     assert args[2].resolution_type == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_resolves_ambiguity_with_actual_term():
+    sessions = InMemorySessionStore()
+    events = PipelineEventBus()
+    audit = MagicMock(spec=AuditStore)
+    
+    pipeline = PipelineOrchestrator(sessions, events, audit)
+    claims = AuthClaims(user_id=uuid.uuid4(), tenant_id=uuid.uuid4())
+    session, _ = sessions.create(claims)
+    req = QueryRequest(session_id=session.session_id, submitted_text="hello", input_modality="text")
+    
+    chunk = SchemaChunk(content="chunk", source_ref="ref", score=0.5, table_name="t")
+    
+    from app.llm.adapter import SqlGenerationResult
+    from app.models.contracts import ClarificationResolutionType
+    
+    pipeline.schema = MagicMock()
+    pipeline.schema.retrieve = AsyncMock(return_value=([chunk], 0.5))
+    pipeline.llm = MagicMock()
+    generation = SqlGenerationResult(sql="SELECT 1", llm_self_confidence=0.5, validation_passed=True)
+    pipeline.llm.generate_sql = AsyncMock(return_value=generation)
+    pipeline.llm.generate_clarification = AsyncMock(return_value=("Could you clarify?", ["A", "B"]))
+    
+    with patch("app.services.pipeline.detect_ambiguity") as mock_detect, \
+         patch("app.services.pipeline.compute_confidence") as mock_conf:
+         
+        mock_detect.return_value = MagicMock(dominant_signal="test", signals_detected=True, ambiguous_terms=["customer_segment"])
+        mock_conf.return_value = MagicMock(clarification_triggered=True, confidence_tier="low", composite_score=0.4)
+        
+        turn = await pipeline.submit_query(req, claims)
+        await asyncio.sleep(0.1)
+    
+        assert turn.clarification_triggered is True
+        
+    await pipeline.resolve_clarification(
+        session_id=session.session_id,
+        turn_id=turn.turn_id,
+        selection="A",
+        resolution_type=ClarificationResolutionType.option_selected,
+        claims=claims
+    )
+    
+    assert "customer_segment" in session.resolved_entities
+    assert session.resolved_entities["customer_segment"].option_selected == "A"
+    assert "revenue" not in session.resolved_entities
+

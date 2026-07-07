@@ -1,7 +1,6 @@
 from __future__ import annotations
 from typing import Any
 import asyncio
-import threading
 from datetime import UTC, datetime
 from time import perf_counter
 from uuid import UUID
@@ -37,7 +36,6 @@ from app.services.providers import (
     FakeSqlGenerator,
     FakeStoryteller,
     FakeWarehouseConnector,
-    clarification_options_for_signal,
 )
 from app.observability.langfuse import tracer
 
@@ -119,7 +117,7 @@ class PipelineOrchestrator:
 
         self.sessions.add_resolved_entity(
             session,
-            "revenue",
+            state.ambiguous_term or "unknown_term",
             selection.lower().replace(" ", "_"),
             selection,
         )
@@ -250,13 +248,21 @@ class PipelineOrchestrator:
         started = perf_counter()
         await self._publish_stage(session.session_id, turn.turn_id, PipelineStage.rag_retrieval, started)
         schema_chunks, rag_score = await self.schema.retrieve(turn.user_input, tenant_id=claims.tenant_id)
+        tracer.span_rag_retrieval(trace, rag_score, len(schema_chunks))
         
         # We stub memory retrieval values for now, but use session info if available
         tracer.span_memory_retrieval(trace, truncated=False, turns_dropped=0, token_count=100)
         
         await self._publish_stage(session.session_id, turn.turn_id, PipelineStage.sql_generation, started)
-        generation = await self.llm.generate_sql(turn.user_input)
         
+        generation = None
+        feedback = None
+        for attempt in range(3):
+            generation = await self.llm.generate_sql(turn.user_input, feedback=feedback)
+            if generation.validation_passed:
+                break
+            feedback = generation.validation_error or "SQL validation failed."
+            
         tracer.span_history_injection(trace, total_prompt_tokens=150)
         
         await self._publish_stage(session.session_id, turn.turn_id, PipelineStage.sql_validation, started)
@@ -293,6 +299,7 @@ class PipelineOrchestrator:
             question, options = await self.llm.generate_clarification(ambiguity.dominant_signal)
             if len(options) >= 2:
                 turn.clarification_triggered = True
+                tracer.span_clarification_issued(trace, question, options)
                 self.sessions.set_pending_clarification(
                     session,
                     ClarificationState(
@@ -305,6 +312,7 @@ class PipelineOrchestrator:
                         raw_transcript=turn.raw_transcript,
                         stt_confidence=turn.deepgram_confidence_raw,
                         input_modality=turn.input_modality,
+                        ambiguous_term=ambiguity.ambiguous_terms[0] if ambiguity.ambiguous_terms else None
                     ),
                 )
                 await self.events.publish(
@@ -320,6 +328,7 @@ class PipelineOrchestrator:
                     self._run_clarification_timer(session, turn.turn_id, claims),
                     session.session_id,
                 )
+                tracer.span_turn_completed(trace, turn.latency_ms, success=True)
                 return
 
         await self._complete_turn(session, turn, claims, trace, clarification_triggered=False)
@@ -337,8 +346,34 @@ class PipelineOrchestrator:
     ) -> None:
         started = perf_counter()
         await self._publish_stage(session.session_id, turn.turn_id, PipelineStage.snowflake_executing, started)
-        generation = await self.llm.generate_sql(turn.user_input, resolved_metric=resolved_metric)
-        result, shape = await self.warehouse.execute_readonly(generation.sql, snowflake_role=claims.snowflake_role)
+        
+        generation = None
+        feedback = None
+        for attempt in range(3):
+            generation = await self.llm.generate_sql(turn.user_input, resolved_metric=resolved_metric, feedback=feedback)
+            if generation.validation_passed:
+                break
+            feedback = generation.validation_error or "SQL validation failed."
+            
+        try:
+            result, shape = await self.warehouse.execute_readonly(generation.sql, snowflake_role=claims.snowflake_role)
+            
+            # Post-execution cross-join detection (triggering DISTINCT re-run)
+            if shape.row_count > 1000 and "DISTINCT" not in generation.sql.upper():
+                import re
+                distinct_sql = re.sub(r'(?i)^\s*SELECT\s+', 'SELECT DISTINCT ', generation.sql)
+                try:
+                    result, shape = await self.warehouse.execute_readonly(distinct_sql, snowflake_role=claims.snowflake_role)
+                    generation.sql = distinct_sql
+                except Exception:
+                    pass # Fall back to original if DISTINCT fails
+                    
+        except Exception as e:
+            # If execution fails entirely, we just let it bubble up or we could add it to feedback.
+            # But PRD focuses on validation retries and cross-join detection.
+            raise e
+            
+        turn.generated_sql = generation.sql
         chart_type, rationale = self.chart.select(result)
         shape.chart_type = chart_type
         summary = await self.story.summarize(shape, turn.user_input)
@@ -411,6 +446,7 @@ class PipelineOrchestrator:
                 from_cache=False,
             ),
         )
+        tracer.span_turn_completed(trace, turn.latency_ms, success=True)
         tracer.flush()
 
     async def _run_clarification_timer(self, session, turn_id: UUID, claims: AuthClaims) -> None:

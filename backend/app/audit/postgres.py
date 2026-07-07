@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import threading
+from datetime import datetime
 from typing import Any
 
 import asyncpg
@@ -164,7 +165,7 @@ class PostgresAuditStore(AuditStore):
                     turn_data.get("chart_rationale", ""), turn_data.get("confidence_tier", "low"),
                     float(turn_data.get("composite_score", 0.0) or 0.0), bool(turn_data.get("clarification_triggered", False)),
                     turn_data.get("quality_flag", "ok"), turn_data.get("source", "user"), turn_data.get("input_modality", "text"),
-                    int(turn_data.get("latency_ms", 0) or 0), turn_data["created_at"]
+                    int(turn_data.get("latency_ms", 0) or 0), datetime.fromisoformat(turn_data["created_at"].replace("Z", "+00:00"))
                 )
                 
                 # 6. Insert clarification if present

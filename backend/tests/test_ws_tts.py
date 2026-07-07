@@ -1,12 +1,9 @@
-import json
 from uuid import uuid4, UUID
 
 import pytest
 from fastapi.testclient import TestClient
-from websockets.exceptions import ConnectionClosed
 
 from app.main import app
-from app.models.contracts import SessionHistoryTurn
 from app.config import get_settings
 
 
@@ -39,7 +36,7 @@ def test_ws_tts_session_not_found(auth_token):
     session_id = uuid4()
     turn_id = uuid4()
     
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(Exception):
         with client.websocket_connect(
             f"/ws/tts?session_id={session_id}&turn_id={turn_id}&token={auth_token}"
         ) as websocket:
@@ -84,7 +81,7 @@ def test_ws_tts_success(auth_token, override_tts_fake):
     from app.main import app as main_app
     fake_user_id = UUID("00000000-0000-0000-0000-000000000001")
     fake_tenant_id = UUID("00000000-0000-0000-0000-000000000101")
-    from app.models.contracts import ConfidenceTier, InputModality, ResultShape, ChartType, TurnRecord
+    from app.models.contracts import InputModality, TurnRecord
     
     turn_id = uuid4()
     dummy_turn = TurnRecord(

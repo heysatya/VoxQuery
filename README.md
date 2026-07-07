@@ -9,12 +9,13 @@ VoxQuery is an enterprise-grade, voice-driven data analyst that enables non-tech
 
 ### What Is Real in this Slice
 - **FastAPI backend** with strict Pydantic request/response contracts.
-- **Next.js frontend** shell (desktop-first).
+- **Next.js frontend**: Fully decoupled headless engine hook (`useVoxQuerySession`) powering an "Ambient Intelligence" 3-state UI (Ready → Thinking → Insight).
 - **Voice STT**: Real voice transcript capture through `/ws/audio` piped to Deepgram streaming STT.
-- **LLM Engine**: Claude Haiku (claude-haiku-4-5-20251001) for entity extraction, ambiguity detection, and SQL generation.
+- **Voice TTS**: Real-time synthesized narrative audio playback through `/ws/tts` via Deepgram TTS.
+- **LLM Engine**: Claude Haiku (claude-haiku-4-5-20251001) for entity extraction, ambiguity detection, SQL generation, and data narrative storytelling.
 - **Session Memory**: Upstash Redis for distributed session-store (handling session TTL and context windows).
 - **Database & Telemetry**: Supabase PgVector for RAG context retrieval and async Audit writes.
-- **Data Warehouse**: Snowflake for secure data warehouse query execution.
+- **Data Warehouse**: Snowflake connector (currently stubbed via `dummy_dsn`, waiting for real credentials for integration).
 - **Observability**: Langfuse for tracing LLM execution paths, latency, and tokens.
 - **Authentication**: Clerk for enterprise SSO and JWT generation.
 
@@ -30,6 +31,7 @@ APP_ENV=development
 AUTH_MODE=clerk
 SESSION_STORE=redis
 STT_PROVIDER=deepgram
+TTS_PROVIDER=deepgram
 LLM_PROVIDER=claude
 RAG_PROVIDER=pgvector
 WAREHOUSE_PROVIDER=snowflake
@@ -82,14 +84,15 @@ Use the voice recording functionality or text input. The backend must have valid
 | Prompt | Expected behavior |
 |---|---|
 | `Show revenue by region` | Claude identifies ambiguity around "revenue" (e.g., net vs gross). Triggers one clarification question. |
-| `Show net revenue by customer segment` | Claude generates SQL and queries Snowflake directly. Returns the data payload. |
+| `Show net revenue by customer segment` | Claude generates SQL and queries Snowflake directly. Returns the data payload. UI enters Insight state and Deepgram streams an audio narrative. |
+| `Break it down by region` (Follow-up) | UI updates to `Show net revenue by customer segment → Break it down by region`. Claude generates refined SQL and updates the chart. |
 | `Show revenue by state` | Triggers clarification. After selection, Claude generates SQL and queries Snowflake for state-level data. |
 
 ### UI States
-- `Session active`: Browser has an authenticated session with the backend via Clerk JWT.
-- `idle`: No recording or query pipeline is active.
-- `clarification_pending`: Received from `/ws/pipeline`; Claude needs one user choice before completing the query.
-- `Result ready`: Received after `/ws/pipeline` emits `result_ready` and the Snowflake query result is retrieved.
+- **State 1: Ready (Listening Concierge)**: Ambient breathing orb, starter questions, and minimal text fallback.
+- **State 2: Thinking (Processing)**: Directional orb animation, transcript display, and human-readable pipeline status.
+- **State 3: Insight (Answer)**: Storytelling narrative (with Deepgram audio playback), frosted glass Recharts visualization, trust layer (confidence/SQL toggle), and proactive follow-up suggestions (which maintain complete query context).
+- **Interruptive: Clarification**: Dark glass overlay requesting user disambiguation before proceeding.
 
 ---
 
@@ -111,7 +114,7 @@ To verify that each gate in the architecture roadmap has been successfully imple
 
 4. **Gate 5 - Supabase/Postgres Audit Writes:**
    *Verification:* Check the `audit_log` table in Supabase.
-   *Success:* Session telemetry events (e.g., `stt.mic.permission`, `pipeline.completed`) are written asynchronously without blocking flow or exposing raw warehouse PII.
+   *Success:* Session telemetry events (e.g., `stt.mic.permission`, `pipeline.completed`) are written asynchronously without failing on timestamp serialization, without blocking flow, or exposing raw warehouse PII.
 
 5. **Gate 6 - Langfuse Observability:**
    *Verification:* Log into Langfuse Dashboard under **Traces**.
@@ -128,7 +131,8 @@ To verify that each gate in the architecture roadmap has been successfully imple
 ### Active Specifications (Voice Subsystem)
 - **Voice Subsystem Engineering Spec**: [engineering-spec.md](./docs/voice-subsystem/engineering-spec.md)
 - **Voice Subsystem Interface Contracts**: [interface-contracts.md](./docs/voice-subsystem/interface-contracts.md)
-- **Gate 8 Production Readiness**: [gate-8-production-readiness.md](./docs/voice-subsystem/gate-8-production-readiness.md)
+- **Frontend Architecture Blueprint**: [frontend-architecture-blueprint.md](./docs/voice-subsystem/frontend-architecture-blueprint.md)
+- **Data Integration Handoff**: [data-integration-handoff.md](./docs/voice-subsystem/data-integration-handoff.md)
 
 ### Active Core Documents
 - **Revised MVP Product Requirements Document (PRD)**: [prd.md](./docs/prd.md)

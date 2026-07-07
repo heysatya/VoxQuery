@@ -1,55 +1,29 @@
 "use client";
 
 import { SignInButton, UserButton, useAuth } from "@clerk/nextjs";
-import React from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ApiRequestError,
-  audioSocketUrl,
-  createSession,
-  deleteSession,
-  fetchResult,
-  pipelineSocketUrl,
-  postClarification,
-  postFeedback,
-  postTelemetry,
-  submitQuery,
-  ttsSocketUrl
-} from "../lib/api";
-import type {
-  AudioEvent,
-  ClarificationState,
-  LastResult,
-  MicPermission,
-  PipelineEvent,
-  RecordingState,
-  SessionState
-} from "../lib/types";
-
-const tenantId =
-  process.env.NEXT_PUBLIC_VOXQUERY_TENANT_ID ??
-  process.env.NEXT_PUBLIC_FAKE_TENANT_ID ??
-  "00000000-0000-0000-0000-000000000101";
+import React, { useMemo } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { RotateCcw } from "lucide-react";
+import { useVoxQuerySession, type VoxQueryAuthRelay } from "./hooks/useVoxQuerySession";
+import { VoiceVisualizer } from "./components/hero/VoiceVisualizer";
+import { DataGlassPanel } from "./components/data/DataGlassPanel";
+import { InsightNarrative } from "./components/insight/InsightNarrative";
+import { FollowUpSuggestions } from "./components/insight/FollowUpSuggestions";
+import { ClarificationOverlay } from "./components/clarification/ClarificationOverlay";
+import { QueryDock } from "./components/query/QueryDock";
 
 const authMode = process.env.NEXT_PUBLIC_AUTH_MODE ?? "fake";
 
-type AuthRelay = {
-  mode: "fake" | "clerk";
-  ready: boolean;
-  signedIn: boolean;
-  getToken: () => Promise<string | null>;
-};
+/* ── Auth wrappers (unchanged contracts) ─────────────────────── */
 
 export default function HomePage() {
-  if (authMode === "clerk") {
-    return <ClerkHomePage />;
-  }
+  if (authMode === "clerk") return <ClerkHomePage />;
   return <VoxQueryApp auth={fakeAuthRelay} />;
 }
 
 function ClerkHomePage() {
   const { isLoaded, isSignedIn, getToken } = useAuth();
-  const auth = useMemo<AuthRelay>(
+  const auth = useMemo<VoxQueryAuthRelay>(
     () => ({
       mode: "clerk",
       ready: isLoaded,
@@ -60,17 +34,23 @@ function ClerkHomePage() {
   );
 
   if (!isLoaded) {
-    return <main className="page-shell">Loading authentication...</main>;
+    return (
+      <main className="min-h-screen flex items-center justify-center">
+        <div className="text-[var(--text-muted)] animate-pulse">Loading authentication...</div>
+      </main>
+    );
   }
 
   if (!isSignedIn) {
     return (
-      <main className="page-shell auth-shell">
-        <section>
-          <h1>VoxQuery</h1>
-          <p>Sign in to start a secure voice analytics session.</p>
+      <main className="min-h-screen flex flex-col items-center justify-center p-4">
+        <section className="glass-card p-8 max-w-md w-full text-center space-y-6">
+          <h1 className="text-3xl font-bold text-[var(--text-primary)]">VoxQuery</h1>
+          <p className="text-[var(--text-secondary)]">Sign in to start a secure voice analytics session.</p>
           <SignInButton mode="modal">
-            <button className="primary-button">Sign in</button>
+            <button className="w-full py-3 px-4 bg-[var(--accent-blue)] hover:bg-[var(--accent-blue)]/80 text-white font-medium rounded-xl transition-colors">
+              Sign in
+            </button>
           </SignInButton>
         </section>
       </main>
@@ -79,787 +59,247 @@ function ClerkHomePage() {
 
   return (
     <>
-      <div className="account-bar">
-        <UserButton />
+      <div className="fixed top-4 right-4 z-50">
+        <div className="glass-card p-1 rounded-full"><UserButton /></div>
       </div>
       <VoxQueryApp auth={auth} />
     </>
   );
 }
 
-const fakeAuthRelay: AuthRelay = {
+const fakeAuthRelay: VoxQueryAuthRelay = {
   mode: "fake",
   ready: true,
   signedIn: true,
   getToken: async () => "fake"
 };
 
-function VoxQueryApp({ auth }: { auth: AuthRelay }) {
-  const [session, setSession] = useState<SessionState>({ sessionId: null, conversationId: null });
-  const [micPermission, setMicPermission] = useState<MicPermission>("unknown");
-  const [recordingState, setRecordingState] = useState<RecordingState>("idle");
-  const [partialTranscript, setPartialTranscript] = useState("");
-  const [submittedText, setSubmittedText] = useState("");
-  const [pipelineInFlight, setPipelineInFlight] = useState(false);
-  const [currentTurnId, setCurrentTurnId] = useState<string | null>(null);
-  const [pipelineStage, setPipelineStage] = useState<string | null>(null);
-  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
-  const [clarification, setClarification] = useState<ClarificationState>({
-    pending: false,
-    question: null,
-    options: [],
-    secondsRemaining: 30
-  });
-  const [lastResult, setLastResult] = useState<LastResult | null>(null);
-  const [userChartOverride, setUserChartOverride] = useState<string | null>(null);
-  const [notice, setNotice] = useState(
-    auth.mode === "clerk"
-      ? "Clerk auth mode active. Requests use the signed-in session token."
-      : "Local fake mode active. No external credentials are required."
-  );
-  const modeLabel = auth.mode === "clerk" ? "clerk auth mode" : "local fake mode";
+/* ── Human-readable status mapping ───────────────────────────── */
 
-  const audioSocketRef = useRef<WebSocket | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const audioWorkletRef = useRef<AudioWorkletNode | null>(null);
+function getHumanStatus(pipelineStage: string | null): string {
+  if (!pipelineStage) return "Analyzing your data...";
+  const map: Record<string, string> = {
+    stt: "Processing your voice...",
+    rag_retrieval: "Understanding your question...",
+    sql_generation: "Crafting the query...",
+    sql_validation: "Verifying accuracy...",
+    sql_execution: "Running against your data...",
+    chart_selection: "Building your chart...",
+    tts_generation: "Preparing the summary...",
+  };
+  return map[pipelineStage] || "Analyzing your data...";
+}
 
-  const ttsAudioContextRef = useRef<AudioContext | null>(null);
-  const ttsSocketRef = useRef<WebSocket | null>(null);
-  const nextPlayTimeRef = useRef<number>(0);
-  const [isMuted, setIsMuted] = useState(false);
+/* ── Starter questions ───────────────────────────────────────── */
 
-  const apiReady = useMemo(
-    () => auth.ready && auth.signedIn && Boolean(session.sessionId),
-    [auth.ready, auth.signedIn, session.sessionId]
-  );
+const STARTER_QUESTIONS = [
+  "How did revenue perform last quarter?",
+  "What are the top-selling products?",
+  "Show me pipeline by region",
+];
 
-  const ensureSession = useCallback(async () => {
-    if (!auth.ready || !auth.signedIn) {
-      return;
-    }
-    const existingSessionId =
-      typeof window !== "undefined" ? window.sessionStorage.getItem("voxquery_session_id") : null;
-    if (existingSessionId) {
-      if (session.sessionId !== existingSessionId) {
-        setSession({ sessionId: existingSessionId, conversationId: null });
-      }
-      return;
-    }
-    const created = await createSession(tenantId, await auth.getToken());
-    window.sessionStorage.setItem("voxquery_session_id", created.session_id);
-    setSession({ sessionId: created.session_id, conversationId: created.conversation_id });
-  }, [auth, session.sessionId]);
+/* ── Main App ────────────────────────────────────────────────── */
 
-  const startNewConversation = useCallback(async () => {
-    setPipelineInFlight(false);
-    setPipelineStage(null);
-    setCurrentTurnId(null);
-    setPartialTranscript("");
-    setSubmittedText("");
-    setRecordingState("idle");
-    setFeedbackSubmitted(false);
-    setClarification({ pending: false, question: null, options: [], secondsRemaining: 30 });
-    setLastResult(null);
-    setUserChartOverride(null);
-    if (session.sessionId) {
-      try {
-        await deleteSession(session.sessionId, await auth.getToken());
-      } catch (error) {
-        console.warn("Could not explicitly delete session on backend", error);
-      }
-    }
-    if (typeof window !== "undefined") {
-      window.sessionStorage.removeItem("voxquery_session_id");
-    }
-    setSession({ sessionId: null, conversationId: null });
-    try {
-      const created = await createSession(tenantId, await auth.getToken());
-      window.sessionStorage.setItem("voxquery_session_id", created.session_id);
-      setSession({ sessionId: created.session_id, conversationId: created.conversation_id });
-      setNotice("New conversation started.");
-    } catch (error) {
-      setNotice(errorMessage(error, "Could not create a new local conversation."));
-    }
-  }, [auth]);
+function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
+  const engine = useVoxQuerySession(auth);
 
-  useEffect(() => {
-    ensureSession().catch(() => setNotice("Could not create a local session. Is the backend running?"));
-  }, [ensureSession]);
+  const isActive = engine.recordingState !== "idle" || engine.pipelineInFlight;
+  const hasResult = !!engine.lastResult;
 
-  // Probe microphone permission status on mount (read-only; does not prompt the user).
-  // The Permissions API is absent in some environments (jsdom, old browsers, HTTP contexts)
-  // so all access is guarded. Failures are silent — the user can still use text input.
-  useEffect(() => {
-    if (typeof navigator === "undefined" || !navigator.permissions) {
-      return;
-    }
-    navigator.permissions
-      .query({ name: "microphone" as PermissionName })
-      .then((status) => {
-        setMicPermission(status.state as MicPermission);
-        status.onchange = () => {
-          setMicPermission(status.state as MicPermission);
-        };
-      })
-      .catch(() => {
-        // Permissions API may throw in some environments; leave state as 'unknown'.
-      });
-  }, []);
-
-  useEffect(() => {
-    if (!session.sessionId || !auth.ready || !auth.signedIn) {
-      return;
-    }
-    let socket: WebSocket | null = null;
-    let cancelled = false;
-    auth
-      .getToken()
-      .then((token) => {
-        if (cancelled || !session.sessionId) {
-          return;
-        }
-        socket = new WebSocket(pipelineSocketUrl(session.sessionId, token));
-        socket.onmessage = (message) => {
-          const event = parseSocketEvent<PipelineEvent>(message.data);
-          if (!event) {
-            return;
-          }
-          if (event.type === "pipeline_progress") {
-            setPipelineStage(event.stage);
-            return;
-          }
-          if (event.type === "clarification_request") {
-            setCurrentTurnId(event.turn_id);
-            setClarification({
-              pending: true,
-              question: event.question,
-              options: event.options,
-              secondsRemaining: event.timeout_seconds
-            });
-            setPipelineInFlight(false);
-            setPipelineStage("clarification_pending");
-            setNotice("Clarification required before executing the query.");
-            return;
-          }
-          if (event.type === "clarification_timeout_warning") {
-            setClarification((current) => ({
-              ...current,
-              secondsRemaining: event.seconds_remaining
-            }));
-            setNotice("Clarification will time out soon. Choose an option or rephrase.");
-            return;
-          }
-          if (event.type === "result_ready") {
-            setCurrentTurnId(event.turn_id);
-            setPipelineInFlight(false);
-            void loadResult(event.turn_id).catch((error) =>
-              setNotice(errorMessage(error, "Result is ready, but could not be loaded."))
-            );
-            return;
-          }
-          if (event.type === "pipeline_error") {
-            setPipelineInFlight(false);
-            setPipelineStage(null);
-            setNotice(event.message);
-          }
-        };
-        socket.onerror = () => setNotice("Pipeline event stream unavailable. Check that the backend is running.");
-        socket.onclose = (event) => {
-          if (event.code !== 4002) {
-            return;
-          }
-          window.sessionStorage.removeItem("voxquery_session_id");
-          setSession({ sessionId: null, conversationId: null });
-          createSession(tenantId, token)
-            .then((created) => {
-              window.sessionStorage.setItem("voxquery_session_id", created.session_id);
-              setSession({ sessionId: created.session_id, conversationId: created.conversation_id });
-          setNotice("Stored session expired. New conversation started.");
-            })
-            .catch(() => setNotice("Stored session expired, and a new local session could not be created."));
-        };
-      })
-      .catch(() => setNotice("Could not get an auth token for the pipeline stream."));
-    return () => {
-      cancelled = true;
-      socket?.close();
-    };
-  }, [auth, session.sessionId]);
-
-  async function handleStartRecording() {
-    // Guard: browser API unavailable (HTTP context, old browser, jsdom).
-    if (
-      typeof navigator === "undefined" ||
-      !navigator.mediaDevices ||
-      typeof navigator.mediaDevices.getUserMedia !== "function"
-    ) {
-      setNotice("Microphone is unavailable in this context. Use text input or Fake voice.");
-      return;
-    }
-    // Guard: permission already known to be denied.
-    if (micPermission === "denied") {
-      setNotice("Microphone access denied. Allow access in browser settings or use text input.");
-      return;
-    }
-    // Guard: ensure session exists before prompting for mic.
-    if (!session.sessionId) {
-      setNotice("Session is not ready. Cannot start recording.");
-      return;
-    }
-
-    try {
-      // This call may prompt the user. On grant, permission is 'granted'.
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      setMicPermission("granted");
-      
-      const token = await auth.getToken();
-      
-      // Emit stt.mic.permission via telemetry endpoint
-      await postTelemetry({ event: "stt.mic.permission", outcome: "granted", session_id: session.sessionId }, token).catch(console.error);
-      
-      setRecordingState("connecting");
-      setNotice("Microphone access granted. Connecting...");
-      
-      const socket = new WebSocket(audioSocketUrl(session.sessionId, token));
-      audioSocketRef.current = socket;
-      mediaStreamRef.current = stream;
-      
-      socket.onopen = async () => {
-        try {
-          const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-          audioContextRef.current = audioContext;
-          
-          await audioContext.audioWorklet.addModule('/audio-processor.js');
-          
-          const source = audioContext.createMediaStreamSource(stream);
-          const worklet = new AudioWorkletNode(audioContext, 'pcm-audio-processor');
-          audioWorkletRef.current = worklet;
-          
-          worklet.port.onmessage = (e) => {
-            if (socket.readyState === WebSocket.OPEN) {
-              socket.send(e.data);
-            }
-          };
-          
-          source.connect(worklet);
-          
-          const zeroGain = audioContext.createGain();
-          zeroGain.gain.value = 0;
-          worklet.connect(zeroGain);
-          zeroGain.connect(audioContext.destination); // Required for worklet to run in some browsers
-          
-          setRecordingState("recording");
-          setNotice("Recording...");
-        } catch (error) {
-          setRecordingState("idle");
-          setNotice("Failed to initialize audio processing.");
-          recorderCleanup();
-        }
-      };
-      
-      socket.onmessage = (message) => {
-        const event = parseSocketEvent<AudioEvent>(message.data);
-        if (!event) return;
-        
-        if (event.type === "interim_transcript") {
-          setPartialTranscript(event.text);
-        } else if (event.type === "final_transcript") {
-          setPartialTranscript(event.text);
-          setSubmittedText(event.text);
-          setRecordingState("idle");
-          setNotice("Transcript received. Review or edit before submitting.");
-          // We can safely close here, final is received.
-          recorderCleanup();
-        } else if (event.type === "error") {
-          setRecordingState("idle");
-          setNotice(event.message);
-          recorderCleanup();
-        }
-      };
-      
-      socket.onerror = () => {
-        setRecordingState("idle");
-        setNotice("Audio WebSocket unavailable or error occurred.");
-        recorderCleanup();
-      };
-      
-      socket.onclose = () => {
-        setRecordingState((prev) => (prev === "recording" || prev === "processing" ? "idle" : prev));
-        if (audioSocketRef.current === socket) {
-          audioSocketRef.current = null;
-        }
-        recorderCleanup();
-      };
-      
-    } catch (err) {
-      const domErr = err as { name?: string };
-      if (domErr?.name === "NotAllowedError" || domErr?.name === "PermissionDeniedError") {
-        setMicPermission("denied");
-        const token = await auth.getToken();
-        if (session.sessionId) {
-          await postTelemetry({ event: "stt.mic.permission", outcome: "denied", session_id: session.sessionId }, token).catch(console.error);
-        }
-        setNotice("Microphone access denied. Allow access in browser settings or use text input.");
-        setRecordingState("idle");
-      } else {
-        setNotice("Could not access microphone. Try again or use text input.");
-        setRecordingState("idle");
-      }
-    }
-  }
-  
-  function recorderCleanup() {
-    if (audioWorkletRef.current) {
-      audioWorkletRef.current.disconnect();
-      audioWorkletRef.current = null;
-    }
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-    }
-    if (audioContextRef.current) {
-      if (audioContextRef.current.state !== "closed") {
-        audioContextRef.current.close().catch(console.error);
-      }
-      audioContextRef.current = null;
-    }
-    if (audioSocketRef.current) {
-      const socket = audioSocketRef.current;
-      audioSocketRef.current = null;
-      // Remove onclose handler to prevent infinite recursion
-      socket.onclose = null;
-      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-        socket.close();
-      }
-    }
-  }
-
-  function handleStopRecording() {
-    // 1. Stop mic tracks
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
-    }
-    // 2. Suspend/Close audio context
-    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-      audioContextRef.current.suspend().catch(console.error);
-    }
-    // 3. Send stop_recording JSON, but keep WS open for final transcript
-    if (audioSocketRef.current && audioSocketRef.current.readyState === WebSocket.OPEN) {
-      audioSocketRef.current.send(JSON.stringify({ type: "stop_recording" }));
-    }
-    
-    setRecordingState("processing");
-    setNotice("Recording stopped. Processing transcript...");
-  }
-
-  async function handleFakeVoice() {
-    if (!session.sessionId) {
-      setNotice("Session is still starting. Try fake voice again in a moment.");
-      return;
-    }
-    if (typeof WebSocket === "undefined") {
-      setNotice("WebSocket support is unavailable in this browser.");
-      return;
-    }
-    setRecordingState("connecting");
-    setNotice("Connecting to local fake STT WebSocket.");
-    const socket = new WebSocket(audioSocketUrl(session.sessionId, await auth.getToken()));
-    socket.onopen = () => {
-      setRecordingState("recording");
-      socket.send(new Uint8Array([1, 2, 3]));
-      setRecordingState("processing");
-      socket.send(JSON.stringify({ type: "stop_recording" }));
-    };
-    socket.onmessage = (message) => {
-      const event = parseSocketEvent<AudioEvent>(message.data);
-      if (!event) {
-        return;
-      }
-      if (event.type === "interim_transcript") {
-        setPartialTranscript(event.text);
-        return;
-      }
-      if (event.type === "final_transcript") {
-        setPartialTranscript(event.text);
-        setSubmittedText(event.text);
-        setRecordingState("idle");
-        setNotice("Fake voice transcript received. Review or edit before submitting.");
-        socket.close();
-        return;
-      }
-      if (event.type === "error") {
-        setRecordingState("idle");
-        setNotice(event.message);
-      }
-    };
-    socket.onerror = () => {
-      setRecordingState("idle");
-      setNotice("Fake voice WebSocket unavailable. Check that the backend is running.");
-    };
-    socket.onclose = () => setRecordingState("idle");
-  }
-
-  async function handleSubmit() {
-    if (pipelineInFlight) {
-      setNotice("A query is already running. Please wait for it to complete.");
-      return;
-    }
-    if (!session.sessionId || !submittedText.trim()) {
-      setNotice("Please enter a question before submitting.");
-      return;
-    }
-    setPipelineInFlight(true);
-    setPipelineStage("sql_generation");
-    setLastResult(null);
-    setUserChartOverride(null);
-    setFeedbackSubmitted(false);
-    setClarification({ pending: false, question: null, options: [], secondsRemaining: 30 });
-    try {
-      const accepted = await submitQuery(
-        {
-          session_id: session.sessionId,
-          submitted_text: submittedText,
-          input_modality: "text",
-          raw_transcript: null,
-          stt_confidence: null
-        },
-        await auth.getToken()
-      );
-      setCurrentTurnId(accepted.turn_id);
-      setFeedbackSubmitted(false);
-      setNotice("Query submitted. Waiting for pipeline events.");
-    } catch (error) {
-      setPipelineInFlight(false);
-      setNotice(errorMessage(error, "Query failed. Check that the backend is running."));
-    }
-  }
-
-  async function handleClarification(selection: string | null) {
-    if (!session.sessionId || !currentTurnId) {
-      return;
-    }
-    if (selection === null) {
-      try {
-        await postClarification(
-          {
-            session_id: session.sessionId,
-            turn_id: currentTurnId,
-            selection: null,
-            resolution_type: "escaped"
-          },
-          await auth.getToken()
-        );
-        setClarification({ pending: false, question: null, options: [], secondsRemaining: 30 });
-        setPipelineStage(null);
-        setCurrentTurnId(null);
-        setNotice("Clarification escaped. Edit your question and submit again.");
-      } catch (error) {
-        setNotice(errorMessage(error, "Could not escape clarification. Try submitting again."));
-      }
-      return;
-    }
-
-    setPipelineInFlight(true);
-    setPipelineStage("snowflake_executing");
-    try {
-      await postClarification(
-        {
-          session_id: session.sessionId,
-          turn_id: currentTurnId,
-          selection,
-          resolution_type: "option_selected"
-        },
-        await auth.getToken()
-      );
-      setClarification({ pending: false, question: null, options: [], secondsRemaining: 30 });
-      setNotice("Clarification submitted. Waiting for pipeline result.");
-    } catch (error) {
-      setPipelineInFlight(false);
-      setNotice(errorMessage(error, "Could not resolve clarification. Try submitting again."));
-    }
-  }
-
-  async function loadResult(turnId: string) {
-    setPipelineStage("rendering");
-    const result = await fetchResult(turnId, await auth.getToken());
-    setLastResult({
-      turnId,
-      confidenceTier: result.confidence_tier,
-      chartType: result.chart_type,
-      chartRationale: result.chart_rationale,
-      resultData: result,
-      proactiveQuestions: [
-        "Show that by quarter",
-        "Compare this with last month",
-        "Break it down by customer segment"
-      ]
-    });
-    setPipelineInFlight(false);
-    setPipelineStage(null);
-    setNotice("Result ready.");
-    
-    // Attempt TTS playback
-    const token = await auth.getToken();
-    playTTS(turnId, token);
-  }
-
-  function playTTS(turnId: string, token: string | null) {
-    if (!session.sessionId) return;
-    
-    stopTTS();
-    setIsMuted(false);
-    
-    try {
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      ttsAudioContextRef.current = audioCtx;
-      nextPlayTimeRef.current = audioCtx.currentTime + 0.1;
-      
-      const socket = new WebSocket(ttsSocketUrl(session.sessionId, turnId, token));
-      socket.binaryType = "arraybuffer";
-      ttsSocketRef.current = socket;
-      
-      socket.onmessage = (event) => {
-        if (ttsAudioContextRef.current?.state === "closed") return;
-        
-        const buffer = event.data as ArrayBuffer;
-        const int16Array = new Int16Array(buffer);
-        const float32Array = new Float32Array(int16Array.length);
-        for (let i = 0; i < int16Array.length; i++) {
-          float32Array[i] = int16Array[i] / 32768.0;
-        }
-        
-        const audioBuffer = audioCtx.createBuffer(1, float32Array.length, 16000);
-        audioBuffer.getChannelData(0).set(float32Array);
-        
-        const source = audioCtx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(audioCtx.destination);
-        
-        const startTime = Math.max(nextPlayTimeRef.current, audioCtx.currentTime);
-        source.start(startTime);
-        nextPlayTimeRef.current = startTime + audioBuffer.duration;
-      };
-    } catch (e) {
-      console.error("TTS playback failed to initialize", e);
-    }
-  }
-
-  function downloadCSV() {
-    if (!lastResult) return;
-    const { columns, rows } = lastResult.resultData.result;
-    const csvContent = [
-      columns.join(","),
-      ...rows.map((row) =>
-        row
-          .map((v) =>
-            typeof v === "string" ? `"${v.replace(/"/g, '""')}"` : v
-          )
-          .join(",")
-      )
-    ].join("\\n");
-    const blob = new Blob([csvContent], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "voxquery_export.csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }
-
-  function stopTTS() {
-    setIsMuted(true);
-    if (ttsSocketRef.current) {
-      ttsSocketRef.current.close();
-      ttsSocketRef.current = null;
-    }
-    if (ttsAudioContextRef.current && ttsAudioContextRef.current.state !== "closed") {
-      ttsAudioContextRef.current.close().catch(console.error);
-      ttsAudioContextRef.current = null;
-    }
-  }
-
-  async function handleFeedback() {
-    if (!session.sessionId || !lastResult) {
-      return;
-    }
-    if (feedbackSubmitted) {
-      setNotice("Feedback already recorded for this query.");
-      return;
-    }
-    try {
-      await postFeedback(
-        { session_id: session.sessionId, turn_id: lastResult.turnId, rating: -1 },
-        await auth.getToken()
-      );
-      setFeedbackSubmitted(true);
-      setNotice("Feedback recorded for threshold tuning.");
-    } catch (error) {
-      setNotice(errorMessage(error, "Could not record feedback."));
-    }
-  }
+  // Three UI states: ready → active → insight
+  const uiState: "ready" | "active" | "insight" =
+    isActive ? "active" : hasResult ? "insight" : "ready";
 
   return (
-    <main className="page-shell">
-      <section className="workbench">
-        <header className="topbar">
-          <div>
-            <h1>VoxQuery</h1>
-            <p>Voice subsystem local MVP</p>
-          </div>
-          <button type="button" onClick={startNewConversation}>
-            New conversation
-          </button>
-        </header>
+    <main className="min-h-screen flex flex-col relative">
+      {/* Scrollable content */}
+      <div className="flex-1 flex flex-col items-center px-4 md:px-8 pb-40 overflow-y-auto scrollbar-hide">
 
-        <div className="status-row">
-          <span>Session {apiReady ? "active" : "starting"}</span>
-          <span>{recordingState}</span>
-          <span>{pipelineStage ?? "idle"}</span>
-          <span>{modeLabel}</span>
-        </div>
+        <AnimatePresence mode="wait">
 
-        <section className="input-panel">
-          <label htmlFor="query">Ask a data question</label>
-          <textarea
-            id="query"
-            value={submittedText}
-            disabled={pipelineInFlight}
-            onChange={(event) => setSubmittedText(event.target.value)}
-            placeholder="Show net revenue by customer segment"
-          />
-          {partialTranscript ? <p className="partial">Raw transcript: {partialTranscript}</p> : null}
-          <div className="actions">
-            {recordingState === "recording" ? (
-              <button type="button" onClick={handleStopRecording} disabled={pipelineInFlight}>
-                Stop recording
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleStartRecording}
-                disabled={
-                  pipelineInFlight ||
-                  recordingState === "connecting" ||
-                  recordingState === "processing"
-                }
-              >
-                Start recording
-              </button>
-            )}
-            <button type="button" onClick={handleFakeVoice} disabled={pipelineInFlight}>
-              Fake voice
-            </button>
-            <button type="button" onClick={handleSubmit} disabled={!apiReady || pipelineInFlight}>
-              Submit
-            </button>
-            {isMuted ? (
-              <button type="button" onClick={() => setIsMuted(false)} disabled={pipelineInFlight}>
-                Unmute TTS
-              </button>
-            ) : (
-              <button type="button" onClick={stopTTS} disabled={pipelineInFlight}>
-                Mute TTS
-              </button>
-            )}
-          </div>
-        </section>
+          {/* ── STATE 1: READY ──────────────────────────────── */}
+          {uiState === "ready" && (
+            <motion.div
+              key="ready"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.4 }}
+              className="flex-1 flex flex-col items-center justify-center min-h-[80vh] max-w-2xl w-full"
+            >
+              <VoiceVisualizer
+                state={engine.recordingState}
+                analyser={engine.audioAnalyserNode}
+                disabled={!engine.isReady || engine.pipelineInFlight}
+                pipelineStage={engine.pipelineStage}
+                partialTranscript={engine.partialTranscript}
+                onPrimaryAction={engine.startRecording}
+                onStop={engine.stopRecording}
+              />
 
-        {clarification.pending ? (
-          <section className="clarification">
-            <h2>{clarification.question}</h2>
-            <p className="partial">{clarification.secondsRemaining}s remaining</p>
-            <div className="option-grid">
-              {clarification.options.map((option) => (
-                <button key={option} type="button" onClick={() => handleClarification(option)}>
-                  {option}
-                </button>
-              ))}
-            </div>
-            <button type="button" className="link-button" onClick={() => handleClarification(null)}>
-              None of these - let me rephrase
-            </button>
-          </section>
-        ) : null}
+              <h2 className="mt-10 text-2xl md:text-3xl font-light text-[var(--text-primary)] text-center tracking-tight">
+                What would you like to know?
+              </h2>
+              <p className="mt-3 text-sm text-[var(--text-muted)] text-center">
+                Tap the orb to speak, or try one of these:
+              </p>
 
-        {lastResult ? (
-          <section className="result-panel">
-            <div className="result-header">
-              <h2>Result</h2>
-              <span className="confidence">{lastResult.confidenceTier}</span>
-              <label style={{ marginLeft: "1rem" }}>
-                Chart Type:
-                <select 
-                  value={userChartOverride ?? lastResult.chartType}
-                  onChange={(e) => setUserChartOverride(e.target.value)}
-                  style={{ marginLeft: "0.5rem" }}
-                >
-                  <option value="bar">Bar</option>
-                  <option value="line">Line</option>
-                  <option value="table">Table</option>
-                  <option value="stat">Stat</option>
-                </select>
-              </label>
-            </div>
-            {lastResult.confidenceTier === "Medium" && (
-              <p className="caveat">I'm moderately confident — the query joined tables I'm less familiar with. Review the SQL before actioning.</p>
-            )}
-            <p>{lastResult.chartRationale}</p>
-            <table>
-              <thead>
-                <tr>
-                  {lastResult.resultData.result.columns.map((column) => (
-                    <th key={column}>{column}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {lastResult.resultData.result.rows.map((row, rowIndex) => (
-                  <tr key={rowIndex}>
-                    {row.map((cell, cellIndex) => (
-                      <td key={cellIndex}>{cell}</td>
-                    ))}
-                  </tr>
+              <div className="mt-6 flex flex-wrap justify-center gap-2">
+                {STARTER_QUESTIONS.map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    onClick={() => {
+                      engine.setSubmittedText(q);
+                      engine.submitQuery(q);
+                    }}
+                    disabled={!engine.isReady}
+                    className="px-4 py-2.5 rounded-full border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--accent-blue)]/30 hover:bg-[var(--bg-elevated)] transition-all disabled:opacity-50"
+                  >
+                    {q}
+                  </button>
                 ))}
-              </tbody>
-            </table>
-            <details>
-              <summary>View SQL</summary>
-              <pre>{lastResult.resultData.generated_sql}</pre>
-            </details>
-            <div className="actions">
-              <button type="button" onClick={handleFeedback}>
-                {feedbackSubmitted ? "Feedback recorded" : "Thumbs down"}
-              </button>
-              <button type="button" onClick={downloadCSV}>
-                Download CSV
-              </button>
-            </div>
-          </section>
-        ) : null}
+              </div>
+            </motion.div>
+          )}
 
-        <p className="notice">{notice}</p>
-      </section>
+          {/* ── STATE 2: ACTIVE (recording / processing) ──── */}
+          {uiState === "active" && (
+            <motion.div
+              key="active"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.4 }}
+              className="flex-1 flex flex-col items-center justify-center min-h-[80vh] max-w-2xl w-full"
+            >
+              <VoiceVisualizer
+                state={engine.recordingState}
+                analyser={engine.audioAnalyserNode}
+                disabled={!engine.isReady}
+                pipelineStage={engine.pipelineStage}
+                partialTranscript={engine.partialTranscript}
+                onPrimaryAction={engine.startRecording}
+                onStop={engine.stopRecording}
+              />
+
+              {/* User's question */}
+              <motion.p
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-10 text-xl md:text-2xl text-[var(--text-primary)] text-center font-light max-w-lg"
+              >
+                {engine.partialTranscript || engine.submittedText || "Listening..."}
+              </motion.p>
+
+              {/* Human-readable status */}
+              {engine.pipelineInFlight && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="mt-4 flex items-center gap-3"
+                >
+                  <div className="w-16 h-0.5 rounded-full bg-[var(--bg-elevated)] overflow-hidden">
+                    <motion.div
+                      animate={{ x: ["-100%", "100%"] }}
+                      transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+                      className="w-full h-full bg-[var(--accent-amber)]"
+                    />
+                  </div>
+                  <span className="text-sm text-[var(--accent-amber)]">
+                    {getHumanStatus(engine.pipelineStage)}
+                  </span>
+                </motion.div>
+              )}
+            </motion.div>
+          )}
+
+          {/* ── STATE 3: INSIGHT ────────────────────────────── */}
+          {uiState === "insight" && engine.lastResult && (
+            <motion.div
+              key="insight"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.5, ease: [0.23, 1, 0.32, 1] }}
+              className="w-full max-w-3xl pt-10 md:pt-16"
+            >
+              {/* Question echo */}
+              <div className="flex items-center gap-3 mb-8">
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[var(--accent-blue)] to-indigo-600 flex-shrink-0" />
+                <p className="text-lg text-[var(--text-secondary)] font-light">
+                  {engine.submittedText}
+                </p>
+              </div>
+
+              {/* Narrative — the hero */}
+              <InsightNarrative
+                text={engine.lastResult.resultData.tts_text}
+                isMuted={engine.isMuted}
+                onToggleMute={engine.isMuted ? engine.unmuteTTS : engine.muteTTS}
+              />
+
+              {/* Chart card */}
+              <DataGlassPanel
+                result={engine.lastResult}
+                feedbackSubmitted={engine.feedbackSubmitted}
+                isMuted={engine.isMuted}
+                onFeedback={() => engine.submitFeedback(-1)}
+                onMute={engine.muteTTS}
+                onUnmute={engine.unmuteTTS}
+              />
+
+              {/* Follow-up suggestions */}
+              <FollowUpSuggestions
+                result={engine.lastResult}
+                onSelect={engine.submitQuery}
+                disabled={engine.pipelineInFlight}
+              />
+
+              {/* New conversation button */}
+              <div className="mt-10 flex justify-center">
+                <button
+                  type="button"
+                  onClick={engine.resetConversation}
+                  className="flex items-center gap-2 px-4 py-2 rounded-full text-sm text-[var(--text-muted)] hover:text-[var(--text-secondary)] border border-[var(--border)] hover:border-[var(--border)] hover:bg-[var(--bg-surface)] transition-all"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>New conversation</span>
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+        </AnimatePresence>
+      </div>
+
+      {/* ── Fixed bottom dock ──────────────────────────────── */}
+      <div className="fixed bottom-0 left-0 right-0 p-4 md:p-6 bg-gradient-to-t from-[var(--bg-base)] via-[var(--bg-base)]/95 to-transparent pointer-events-none z-20">
+        <div className="pointer-events-auto">
+          <QueryDock
+            value={engine.submittedText}
+            disabled={!engine.isReady || engine.pipelineInFlight}
+            isReady={engine.isReady}
+            recordingState={engine.recordingState}
+            notice={engine.notice}
+            modeLabel={engine.modeLabel}
+            onChange={engine.setSubmittedText}
+            onSubmit={engine.submitCurrentQuery}
+            onFakeVoice={engine.startFakeVoice}
+            onResetConversation={engine.resetConversation}
+          />
+        </div>
+      </div>
+
+      {/* ── Clarification overlay ──────────────────────────── */}
+      <AnimatePresence>
+        {engine.clarification.pending && (
+          <ClarificationOverlay
+            clarification={engine.clarification}
+            onResolve={engine.submitClarification}
+          />
+        )}
+      </AnimatePresence>
     </main>
   );
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ApiRequestError) {
-    return error.message;
-  }
-  return fallback;
-}
-
-function parseSocketEvent<T>(data: unknown): T | null {
-  if (typeof data !== "string") {
-    return null;
-  }
-  try {
-    return JSON.parse(data) as T;
-  } catch {
-    return null;
-  }
 }

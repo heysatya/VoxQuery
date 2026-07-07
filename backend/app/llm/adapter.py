@@ -6,15 +6,16 @@ from abc import ABC, abstractmethod
 from app.models.contracts import ResultShape
 
 class SqlGenerationResult:
-    def __init__(self, sql: str, llm_self_confidence: float, validation_passed: bool) -> None:
+    def __init__(self, sql: str, llm_self_confidence: float, validation_passed: bool, validation_error: str | None = None) -> None:
         self.sql = sql
         self.llm_self_confidence = llm_self_confidence
         self.validation_passed = validation_passed
+        self.validation_error = validation_error
 
 
 class LlmAdapter(ABC):
     @abstractmethod
-    async def generate_sql(self, submitted_text: str, *, resolved_metric: str | None = None) -> SqlGenerationResult:
+    async def generate_sql(self, submitted_text: str, *, resolved_metric: str | None = None, feedback: str | None = None) -> SqlGenerationResult:
         """Generate SQL without exposing provider-specific prompt mechanics upstream."""
 
     @abstractmethod

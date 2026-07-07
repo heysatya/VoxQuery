@@ -76,6 +76,7 @@ class FakeSqlGenerator(LlmAdapter):
         submitted_text: str,
         *,
         resolved_metric: str | None = None,
+        feedback: str | None = None,
     ) -> SqlGenerationResult:
         metric = _metric_column(resolved_metric or submitted_text)
         dimension = _dimension_column(submitted_text)

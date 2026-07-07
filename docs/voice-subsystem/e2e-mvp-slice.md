@@ -4,7 +4,7 @@
 
 This is the production-ready end-to-end (E2E) implementation slice for the VoxQuery MVP. It integrates all real providers across the data and voice subsystems:
 
-- Voice/text input flow via Deepgram streaming
+- Voice/text input flow and Text-to-Speech (TTS) via Deepgram streaming
 - Clarification loop driven by Claude Haiku (claude-haiku-4-5-20251001)
 - Session memory backed by Upstash Redis
 - Security, Authentication & Session via Clerk
@@ -18,7 +18,8 @@ It proves the application contracts and state flow using live external providers
 - FastAPI backend with Pydantic request/response contracts.
 - Next.js frontend shell.
 - Real voice transcript capture through `/ws/audio` piped to Deepgram STT.
-- Claude Haiku (claude-haiku-4-5-20251001) for entity extraction, ambiguity detection, and SQL generation.
+- Real-time synthesized narrative audio playback through `/ws/tts` via Deepgram TTS.
+- Claude Haiku (claude-haiku-4-5-20251001) for entity extraction, ambiguity detection, story summarization, and SQL generation.
 - Upstash Redis for distributed session-store.
 - Supabase PgVector for RAG context retrieval and Audit writes.
 - Snowflake for secure data warehouse query execution.
@@ -35,6 +36,7 @@ APP_ENV=development
 AUTH_MODE=clerk
 SESSION_STORE=redis
 STT_PROVIDER=deepgram
+TTS_PROVIDER=deepgram
 LLM_PROVIDER=claude
 RAG_PROVIDER=pgvector
 WAREHOUSE_PROVIDER=snowflake
@@ -84,7 +86,8 @@ Use the voice recording functionality or text input. The backend must have valid
 | Prompt | Expected behavior |
 |---|---|
 | `Show revenue by region` | Claude identifies ambiguity around "revenue" (e.g., net vs gross). Triggers one clarification question. |
-| `Show net revenue by customer segment` | Claude generates SQL and queries Snowflake directly. Returns the data payload. |
+| `Show net revenue by customer segment` | Claude generates SQL and queries Snowflake directly. Returns the data payload. UI enters Insight state and Deepgram streams an audio narrative. |
+| `Break it down by region` (Follow-up) | UI updates to `Show net revenue by customer segment → Break it down by region`. Claude generates refined SQL and updates the chart. |
 | `Show revenue by state` | Triggers clarification. After selection, Claude generates SQL and queries Snowflake for state-level data. |
 
 ## UI States
@@ -98,9 +101,9 @@ Use the voice recording functionality or text input. The backend must have valid
 
 1. **Voice Input**: Audio stream connects to Deepgram via WebSocket and returns accurate transcripts in real-time.
 2. **Ambiguity Resolution**: Claude correctly identifies ambiguous queries and initiates the clarification loop.
-3. **State Persistence**: The session is persisted in Redis across the clarification flow.
+3. **State Persistence**: The session is persisted in Redis across the clarification flow. Follow-up queries correctly concatenate their context string visually for the user.
 4. **SQL Execution**: Claude generates valid Snowflake SQL, which is executed against the warehouse successfully, without throwing permissions or syntax errors.
-5. **UI Updates**: The Next.js frontend correctly updates based on the `/ws/pipeline` WebSocket events.
+5. **UI Updates & Audio**: The Next.js frontend correctly updates based on the `/ws/pipeline` events and seamlessly plays the narrative response from the TTS socket.
 6. **Observability**: Langfuse traces the Claude interaction and Supabase records the audit trail.
 
 ## Verification of Architecture Gates
@@ -121,7 +124,7 @@ To verify that each gate in the architecture roadmap has been successfully imple
 
 ### Gate 5 - Supabase/Postgres Audit Writes
 - **Verification:** Log into your Supabase Dashboard and check the `audit_log` table.
-- **Success Criteria:** The system asynchronously writes session telemetry events (e.g., `stt.mic.permission`, `pipeline.completed`) to the database without blocking the user interaction flow or exposing raw warehouse PII.
+- **Success Criteria**: The system asynchronously writes session telemetry events (e.g., `stt.mic.permission`, `pipeline.completed`) to the database safely, correctly casting timestamps without failing in the background asyncpg worker, and avoiding raw PII leakage.
 
 ### Gate 6 - Langfuse Observability
 - **Verification:** Log into your Langfuse Dashboard (`cloud.langfuse.com`).
