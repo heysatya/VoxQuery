@@ -31,6 +31,12 @@ const result = {
   from_cache: false
 };
 
+const mediumResult = {
+  ...result,
+  turn_id: "turn-medium",
+  confidence_tier: "Medium",
+};
+
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
   url: string;
@@ -134,6 +140,9 @@ describe("HomePage", () => {
         }
         if (url.endsWith("/api/result/turn-1")) {
           return jsonResponse(result);
+        }
+        if (url.endsWith("/api/result/turn-medium")) {
+          return jsonResponse(mediumResult);
         }
         if (url.endsWith("/api/feedback")) {
           feedbackCalls += 1;
@@ -507,6 +516,77 @@ describe("HomePage", () => {
     expect(mockGainNode.gain.value).toBe(0);
     expect(worklet.connect).toHaveBeenCalledWith(mockGainNode);
     expect(mockGainNode.connect).toHaveBeenCalledWith(context.destination);
+  });
+
+  // ------------------------------------------------------------------
+  // Data Visualizer (4.6)
+  // ------------------------------------------------------------------
+
+  it("renders a chart override dropdown and responds to selection changes", async () => {
+    render(<HomePage />);
+    const input = await screen.findByLabelText("Ask a data question");
+    fireEvent.change(input, { target: { value: "Show net revenue by customer segment" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    await emitPipeline({ type: "result_ready", turn_id: "turn-1" });
+
+    expect(await screen.findByText("Result")).toBeInTheDocument();
+    
+    // The dropdown should be initialized with the LLM's recommended chart type ("bar")
+    const dropdown = screen.getByLabelText("Chart Type:") as HTMLSelectElement;
+    expect(dropdown).toBeInTheDocument();
+    expect(dropdown.value).toBe("bar");
+
+    // Change the selection to "table"
+    fireEvent.change(dropdown, { target: { value: "table" } });
+    expect(dropdown.value).toBe("table");
+  });
+
+  it("generates a CSV Blob and triggers a download when Download CSV is clicked", async () => {
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn().mockReturnValue("blob:fake-url");
+    URL.revokeObjectURL = vi.fn();
+
+    render(<HomePage />);
+    const input = await screen.findByLabelText("Ask a data question");
+    fireEvent.change(input, { target: { value: "Show net revenue by customer segment" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    await emitPipeline({ type: "result_ready", turn_id: "turn-1" });
+
+    expect(await screen.findByText("Result")).toBeInTheDocument();
+    
+    const downloadBtn = screen.getByRole("button", { name: "Download CSV" });
+    fireEvent.click(downloadBtn);
+
+    expect(URL.createObjectURL).toHaveBeenCalled();
+    // Verify it created a Blob with the expected CSV format
+    const blobArg = (URL.createObjectURL as any).mock.calls[0][0];
+    expect(blobArg).toBeInstanceOf(Blob);
+    
+    const text = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.readAsText(blobArg);
+    });
+    
+    expect(text).toContain("customer_segment,total_net_revenue");
+    expect(text).toContain('"Enterprise",1240000');
+
+    URL.createObjectURL = originalCreateObjectURL;
+    URL.revokeObjectURL = originalRevokeObjectURL;
+  });
+
+  it("renders a caveat warning when confidence tier is Medium", async () => {
+    render(<HomePage />);
+    const input = await screen.findByLabelText("Ask a data question");
+    fireEvent.change(input, { target: { value: "Show net revenue by customer segment" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    await emitPipeline({ type: "result_ready", turn_id: "turn-medium" });
+
+    expect(await screen.findByText("Medium")).toBeInTheDocument();
+    expect(
+      screen.getByText("I'm moderately confident — the query joined tables I'm less familiar with. Review the SQL before actioning.")
+    ).toBeInTheDocument();
   });
 });
 

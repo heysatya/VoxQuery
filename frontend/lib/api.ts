@@ -55,6 +55,15 @@ export async function createSession(
   }, authToken);
 }
 
+export async function deleteSession(
+  sessionId: string,
+  authToken?: string | null
+): Promise<void> {
+  await request(`/api/session/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE"
+  }, authToken);
+}
+
 export async function submitQuery(
   payload: QueryRequest,
   authToken?: string | null
@@ -112,6 +121,12 @@ export function pipelineSocketUrl(sessionId: string, authToken: string | null = 
 export function audioSocketUrl(sessionId: string, authToken: string | null = fakeToken): string {
   return socketUrl(
     `/ws/audio?session_id=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(authToken ?? "")}`
+  );
+}
+
+export function ttsSocketUrl(sessionId: string, turnId: string, authToken: string | null = fakeToken): string {
+  return socketUrl(
+    `/ws/tts?session_id=${encodeURIComponent(sessionId)}&turn_id=${encodeURIComponent(turnId)}&token=${encodeURIComponent(authToken ?? "")}`
   );
 }
 

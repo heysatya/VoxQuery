@@ -7,12 +7,14 @@ import {
   ApiRequestError,
   audioSocketUrl,
   createSession,
+  deleteSession,
   fetchResult,
   pipelineSocketUrl,
   postClarification,
   postFeedback,
   postTelemetry,
-  submitQuery
+  submitQuery,
+  ttsSocketUrl
 } from "../lib/api";
 import type {
   AudioEvent,
@@ -109,6 +111,7 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
     secondsRemaining: 30
   });
   const [lastResult, setLastResult] = useState<LastResult | null>(null);
+  const [userChartOverride, setUserChartOverride] = useState<string | null>(null);
   const [notice, setNotice] = useState(
     auth.mode === "clerk"
       ? "Clerk auth mode active. Requests use the signed-in session token."
@@ -120,6 +123,11 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioWorkletRef = useRef<AudioWorkletNode | null>(null);
+
+  const ttsAudioContextRef = useRef<AudioContext | null>(null);
+  const ttsSocketRef = useRef<WebSocket | null>(null);
+  const nextPlayTimeRef = useRef<number>(0);
+  const [isMuted, setIsMuted] = useState(false);
 
   const apiReady = useMemo(
     () => auth.ready && auth.signedIn && Boolean(session.sessionId),
@@ -153,6 +161,14 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
     setFeedbackSubmitted(false);
     setClarification({ pending: false, question: null, options: [], secondsRemaining: 30 });
     setLastResult(null);
+    setUserChartOverride(null);
+    if (session.sessionId) {
+      try {
+        await deleteSession(session.sessionId, await auth.getToken());
+      } catch (error) {
+        console.warn("Could not explicitly delete session on backend", error);
+      }
+    }
     if (typeof window !== "undefined") {
       window.sessionStorage.removeItem("voxquery_session_id");
     }
@@ -496,6 +512,7 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
     setPipelineInFlight(true);
     setPipelineStage("sql_generation");
     setLastResult(null);
+    setUserChartOverride(null);
     setFeedbackSubmitted(false);
     setClarification({ pending: false, question: null, options: [], secondsRemaining: 30 });
     try {
@@ -581,6 +598,87 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
     setPipelineInFlight(false);
     setPipelineStage(null);
     setNotice("Result ready.");
+    
+    // Attempt TTS playback
+    const token = await auth.getToken();
+    playTTS(turnId, token);
+  }
+
+  function playTTS(turnId: string, token: string | null) {
+    if (!session.sessionId) return;
+    
+    stopTTS();
+    setIsMuted(false);
+    
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      ttsAudioContextRef.current = audioCtx;
+      nextPlayTimeRef.current = audioCtx.currentTime + 0.1;
+      
+      const socket = new WebSocket(ttsSocketUrl(session.sessionId, turnId, token));
+      socket.binaryType = "arraybuffer";
+      ttsSocketRef.current = socket;
+      
+      socket.onmessage = (event) => {
+        if (ttsAudioContextRef.current?.state === "closed") return;
+        
+        const buffer = event.data as ArrayBuffer;
+        const int16Array = new Int16Array(buffer);
+        const float32Array = new Float32Array(int16Array.length);
+        for (let i = 0; i < int16Array.length; i++) {
+          float32Array[i] = int16Array[i] / 32768.0;
+        }
+        
+        const audioBuffer = audioCtx.createBuffer(1, float32Array.length, 16000);
+        audioBuffer.getChannelData(0).set(float32Array);
+        
+        const source = audioCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioCtx.destination);
+        
+        const startTime = Math.max(nextPlayTimeRef.current, audioCtx.currentTime);
+        source.start(startTime);
+        nextPlayTimeRef.current = startTime + audioBuffer.duration;
+      };
+    } catch (e) {
+      console.error("TTS playback failed to initialize", e);
+    }
+  }
+
+  function downloadCSV() {
+    if (!lastResult) return;
+    const { columns, rows } = lastResult.resultData.result;
+    const csvContent = [
+      columns.join(","),
+      ...rows.map((row) =>
+        row
+          .map((v) =>
+            typeof v === "string" ? `"${v.replace(/"/g, '""')}"` : v
+          )
+          .join(",")
+      )
+    ].join("\\n");
+    const blob = new Blob([csvContent], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "voxquery_export.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function stopTTS() {
+    setIsMuted(true);
+    if (ttsSocketRef.current) {
+      ttsSocketRef.current.close();
+      ttsSocketRef.current = null;
+    }
+    if (ttsAudioContextRef.current && ttsAudioContextRef.current.state !== "closed") {
+      ttsAudioContextRef.current.close().catch(console.error);
+      ttsAudioContextRef.current = null;
+    }
   }
 
   async function handleFeedback() {
@@ -657,6 +755,15 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
             <button type="button" onClick={handleSubmit} disabled={!apiReady || pipelineInFlight}>
               Submit
             </button>
+            {isMuted ? (
+              <button type="button" onClick={() => setIsMuted(false)} disabled={pipelineInFlight}>
+                Unmute TTS
+              </button>
+            ) : (
+              <button type="button" onClick={stopTTS} disabled={pipelineInFlight}>
+                Mute TTS
+              </button>
+            )}
           </div>
         </section>
 
@@ -682,7 +789,23 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
             <div className="result-header">
               <h2>Result</h2>
               <span className="confidence">{lastResult.confidenceTier}</span>
+              <label style={{ marginLeft: "1rem" }}>
+                Chart Type:
+                <select 
+                  value={userChartOverride ?? lastResult.chartType}
+                  onChange={(e) => setUserChartOverride(e.target.value)}
+                  style={{ marginLeft: "0.5rem" }}
+                >
+                  <option value="bar">Bar</option>
+                  <option value="line">Line</option>
+                  <option value="table">Table</option>
+                  <option value="stat">Stat</option>
+                </select>
+              </label>
             </div>
+            {lastResult.confidenceTier === "Medium" && (
+              <p className="caveat">I'm moderately confident — the query joined tables I'm less familiar with. Review the SQL before actioning.</p>
+            )}
             <p>{lastResult.chartRationale}</p>
             <table>
               <thead>
@@ -709,6 +832,9 @@ function VoxQueryApp({ auth }: { auth: AuthRelay }) {
             <div className="actions">
               <button type="button" onClick={handleFeedback}>
                 {feedbackSubmitted ? "Feedback recorded" : "Thumbs down"}
+              </button>
+              <button type="button" onClick={downloadCSV}>
+                Download CSV
               </button>
             </div>
           </section>

@@ -3,6 +3,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 
+from app.models.contracts import ResultShape
+
 class SqlGenerationResult:
     def __init__(self, sql: str, llm_self_confidence: float, validation_passed: bool) -> None:
         self.sql = sql
@@ -18,3 +20,8 @@ class LlmAdapter(ABC):
     @abstractmethod
     async def generate_clarification(self, dominant_signal: str) -> tuple[str, list[str]]:
         """Return exactly one clarification question and 2-4 options."""
+
+class Storyteller(ABC):
+    @abstractmethod
+    async def summarize(self, result_shape: ResultShape, user_query: str) -> str:
+        """Generate a 1-3 sentence narrative (Headline, Driver, Implication)."""

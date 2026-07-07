@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     upstash_redis_url: str | None = Field(default=None, alias="UPSTASH_REDIS_URL")
     supabase_database_url: str | None = Field(default=None, alias="SUPABASE_DATABASE_URL")
     stt_provider: str = Field(default="fake", alias="STT_PROVIDER")
+    tts_provider: str = Field(default="fake", alias="TTS_PROVIDER")
     deepgram_api_key: str | None = Field(default=None, alias="DEEPGRAM_API_KEY")
     clerk_issuer: str | None = Field(default=None, alias="CLERK_ISSUER")
     clerk_jwks_url: str | None = Field(default=None, alias="CLERK_JWKS_URL")
@@ -97,8 +98,20 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.backend_cors_origins.split(",") if origin.strip()]
 
     def validate_startup(self) -> None:
-        if self.app_env in {"staging", "production"} and self.auth_mode == "fake":
-            raise RuntimeError("AUTH_MODE=fake is only allowed in development or test.")
+        if self.app_env in {"staging", "production"}:
+            if self.auth_mode == "fake":
+                raise RuntimeError("AUTH_MODE=fake is only allowed in development or test.")
+            if self.stt_provider == "fake":
+                raise RuntimeError("STT_PROVIDER=fake is not allowed in staging/production.")
+            if self.tts_provider == "fake":
+                raise RuntimeError("TTS_PROVIDER=fake is not allowed in staging/production.")
+            if self.llm_provider == "fake":
+                raise RuntimeError("LLM_PROVIDER=fake is not allowed in staging/production.")
+            if self.rag_provider == "fake":
+                raise RuntimeError("RAG_PROVIDER=fake is not allowed in staging/production.")
+            if self.warehouse_provider == "fake":
+                raise RuntimeError("WAREHOUSE_PROVIDER=fake is not allowed in staging/production.")
+                
         if self.auth_mode == "clerk" and (not self.clerk_issuer or not self.clerk_jwks_url):
             raise RuntimeError("CLERK_ISSUER and CLERK_JWKS_URL are required when AUTH_MODE=clerk.")
         if (

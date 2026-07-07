@@ -7,13 +7,32 @@ logger = logging.getLogger(__name__)
 class SnowflakeWarehouseConnector(WarehouseConnector):
     def __init__(self, dsn: str):
         self.dsn = dsn
+        self.last_sql: str | None = None
 
     async def execute_readonly(self, sql: str, *, snowflake_role: str) -> tuple[ResultPayload, ResultShape]:
         # Connect to Snowflake using self.dsn and snowflake_role
         # For MVP we will stub the connection but validate the query limit requirement is met
         
-        if "LIMIT" not in sql.upper():
-            sql += " LIMIT 10000"
+        import sqlglot
+        try:
+            parsed = sqlglot.parse_one(sql, read="snowflake")
+            limit_exp = parsed.args.get("limit")
+            if not limit_exp:
+                parsed = parsed.limit(10000)
+            else:
+                try:
+                    limit_val = int(limit_exp.expression.name)
+                    if limit_val > 10000:
+                        parsed.args["limit"].set("expression", sqlglot.exp.Literal.number(10000))
+                except Exception:
+                    parsed.args["limit"].set("expression", sqlglot.exp.Literal.number(10000))
+            sql = parsed.sql(dialect="snowflake")
+        except Exception as e:
+            logger.warning(f"Failed to parse SQL for limit enforcement, applying naive limit: {e}")
+            if "LIMIT" not in sql.upper():
+                sql += " LIMIT 10000"
+                
+        self.last_sql = sql
             
         # Dynamically extract the first column after SELECT to fix the UI data binding anomaly
         # e.g. "SELECT REGION, SUM(REVENUE)..." -> "REGION"

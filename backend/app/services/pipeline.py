@@ -29,7 +29,7 @@ from app.models.contracts import (
 )
 from app.services.events import PipelineEventBus
 from app.rag.retriever import SchemaRetriever
-from app.llm.adapter import LlmAdapter
+from app.llm.adapter import LlmAdapter, Storyteller
 from app.warehouse.connector import WarehouseConnector
 from app.services.providers import (
     FakeChartSelector,
@@ -52,6 +52,7 @@ class PipelineOrchestrator:
         schema: SchemaRetriever | None = None,
         llm: LlmAdapter | None = None,
         warehouse: WarehouseConnector | None = None,
+        story: Storyteller | None = None,
     ) -> None:
         self.sessions = sessions
         self.events = events
@@ -61,7 +62,7 @@ class PipelineOrchestrator:
         self.llm = llm or FakeSqlGenerator()
         self.warehouse = warehouse or FakeWarehouseConnector()
         self.chart = FakeChartSelector()
-        self.story = FakeStoryteller()
+        self.story = story or FakeStoryteller()
         self.turns: dict[UUID, TurnRecord] = {}
         self._in_flight: set[UUID] = set()
 

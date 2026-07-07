@@ -34,6 +34,18 @@ class FakeRedis:
         self.values[name] = value
         self.ttls[name] = time
 
+    def delete(self, *names: str) -> int:
+        if self.fail:
+            raise RuntimeError(self.error_message)
+        count = 0
+        for name in names:
+            if name in self.values:
+                del self.values[name]
+                if name in self.ttls:
+                    del self.ttls[name]
+                count += 1
+        return count
+
     def ping(self) -> bool:
         if self.fail:
             raise RuntimeError(self.error_message)
@@ -207,6 +219,11 @@ def test_redis_mode_requires_tls_in_staging_and_production():
     staging = Settings(
         APP_ENV="staging",
         AUTH_MODE="clerk",
+        STT_PROVIDER="deepgram",
+        TTS_PROVIDER="deepgram",
+        LLM_PROVIDER="anthropic",
+        RAG_PROVIDER="pgvector",
+        WAREHOUSE_PROVIDER="snowflake",
         SESSION_STORE="redis",
         UPSTASH_REDIS_URL="redis://example.com:6379",
         CLERK_ISSUER="https://clerk.voxquery.test",
@@ -218,6 +235,11 @@ def test_redis_mode_requires_tls_in_staging_and_production():
     production = Settings(
         APP_ENV="production",
         AUTH_MODE="clerk",
+        STT_PROVIDER="deepgram",
+        TTS_PROVIDER="deepgram",
+        LLM_PROVIDER="anthropic",
+        RAG_PROVIDER="pgvector",
+        WAREHOUSE_PROVIDER="snowflake",
         SESSION_STORE="redis",
         UPSTASH_REDIS_URL="rediss://example.com:6379",
         CLERK_ISSUER="https://clerk.voxquery.test",

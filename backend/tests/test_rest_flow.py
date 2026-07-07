@@ -17,7 +17,38 @@ def create_session():
     return response.json()
 
 
-def test_text_query_clarification_then_result_and_feedback():
+def test_delete_session_success():
+    session = create_session()
+    session_id = session["session_id"]
+    
+    # Try deleting it
+    response = client.delete(f"/api/session/{session_id}")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    
+    # Verify it is actually deleted by trying to query
+    query = client.post(
+        "/api/query",
+        json={
+            "session_id": session_id,
+            "submitted_text": "Show revenue by region",
+            "input_modality": "text",
+        },
+    )
+    assert query.status_code == 404
+    assert query.json()["error"]["code"] == "session_not_found"
+
+def test_delete_session_not_found():
+    response = client.delete(f"/api/session/00000000-0000-0000-0000-000000000999")
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "session_not_found"
+
+
+
+from unittest.mock import patch
+
+@patch("app.observability.langfuse.LangfuseTracer.score_feedback")
+def test_text_query_clarification_then_result_and_feedback(mock_score_feedback):
     session = create_session()
     with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
         query = client.post(
@@ -63,6 +94,13 @@ def test_text_query_clarification_then_result_and_feedback():
         },
     )
     assert feedback.status_code == 200
+    
+    # Verify telemetry linkage: tracer.score_feedback must be called with the correct turn_id
+    mock_score_feedback.assert_called_once()
+    assert mock_score_feedback.call_args[0][0] == UUID(body["turn_id"])
+    assert mock_score_feedback.call_args[0][3] is True # clarification_triggered
+    assert mock_score_feedback.call_args[0][4] == "Net revenue" # option_selected
+
     duplicate_feedback = client.post(
         "/api/feedback",
         json={

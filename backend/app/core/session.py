@@ -25,6 +25,8 @@ class RedisClientProtocol(Protocol):
     def get(self, name: str) -> str | bytes | None: ...
 
     def setex(self, name: str, time: int, value: str) -> object: ...
+    
+    def delete(self, *names: str) -> int: ...
 
     def ping(self) -> object: ...
 
@@ -64,6 +66,11 @@ class InMemorySessionStore:
         if session is None or session.user_id != claims.user_id:
             return None
         return session
+
+    def delete(self, tenant_id: UUID, session_id: UUID) -> None:
+        key = self._key(tenant_id, session_id)
+        self._sessions.pop(key, None)
+        self._expires_at.pop(key, None)
 
     def save(self, session: VoiceSession) -> datetime:
         session.last_interaction_ts = datetime.now(UTC)
@@ -209,6 +216,12 @@ class RedisSessionStore(InMemorySessionStore):
         if session.tenant_id != tenant_id or session.session_id != session_id:
             return None
         return session
+
+    def delete(self, tenant_id: UUID, session_id: UUID) -> None:
+        try:
+            self.client.delete(self.redis_key(tenant_id, session_id))
+        except Exception as exc:
+            raise self._session_unavailable(exc) from exc
 
     def save(self, session: VoiceSession) -> datetime:
         session.last_interaction_ts = datetime.now(UTC)

@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from app.api.rest import router as rest_router
 from app.api.ws_audio import router as ws_audio_router
 from app.api.ws_pipeline import router as ws_pipeline_router
+from app.api.ws_tts import router as ws_tts_router
 from app.api.telemetry import router as telemetry_router
 from app.audit.store import AuditStore
 from app.audit.noop import NoopAuditStore
@@ -22,7 +23,7 @@ from app.models.contracts import ApiError, ErrorCode, ErrorEnvelope, ERROR_MESSA
 from app.services.events import PipelineEventBus
 from app.services.pipeline import PipelineOrchestrator
 from app.services.telemetry import StructuredLogger
-from app.llm.claude import ClaudeAdapter
+from app.llm.claude import ClaudeAdapter, ClaudeStoryteller
 from app.rag.pgvector import PgVectorSchemaRetriever
 from app.warehouse.snowflake import SnowflakeWarehouseConnector
 import asyncpg
@@ -67,13 +68,14 @@ else:
 schema_retriever = None
 llm_adapter = None
 warehouse_connector = None
+storyteller = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if settings.supabase_database_url:
         await run_migrations(settings.supabase_database_url)
     
-    global schema_retriever, llm_adapter, warehouse_connector
+    global schema_retriever, llm_adapter, warehouse_connector, storyteller
     
     if settings.rag_provider == "pgvector" and settings.supabase_database_url:
         pool = await asyncpg.create_pool(settings.supabase_database_url, min_size=1, max_size=4, statement_cache_size=0)
@@ -83,6 +85,7 @@ async def lifespan(app: FastAPI):
     if settings.llm_provider == "claude":
         anthropic_client = AsyncAnthropic(api_key=settings.anthropic_api_key) if settings.anthropic_api_key else AsyncAnthropic()
         llm_adapter = ClaudeAdapter(client=anthropic_client)
+        storyteller = ClaudeStoryteller(client=anthropic_client)
         
     if settings.warehouse_provider == "snowflake":
         # Snowflake doesn't need an async initialization pool for this MVP slice
@@ -100,6 +103,7 @@ async def lifespan(app: FastAPI):
         schema=schema_retriever,
         llm=llm_adapter,
         warehouse=warehouse_connector,
+        story=storyteller,
     )
     
     yield
@@ -183,4 +187,5 @@ async def health() -> dict[str, str]:
 app.include_router(rest_router)
 app.include_router(ws_pipeline_router)
 app.include_router(ws_audio_router)
+app.include_router(ws_tts_router)
 app.include_router(telemetry_router)

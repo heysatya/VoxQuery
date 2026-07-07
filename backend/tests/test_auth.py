@@ -187,6 +187,11 @@ def test_clerk_startup_requires_metadata_and_https_in_hosted_envs():
     non_tls = Settings(
         APP_ENV="production",
         AUTH_MODE="clerk",
+        STT_PROVIDER="deepgram",
+        TTS_PROVIDER="deepgram",
+        LLM_PROVIDER="anthropic",
+        RAG_PROVIDER="pgvector",
+        WAREHOUSE_PROVIDER="snowflake",
         CLERK_ISSUER="http://clerk.voxquery.test",
         CLERK_JWKS_URL=JWKS_URL,
     )
@@ -196,6 +201,11 @@ def test_clerk_startup_requires_metadata_and_https_in_hosted_envs():
     configured = Settings(
         APP_ENV="production",
         AUTH_MODE="clerk",
+        STT_PROVIDER="deepgram",
+        TTS_PROVIDER="deepgram",
+        LLM_PROVIDER="anthropic",
+        RAG_PROVIDER="pgvector",
+        WAREHOUSE_PROVIDER="snowflake",
         CLERK_ISSUER=ISSUER,
         CLERK_JWKS_URL=JWKS_URL,
     )

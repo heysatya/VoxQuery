@@ -3,7 +3,8 @@ import logging
 import sqlglot
 from anthropic import AsyncAnthropic
 from app.config import get_settings
-from app.llm.adapter import LlmAdapter, SqlGenerationResult
+from app.llm.adapter import LlmAdapter, SqlGenerationResult, Storyteller
+from app.models.contracts import ResultShape
 from langfuse import observe, get_client
 
 logger = logging.getLogger(__name__)
@@ -116,3 +117,43 @@ class ClaudeAdapter(LlmAdapter):
             options = ["Option A", "Option B", "Skip"]
             get_client().update_current_generation(output={"question": question, "options": options, "error": str(e)})
             return question, options
+
+
+class ClaudeStoryteller(Storyteller):
+    def __init__(self, client: AsyncAnthropic) -> None:
+        self.client = client
+        self.model_name = get_settings().canonical_sql_model
+
+    @observe(as_type="generation", capture_input=False, capture_output=False)
+    async def summarize(self, result_shape: ResultShape, user_query: str) -> str:
+        get_client().update_current_generation(
+            name="claude-story-summarization",
+            input={"user_query": user_query, "result_shape": result_shape.dict()},
+            model=self.model_name
+        )
+        prompt = f"""
+        You are an expert Data Storyteller. Based on the user's query and the resulting data shape below, generate a STRICT 1-3 sentence narrative.
+        The narrative MUST follow this structure: Headline, Driver, Implication. 
+        DO NOT EXCEED 3 SENTENCES.
+        
+        User Query: {user_query}
+        Data Shape Summary: {result_shape.aggregate_summary}
+        Row Count: {result_shape.row_count}
+        Chart Type: {result_shape.chart_type}
+        """
+
+        response = await self.client.messages.create(
+            model=self.model_name,
+            max_tokens=300,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        summary = response.content[0].text.strip()
+        
+        # Ensure it's not overly verbose by simple truncation if the LLM hallucinates longer text
+        # But we trust the LLM mostly with this strong prompt.
+        get_client().update_current_generation(output={"summary": summary})
+        return summary
+

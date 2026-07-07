@@ -52,6 +52,19 @@ async def create_session(
     )
 
 
+@router.delete("/api/session/{session_id}", response_model=StatusResponse)
+async def delete_session(
+    session_id: UUID,
+    claims: AuthClaims = Depends(get_current_user),
+    sessions: InMemorySessionStore = Depends(get_sessions),
+) -> StatusResponse:
+    session = sessions.get_for_claims(claims, session_id)
+    if not session:
+        raise ApiError(ErrorCode.session_not_found, status_code=404)
+    sessions.delete(claims.tenant_id, session_id)
+    return StatusResponse(status="ok")
+
+
 @router.post("/api/query", response_model=QueryAcceptedResponse, status_code=202)
 async def submit_query(
     request: QueryRequest,
@@ -138,8 +151,8 @@ async def submit_feedback(
     option_selected = None
     if turn.clarification_triggered:
         for entity_value in session.resolved_entities.values():
-            if hasattr(entity_value, "raw_text") and entity_value.raw_text:
-                option_selected = entity_value.raw_text
+            if hasattr(entity_value, "option_selected") and entity_value.option_selected:
+                option_selected = entity_value.option_selected
                 break
     
     tracer.score_feedback(
