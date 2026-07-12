@@ -29,6 +29,9 @@ dependencies = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "integration: marks tests as requiring external databases/services",
+]
 
 [tool.ruff]
 line-length = 100

@@ -10,7 +10,7 @@ from app.warehouse.connector import WarehouseConnector
 
 
 class FakeSchemaRetriever(SchemaRetriever):
-    async def retrieve(self, submitted_text: str, tenant_id: UUID) -> tuple[list[SchemaChunk], float]:
+    async def retrieve(self, rewritten: Any, tenant_id: UUID) -> tuple[list[SchemaChunk], float]:
         return [
             SchemaChunk(
                 source_ref="order_items.price",

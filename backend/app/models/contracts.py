@@ -381,6 +381,51 @@ class SchemaChunk(BaseModel):
     column: str | None = None
 
 
+class MetricDefinition(BaseModel):
+    """Definition of a certified business metric."""
+    name: str
+    display_name: str
+    description: str
+
+    formula: str                             # SQL expression
+    source_table: str
+    additional_tables: list[str] = Field(default_factory=list)
+
+    synonyms: list[str] = Field(default_factory=list)
+    related_metrics: list[str] = Field(default_factory=list)
+    default_dimensions: list[str] = Field(default_factory=list)
+    default_grain: str = "day"              # day, week, month, quarter, year
+
+    certified: bool = False
+    owner: str | None = None
+    format: str | None = None           # currency, percentage, number
+
+    @property
+    def all_names(self) -> list[str]:
+        """All known names for this metric (for matching)."""
+        return [self.name, self.display_name] + self.synonyms
+
+    def to_metric_text(self) -> str:
+        """Render metric as human-readable text for embedding."""
+        lines = [
+            f"Metric: {self.display_name}"
+            + (" [CERTIFIED]" if self.certified else ""),
+            f"Name: {self.name}",
+            f"Description: {self.description}",
+            f"Formula: {self.formula}",
+            f"Source table: {self.source_table}",
+        ]
+        if self.synonyms:
+            lines.append(f"Synonyms: {', '.join(self.synonyms)}")
+        if self.default_dimensions:
+            lines.append(
+                f"Default dimensions: {', '.join(self.default_dimensions)}"
+            )
+        if self.format:
+            lines.append(f"Format: {self.format}")
+        return "\n".join(lines)
+
+
 class ResolvedEntity(BaseModel):
     resolution: str
     resolved_at_turn: int

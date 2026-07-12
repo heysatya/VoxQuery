@@ -1,0 +1,324 @@
+# ============================================================
+# Golden Evaluation Dataset
+# Schema-Aware RAG Layer — VoxQuery Sales Analytics
+# Source: VoxQuery Executive Questions + DBSchema
+# ============================================================
+# Format:
+#   question:        Natural language query to test
+#   expected_chunks: What the retriever MUST return
+#     - metric:      Metric card for this metric name
+#     - table:       Table card for this table
+#     - rule:        Business rule containing this keyword
+#   min_recall_at_5: Minimum acceptable recall in top-5 (0.0-1.0)
+# ============================================================
+
+queries:
+  # ─── Revenue Questions ──────────────────────────────────────
+  - id: "gq_001"
+    question: "What was revenue by region last quarter?"
+    domain: sales
+    complexity: simple
+    expected_chunks:
+      - metric: revenue
+      - table: ORDERS
+      - table: ORDER_ITEMS
+      - rule: completed_orders_only
+      - rule: revenue_net_of_discounts
+    min_recall_at_5: 0.80
+    min_recall_at_10: 0.90
+
+  - id: "gq_002"
+    question: "Show me monthly revenue growth with year over year comparison"
+    domain: sales
+    complexity: high
+    expected_chunks:
+      - metric: revenue
+      - table: ORDERS
+      - table: ORDER_ITEMS
+      - rule: duckdb_date_syntax
+    min_recall_at_5: 0.75
+    min_recall_at_10: 0.90
+
+  - id: "gq_003"
+    question: "What is our total gross revenue this year?"
+    domain: sales
+    complexity: simple
+    expected_chunks:
+      - metric: gross_revenue
+      - table: ORDERS
+      - table: ORDER_ITEMS
+    min_recall_at_5: 0.75
+    min_recall_at_10: 0.85
+
+  # ─── Order Questions ────────────────────────────────────────
+  - id: "gq_004"
+    question: "How many orders were placed last month?"
+    domain: sales
+    complexity: simple
+    expected_chunks:
+      - metric: order_count
+      - table: ORDERS
+      - rule: completed_orders_only
+    min_recall_at_5: 0.80
+    min_recall_at_10: 0.90
+
+  - id: "gq_005"
+    question: "Show me monthly order count trend"
+    domain: sales
+    complexity: simple
+    expected_chunks:
+      - metric: order_count
+      - table: ORDERS
+      - rule: duckdb_date_syntax
+    min_recall_at_5: 0.75
+    min_recall_at_10: 0.90
+
+  - id: "gq_006"
+    question: "What is the average order value by customer segment?"
+    domain: sales
+    complexity: medium
+    expected_chunks:
+      - metric: average_order_value
+      - table: ORDERS
+      - table: ORDER_ITEMS
+      - table: CUSTOMERS
+    min_recall_at_5: 0.75
+    min_recall_at_10: 0.90
+
+  # ─── Customer Questions ──────────────────────────────────────
+  - id: "gq_007"
+    question: "How many active customers do we have by region?"
+    domain: customers
+    complexity: simple
+    expected_chunks:
+      - metric: active_customers
+      - table: CUSTOMERS
+      - table: ORDERS
+    min_recall_at_5: 0.80
+    min_recall_at_10: 0.90
+
+  - id: "gq_008"
+    question: "Show customer lifetime value by segment"
+    domain: customers
+    complexity: advanced
+    expected_chunks:
+      - metric: active_customers
+      - metric: average_order_value
+      - table: CUSTOMERS
+      - table: ORDERS
+      - table: ORDER_ITEMS
+    min_recall_at_5: 0.70
+    min_recall_at_10: 0.85
+
+  - id: "gq_009"
+    question: "Which customers are at risk of churning?"
+    domain: customers
+    complexity: advanced
+    expected_chunks:
+      - metric: active_customers
+      - table: CUSTOMERS
+      - table: ORDERS
+      - rule: completed_orders_only
+    min_recall_at_5: 0.70
+    min_recall_at_10: 0.85
+
+  - id: "gq_010"
+    question: "Segment customers using RFM analysis"
+    domain: customers
+    complexity: advanced
+    expected_chunks:
+      - metric: active_customers
+      - metric: revenue
+      - table: CUSTOMERS
+      - table: ORDERS
+      - table: ORDER_ITEMS
+    min_recall_at_5: 0.65
+    min_recall_at_10: 0.80
+
+  # ─── Product Questions ───────────────────────────────────────
+  - id: "gq_011"
+    question: "What are the top 5 products by sales?"
+    domain: products
+    complexity: simple
+    expected_chunks:
+      - metric: revenue
+      - metric: units_sold
+      - table: PRODUCTS
+      - table: ORDER_ITEMS
+      - table: ORDERS
+    min_recall_at_5: 0.75
+    min_recall_at_10: 0.90
+
+  - id: "gq_012"
+    question: "Which products have the highest profit margin?"
+    domain: products
+    complexity: medium
+    expected_chunks:
+      - metric: product_revenue
+      - table: PRODUCTS
+      - table: ORDER_ITEMS
+      - rule: revenue_net_of_discounts
+    min_recall_at_5: 0.70
+    min_recall_at_10: 0.85
+
+  - id: "gq_013"
+    question: "How effective are our discounts on product categories?"
+    domain: products
+    complexity: medium
+    expected_chunks:
+      - metric: discount_rate
+      - metric: revenue
+      - table: PRODUCTS
+      - table: ORDER_ITEMS
+    min_recall_at_5: 0.70
+    min_recall_at_10: 0.85
+
+  # ─── Seller Questions ────────────────────────────────────────
+  - id: "gq_014"
+    question: "Show seller performance scorecard with delivery metrics"
+    domain: sellers
+    complexity: advanced
+    expected_chunks:
+      - metric: order_count
+      - metric: revenue
+      - table: SELLERS
+      - table: ORDER_ITEMS
+      - table: ORDERS
+      - table: ORDER_REVIEWS
+    min_recall_at_5: 0.65
+    min_recall_at_10: 0.80
+
+  - id: "gq_015"
+    question: "Which sellers have the most late deliveries?"
+    domain: sellers
+    complexity: medium
+    expected_chunks:
+      - table: SELLERS
+      - table: ORDERS
+      - rule: delivery_time_calculation
+    min_recall_at_5: 0.70
+    min_recall_at_10: 0.85
+
+  # ─── Payment Questions ───────────────────────────────────────
+  - id: "gq_016"
+    question: "What payment methods are customers using?"
+    domain: payments
+    complexity: simple
+    expected_chunks:
+      - table: ORDER_PAYMENTS
+      - table: ORDERS
+    min_recall_at_5: 0.80
+    min_recall_at_10: 0.90
+
+  - id: "gq_017"
+    question: "Show installment payment behavior by product category"
+    domain: payments
+    complexity: medium
+    expected_chunks:
+      - table: ORDER_PAYMENTS
+      - table: ORDER_ITEMS
+      - table: PRODUCTS
+    min_recall_at_5: 0.70
+    min_recall_at_10: 0.85
+
+  # ─── Geographic Questions ────────────────────────────────────
+  - id: "gq_018"
+    question: "Which states have the highest revenue?"
+    domain: geography
+    complexity: medium
+    expected_chunks:
+      - metric: revenue
+      - table: CUSTOMERS
+      - table: ORDERS
+      - table: ORDER_ITEMS
+    min_recall_at_5: 0.75
+    min_recall_at_10: 0.90
+
+  - id: "gq_019"
+    question: "Show geographic revenue heatmap by city"
+    domain: geography
+    complexity: high
+    expected_chunks:
+      - metric: revenue
+      - table: GEOLOCATION
+      - table: CUSTOMERS
+      - table: ORDERS
+      - rule: customer_geolocation_join
+    min_recall_at_5: 0.65
+    min_recall_at_10: 0.80
+
+  # ─── Executive Dashboard Questions ──────────────────────────
+  - id: "gq_020"
+    question: "Give me the executive KPI dashboard for this month"
+    domain: executive
+    complexity: advanced
+    expected_chunks:
+      - metric: revenue
+      - metric: order_count
+      - metric: active_customers
+      - metric: average_order_value
+      - table: ORDERS
+      - table: ORDER_ITEMS
+      - rule: completed_orders_only
+    min_recall_at_5: 0.65
+    min_recall_at_10: 0.80
+
+  - id: "gq_021"
+    question: "How are we doing compared to last month?"
+    domain: executive
+    complexity: medium
+    expected_chunks:
+      - metric: revenue
+      - metric: order_count
+      - table: ORDERS
+      - rule: completed_orders_only
+    min_recall_at_5: 0.75
+    min_recall_at_10: 0.90
+
+  # ─── Review / Satisfaction Questions ────────────────────────
+  - id: "gq_022"
+    question: "What is the average customer satisfaction score?"
+    domain: reviews
+    complexity: simple
+    expected_chunks:
+      - table: ORDER_REVIEWS
+      - table: ORDERS
+    min_recall_at_5: 0.80
+    min_recall_at_10: 0.90
+
+  - id: "gq_023"
+    question: "How do customer reviews affect product sales?"
+    domain: reviews
+    complexity: medium
+    expected_chunks:
+      - table: ORDER_REVIEWS
+      - table: PRODUCTS
+      - table: ORDER_ITEMS
+      - metric: revenue
+    min_recall_at_5: 0.70
+    min_recall_at_10: 0.85
+
+  # ─── Profit Questions ────────────────────────────────────────
+  - id: "gq_024"
+    question: "What is our total profit and profit margin?"
+    domain: sales
+    complexity: medium
+    expected_chunks:
+      - metric: product_revenue
+      - table: ORDER_ITEMS
+      - table: PRODUCTS
+      - rule: profit_calculation
+    min_recall_at_5: 0.75
+    min_recall_at_10: 0.90
+
+  - id: "gq_025"
+    question: "Show freight cost as percentage of order value by route"
+    domain: operations
+    complexity: high
+    expected_chunks:
+      - table: ORDER_ITEMS
+      - table: ORDERS
+      - table: SELLERS
+      - table: CUSTOMERS
+    min_recall_at_5: 0.65
+    min_recall_at_10: 0.80

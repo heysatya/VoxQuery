@@ -1,0 +1,172 @@
+# ============================================================
+# Business Metric Registry
+# Voice-Driven Data Analyst — Sales Domain MVP
+#
+# Format:
+#   name:            internal identifier (snake_case)
+#   display_name:    user-facing name
+#   description:     plain English explanation
+#   formula:         DuckDB-compatible SQL expression
+#   source_table:    primary source table (fully qualified)
+#   synonyms:        common alternative names
+#   default_dimensions: columns to group by by default
+#   certified:       whether this is a board-approved metric
+# ============================================================
+
+metrics:
+  # ─── Revenue Metrics ─────────────────────────────────────
+  - name: revenue
+    display_name: Revenue
+    description: >
+      Total net sales revenue from completed orders.
+      Excludes discounts and cancelled orders.
+      Use this for all top-line revenue reporting.
+    formula: "SUM(order_total - COALESCE(discount_amount, 0))"
+    source_table: "main.orders"
+    synonyms:
+      - sales
+      - net sales
+      - topline
+      - net revenue
+      - total revenue
+    default_dimensions:
+      - region
+      - order_date
+      - product_category
+    default_grain: month
+    certified: true
+    format: currency
+    owner: finance
+
+  - name: gross_revenue
+    display_name: Gross Revenue
+    description: >
+      Total revenue before discounts. Use when comparing
+      against gross pricing benchmarks.
+    formula: "SUM(order_total)"
+    source_table: "main.orders"
+    synonyms:
+      - gross sales
+      - total sales before discounts
+    default_dimensions:
+      - region
+      - order_date
+    certified: true
+    format: currency
+    owner: finance
+
+  # ─── Order Metrics ────────────────────────────────────────
+  - name: order_count
+    display_name: Order Count
+    description: >
+      Number of completed customer orders.
+      Excludes cancelled and pending orders.
+    formula: "COUNT(DISTINCT order_id)"
+    source_table: "main.orders"
+    synonyms:
+      - orders
+      - number of orders
+      - purchases
+      - transactions
+      - order volume
+    default_dimensions:
+      - region
+      - order_date
+    default_grain: month
+    certified: true
+    format: number
+    owner: sales
+
+  - name: average_order_value
+    display_name: Average Order Value
+    description: >
+      Average revenue per completed order.
+      Key metric for pricing and upsell analysis.
+    formula: "SUM(order_total - COALESCE(discount_amount, 0)) / NULLIF(COUNT(DISTINCT order_id), 0)"
+    source_table: "main.orders"
+    synonyms:
+      - aov
+      - avg order value
+      - average basket size
+      - average ticket
+    default_dimensions:
+      - region
+      - product_category
+    certified: true
+    format: currency
+    owner: sales
+
+  # ─── Customer Metrics ─────────────────────────────────────
+  - name: active_customers
+    display_name: Active Customers
+    description: >
+      Customers who placed at least one completed order
+      in the selected time period.
+    formula: "COUNT(DISTINCT customer_id)"
+    source_table: "main.orders"
+    synonyms:
+      - customers
+      - unique customers
+      - buyers
+      - active buyers
+    default_dimensions:
+      - region
+      - order_date
+    certified: true
+    format: number
+    owner: sales
+
+  # ─── Product Metrics ──────────────────────────────────────
+  - name: units_sold
+    display_name: Units Sold
+    description: Total number of product units sold across all completed orders.
+    formula: "SUM(quantity)"
+    source_table: "main.order_items"
+    synonyms:
+      - quantity sold
+      - volume
+      - units
+    default_dimensions:
+      - product_name
+      - product_category
+      - order_date
+    certified: false
+    format: number
+    owner: product
+
+  - name: product_revenue
+    display_name: Product Revenue
+    description: Revenue attributed to each product, net of discounts.
+    formula: "SUM((unit_price - COALESCE(discount_per_unit, 0)) * quantity)"
+    source_table: "main.order_items"
+    additional_tables:
+      - "main.products"
+    synonyms:
+      - revenue by product
+      - product sales
+    default_dimensions:
+      - product_name
+      - product_category
+      - region
+    certified: false
+    format: currency
+    owner: product
+
+  # ─── Discount Metrics ─────────────────────────────────────
+  - name: discount_rate
+    display_name: Discount Rate
+    description: >
+      Average percentage discount applied to orders.
+      Used to track promotional effectiveness.
+    formula: "AVG(COALESCE(discount_amount, 0) / NULLIF(order_total, 0) * 100)"
+    source_table: "main.orders"
+    synonyms:
+      - average discount
+      - promo rate
+      - discount percentage
+    default_dimensions:
+      - region
+      - order_date
+    certified: false
+    format: percentage
+    owner: marketing

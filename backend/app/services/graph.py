@@ -90,6 +90,7 @@ class PipelineGraphState(TypedDict, total=False):
     # ── populated by nodes ─────────────────────────────────────────────────
     schema_chunks: list             # list[SchemaChunk]
     rag_score: float
+    rewritten_query: Any            # RewrittenQuery
     history: list                   # list[SessionHistoryTurn]
     generation: Any                 # SqlGenerationResult
     attempt_idx: int                # 0-based; max 1 (two total attempts)
@@ -144,6 +145,18 @@ async def input_resolver_node(state: PipelineGraphState) -> dict:
     }
 
 # ---------------------------------------------------------------------------
+# Node: rewrite_query
+# ---------------------------------------------------------------------------
+
+async def rewrite_query_node(state: PipelineGraphState) -> dict:
+    from app.rag.query_rewriter import QueryRewriter
+    turn = state["turn"]
+    rewriter = QueryRewriter()
+    rewritten = rewriter.rewrite(turn.user_input)
+    return {"rewritten_query": rewritten}
+
+
+# ---------------------------------------------------------------------------
 # Node: rag_retrieval
 # ---------------------------------------------------------------------------
 
@@ -157,7 +170,7 @@ async def rag_retrieval_node(state: PipelineGraphState) -> dict:
 
     try:
         schema_chunks, rag_score = await state["schema_retriever"].retrieve(
-            turn.user_input, tenant_id=claims.tenant_id
+            state["rewritten_query"], tenant_id=claims.tenant_id
         )
     except ApiError:
         raise
@@ -561,6 +574,7 @@ def build_pipeline_graph():
     graph: StateGraph = StateGraph(PipelineGraphState)
 
     graph.add_node("input_resolver_node", input_resolver_node)
+    graph.add_node("rewrite_query_node", rewrite_query_node)
     graph.add_node("rag_retrieval_node", rag_retrieval_node)
     graph.add_node("sql_generation_node", sql_generation_node)
     graph.add_node("ambiguity_check_node", ambiguity_check_node)
@@ -571,11 +585,11 @@ def build_pipeline_graph():
     def _route_after_input_resolver(state: PipelineGraphState) -> str:
         # If we are resuming after a user answer, do not block again.
         if state.get("clarification_triggered"):
-            return "rag_retrieval_node"
+            return "rewrite_query_node"
             
         if state.get("pre_sql_ambiguity") is not None:
             return "clarification_node"
-        return "rag_retrieval_node"
+        return "rewrite_query_node"
 
     graph.set_entry_point("input_resolver_node")
     graph.add_conditional_edges(
@@ -583,10 +597,11 @@ def build_pipeline_graph():
         _route_after_input_resolver,
         {
             "clarification_node": "clarification_node",
-            "rag_retrieval_node": "rag_retrieval_node",
+            "rewrite_query_node": "rewrite_query_node",
         },
     )
 
+    graph.add_edge("rewrite_query_node", "rag_retrieval_node")
     graph.add_edge("rag_retrieval_node", "sql_generation_node")
 
     graph.add_conditional_edges(

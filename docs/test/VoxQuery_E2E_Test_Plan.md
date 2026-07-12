@@ -22,25 +22,29 @@ This section maps every cog in the VoxQuery wheel. The backend is orchestrated b
    * *What is `pre_sql_ambiguity`?* Programmatically, it is a signal that halts the pipeline before any heavy processing occurs. For the user, it means they receive an instant clarifying question (e.g., "By 'US', do you mean Shipping or Billing?") instead of waiting 15 seconds for the system to hallucinate an incorrect SQL query.
    * **Routing:** A conditional edge checks this flag. If ambiguity exists, it routes directly to `clarification_node`. If clear, it routes to `rag_retrieval_node`.
 
-3. **Node 2: `rag_retrieval_node` (Schema Context Injection):**
-   * **Action:** The system queries the **Vector Store (Live)** using the user's intent.
-   * **State Update:** It pulls exact DDL (Data Definition Language) and semantic definitions from the Kaggle E-commerce schema and appends them to the graph state.
+3. **Node 2: `rewrite_query_node` (Pre-Retrieval Expansion):**
+   * **Action:** Intercepts the raw query and queries the `MetricRegistry` to resolve business jargon into structured metric metadata.
+   * **State Update:** Generates a `RewrittenQuery` object that explicitly targets required tables.
 
-4. **Node 3: `sql_generation_node` (LLM Synthesis):**
+4. **Node 3: `rag_retrieval_node` (Hybrid Context Injection):**
+   * **Action:** The system queries the **Vector Store (Live)** using the `RewrittenQuery`. It utilizes **Reciprocal Rank Fusion (RRF)**, combining dense vector embeddings and sparse BM25 lexical search for high-recall schema retrieval.
+   * **State Update:** It pulls exact DDL and semantic definitions from the E-commerce schema and appends them to the graph state.
+
+5. **Node 4: `sql_generation_node` (LLM Synthesis):**
    * **Action:** **Anthropic Claude 3.5 Sonnet (Live)** receives the query, the chat history, and the RAG chunks to synthesize a Snowflake-compatible SQL query.
    * **State Update:** Injects the generated SQL into the state.
 
-5. **Node 4: `ambiguity_check_node` (Policy & Post-Generation Validation):**
+6. **Node 5: `ambiguity_check_node` (Policy & Post-Generation Validation):**
    * **Action:** The system runs internal policy checks (e.g., detecting Cartesian joins) and evaluates the LLM's self-reported confidence against the generated SQL.
    * **State Update:** If the SQL violates safety policies or is generated with extremely low confidence, it updates the `ambiguity` field.
    * **Routing:** Routes to `execution_node` if safe. Routes to `clarification_node` if unsafe.
 
-6. **Node 5: `execution_node` (Warehouse Interaction):**
+7. **Node 6: `execution_node` (Warehouse Interaction):**
    * **Action:** **Snowflake (Live)** executes the analytical workload using a locked-down, read-only Role-Based Access Control (RBAC) user. 
    * **State Update:** Retrieves raw rows and infers `ResultSemantics` (deciding if the data should be a Bar chart, Line chart, or Stat card).
 
-7. **Node 6: `clarification_node` (Interruption):**
-   * **Action:** If routed here from Node 1 or Node 4, the graph generates a human-readable question and halts execution.
+8. **Node 7: `clarification_node` (Interruption):**
+   * **Action:** If routed here from Node 1 or Node 5, the graph generates a human-readable question and halts execution.
    * **State Update:** Emits a `ClarificationRequired` payload over the WebSocket. The graph suspends state until the user answers in the UI.
 
 8. **Telemetry & Rendering (Post-Graph):**
@@ -84,11 +88,16 @@ To execute this plan, the environment must be configured with live keys:
 * **Agent UI Action 2:** Click the button for "Shipping Country". Wait for resolution.
 * **Expected UI State:** The modal disappears, the query resumes, and a final numerical result is displayed.
 
-### Category C: RAG & Context Integration
-**Test Case C1: Domain Jargon Resolution**
-* **Agent UI Action:** Type: *"What is our average order value for VIP customers?"* and press Enter.
-* **Expected UI State:** A result is rendered. Expand the "Trust Panel". 
-* **Verification:** The Trust Panel text must explicitly mention using the schema definition for "VIP customers" or show a SQL snippet featuring `COUNT > 5`.
+### Category C: Schema-Aware RAG & Hybrid Retrieval
+**Test Case C1: Metric Registry Resolution**
+* **Agent UI Action:** Type: *"What is our Net Revenue by region?"* and press Enter.
+* **Expected UI State:** A result is rendered without the LLM hallucinating the definition of "Net Revenue".
+* **Verification:** The Trust Panel text or generated SQL must explicitly show the correct formula for Net Revenue (as defined in the Metric Registry) applied accurately, verifying the `rewrite_query_node` successfully mapped the term to specific warehouse tables.
+
+**Test Case C2: RRF Multi-Hop Schema Injection**
+* **Agent UI Action:** Type: *"Show me the conversion rate for active customers vs churned customers."* and press Enter.
+* **Expected UI State:** A Bar or Line chart is rendered comparing the two segments.
+* **Verification:** Check the generated SQL in the Trust Panel. It should accurately join `customers`, `orders`, and whatever tables govern `churn` logic, proving that the RRF (Reciprocal Rank Fusion) retrieved all disparate DDL chunks necessary for this complex query.
 
 ### Category D: Memory & Multi-Turn Context
 **Test Case D1: Pronoun Resolution via History**
