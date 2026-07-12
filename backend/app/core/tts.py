@@ -6,6 +6,12 @@ import aiohttp
 
 from app.config import Settings
 
+DEEPGRAM_AURA_MODEL = "aura-asteria-en"
+DEEPGRAM_AURA_URL = (
+    "https://api.deepgram.com/v1/speak"
+    f"?model={DEEPGRAM_AURA_MODEL}&encoding=linear16&sample_rate=16000"
+)
+
 
 class TTSUnavailableError(Exception):
     """Raised when the TTS provider fails to connect or returns an error."""
@@ -40,7 +46,6 @@ class DeepgramTTSProvider:
         self.logger = logger or logging.getLogger("voxquery.tts")
 
     async def stream_audio(self, text: str) -> AsyncGenerator[bytes, None]:
-        url = "https://api.deepgram.com/v1/speak?model=aura-asteria-en&encoding=linear16&sample_rate=16000"
         headers = {
             "Authorization": f"Token {self.api_key}",
             "Content-Type": "application/json",
@@ -49,16 +54,21 @@ class DeepgramTTSProvider:
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                async with session.post(DEEPGRAM_AURA_URL, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as response:
                     if response.status != 200:
                         body = await response.text()
+                        if self.api_key in body:
+                            body = body.replace(self.api_key, "[REDACTED]")
                         self.logger.error("Deepgram TTS error %d: %s", response.status, body)
                         raise TTSUnavailableError(f"Deepgram returned HTTP {response.status}")
                     
                     async for chunk in response.content.iter_chunked(4096):
                         yield chunk
         except aiohttp.ClientError as exc:
-            self.logger.error("Deepgram TTS network error: %s", exc)
+            err_msg = str(exc)
+            if self.api_key in err_msg:
+                err_msg = err_msg.replace(self.api_key, "[REDACTED]")
+            self.logger.error("Deepgram TTS network error: %s", err_msg)
             raise TTSUnavailableError("Network error connecting to Deepgram TTS") from exc
 
 

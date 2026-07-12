@@ -68,9 +68,9 @@ class PostgresAuditStore(AuditStore):
             self._loop.call_soon_threadsafe(self._queue.put_nowait, ("feedback", turn_id, quality_flag))
             
     async def check_health(self) -> str:
-        """Check Postgres connectivity within a strict 100ms timeout."""
+        """Check Postgres connectivity with a 10-second timeout."""
         try:
-            conn = await asyncio.wait_for(asyncpg.connect(self.dsn), timeout=0.1)
+            conn = await asyncio.wait_for(asyncpg.connect(self.dsn), timeout=10.0)
             await conn.close()
             return "ok"
         except Exception as e:

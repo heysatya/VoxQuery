@@ -11,37 +11,8 @@ type FollowUpSuggestionsProps = {
   disabled: boolean;
 };
 
-function generatePlaceholderSuggestions(result: LastResult): string[] {
-  if (result.proactiveQuestions && result.proactiveQuestions.length > 0) {
-    return result.proactiveQuestions.slice(0, 3);
-  }
-
-  const { columns } = result.resultData.result;
-  const suggestions: string[] = [];
-
-  const hasTimeLike = columns.some(col =>
-    /date|month|quarter|year|week|time|period/i.test(col)
-  );
-  if (hasTimeLike) {
-    suggestions.push("Show this as a trend over time");
-  }
-
-  if (columns.length >= 2) {
-    const label = columns[0].replace(/_/g, " ").toLowerCase();
-    suggestions.push(`Break this down further by ${label}`);
-  }
-
-  suggestions.push("Compare to the previous period");
-
-  if (suggestions.length < 3) {
-    suggestions.push("What's driving this?");
-  }
-
-  return suggestions.slice(0, 3);
-}
-
 export function FollowUpSuggestions({ result, onSelect, disabled }: FollowUpSuggestionsProps) {
-  const suggestions = generatePlaceholderSuggestions(result);
+  const suggestions = result.proactiveQuestions.slice(0, 3);
   if (suggestions.length === 0) return null;
 
   return (

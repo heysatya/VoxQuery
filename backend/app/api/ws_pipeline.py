@@ -27,7 +27,6 @@ async def pipeline_socket(
 
     await websocket.accept()
     queue = app.state.events.connect(session_id)
-    await app.state.pipeline.expire_pending_clarification_if_needed(session_id, claims)
     try:
         while True:
             try:

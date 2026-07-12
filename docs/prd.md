@@ -55,7 +55,7 @@ Scope decisions are intentional. Everything marked out-of-scope is a post-MVP fe
 
 * Chart selector — bar, line, table, and stat card — chosen by result shape
 
-* TTS voice summary (OpenAI tts-1) of the query result
+* TTS voice summary (Deepgram Aura, `aura-asteria-en`) of the query result
 
 * Single-session conversation memory (context within one browser session)
 
@@ -228,7 +228,7 @@ Scope decisions are intentional. Everything marked out-of-scope is a post-MVP fe
 
 * Audio plays automatically after the chart renders (with a visible mute toggle)
 
-* TTS uses OpenAI tts-1 — alloy voice at MVP, no voice selection
+* TTS uses Deepgram Aura (`aura-asteria-en`) at MVP, no voice selection
 
 * Audio is generated in parallel with chart rendering to minimise perceived latency
 
@@ -289,7 +289,7 @@ Three layers: client, backend pipeline, and data layer. The client is thin — i
 | Backend | LiveKit (evaluate for v1.1) | Voice agent state management and WebSocket session orchestration — recommended for MVP if voice agent complexity grows; use HTTP/WebSocket endpoints for structured responses at MVP, evaluate LiveKit cutover before pilot scale-up |
 | Backend | Claude claude-sonnet-4-20250514 | SQL generation, clarification, summary generation |
 | Backend | sqlglot | SQL validation, dialect normalisation, safety enforcement |
-| Backend | OpenAI tts-1 | Voice summary generation |
+| Backend | Deepgram Aura (`aura-asteria-en`) | Voice summary generation |
 | Data | Postgres 16 \+ pgvector | Users, sessions, turns, schema embeddings |
 | Data | Upstash Redis | Session state, rate limiting, query caching |
 | Data | Snowflake (customer) | Live warehouse query execution |
@@ -376,7 +376,7 @@ Optimised for rapid development, low operational overhead, and easy deployment. 
 | Backend | Python 3.12 \+ FastAPI | Async, strong AI/ML ecosystem |
 | LLM | Claude claude-sonnet-4-20250514 (Anthropic) | Best-in-class SQL generation & schema reasoning |
 | STT | Deepgram (streaming) | Lower latency than Whisper API |
-| TTS | OpenAI tts-1 (alloy) | Fastest, lowest cost, sufficient quality |
+| TTS | Deepgram Aura (`aura-asteria-en`) | Low-latency synthesized voice aligned with the Deepgram voice stack |
 | SQL validation | sqlglot | Pure Python, dialect-aware, no dependencies |
 | Embeddings | text-embedding-3-small | Low cost, strong accuracy |
 | Primary DB | Postgres 16 (Supabase) | Managed, pgvector included, no DevOps |
@@ -507,7 +507,7 @@ These items require a decision before or during development. Each has a proposed
 | What is the confidence score threshold for clarification? | 0.65 — tune after 50 pilot queries | ML / Engineering |
 | Should generated SQL be visible to users by default? | Collapsed, expandable on click | Product |
 | Row limit for Snowflake queries? | 10,000 rows hard cap in MVP | Engineering |
-| TTS voice — alloy or nova? | Alloy (neutral, clear) unless pilot requests change | Product |
+| TTS voice — Deepgram Aura voice? | `aura-asteria-en` unless pilot feedback requires another Aura voice | Product |
 | STT provider: Deepgram (current) vs ElevenLabs vs Microsoft VibeVoice (OSS)? | Deepgram for MVP; trigger ElevenLabs evaluation if domain vocabulary transcription accuracy < 90% in first 2 pilot weeks | Engineering lead |
 | SQL generation: Claude API (current) vs private SLM for InfoSec-sensitive pilots? | Claude API for MVP; model-agnostic adapter (Change 16) enables swap without pipeline rewrite; revisit after first enterprise InfoSec review | Engineering lead |
 | Will pilot customer accept SaaS (shared infra) or require single-tenant VPC isolation? | Single-tenant logical isolation in MVP; physical VPC as a fast-follow if pilot deal requires it | Product / Sales |

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
-from app.models.contracts import ChartType, ResultPayload, ResultShape, SchemaChunk
+from app.models.contracts import ChartType, ResultPayload, ResultShape, SchemaChunk, SessionHistoryTurn, SchemaTable, ColumnInfo
 from app.rag.retriever import SchemaRetriever
 from app.llm.adapter import LlmAdapter, SqlGenerationResult
 from app.warehouse.connector import WarehouseConnector
@@ -74,10 +75,19 @@ class FakeSqlGenerator(LlmAdapter):
     async def generate_sql(
         self,
         submitted_text: str,
+        schema_chunks: list[SchemaChunk],
+        conversation_history: list[SessionHistoryTurn],
         *,
-        resolved_metric: str | None = None,
+        resolved_entities: dict[str, Any] | None = None,
         feedback: str | None = None,
+        previous_sql: str | None = None,
     ) -> SqlGenerationResult:
+        resolved_metric = None
+        if resolved_entities:
+            for k, v in resolved_entities.items():
+                if k in ("metric_ambiguity", "revenue"):
+                    resolved_metric = v.resolution
+        
         metric = _metric_column(resolved_metric or submitted_text)
         dimension = _dimension_column(submitted_text)
         confidence = 0.87 if resolved_metric or "revenue" not in submitted_text.lower() else 0.58
@@ -87,7 +97,7 @@ class FakeSqlGenerator(LlmAdapter):
             validation_passed=True,
         )
 
-    async def generate_clarification(self, dominant_signal: str) -> tuple[str, list[str]]:
+    async def generate_clarification(self, dominant_signal: str, *, user_input: str | None = None) -> tuple[str, list[str]]:
         return clarification_options_for_signal()
 
 
@@ -113,6 +123,12 @@ class FakeWarehouseConnector(WarehouseConnector):
             aggregate_summary=summary,
         )
         return result, shape
+
+    def fetch_schema_snapshot(self) -> list[SchemaTable]:
+        return [
+            SchemaTable(table_name="orders", columns=[ColumnInfo(name="order_id", data_type="varchar")]),
+            SchemaTable(table_name="order_items", columns=[ColumnInfo(name="order_id", data_type="varchar"), ColumnInfo(name="price", data_type="float")]),
+        ]
 
 
 class FakeChartSelector:

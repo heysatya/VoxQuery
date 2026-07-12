@@ -12,14 +12,24 @@ import {
   ttsSocketUrl
 } from "../../lib/api";
 import type {
-  AudioEvent,
   ClarificationState,
   LastResult,
   MicPermission,
-  PipelineEvent,
-  RecordingState,
   SessionState
 } from "../../lib/types";
+import {
+  mapVoiceToRecordingState,
+  notice as createNotice,
+  parseAudioEvent,
+  parsePipelineEvent,
+  transitionVoiceState,
+  turnPhaseFromPipelineStage,
+  type NoticeSeverity,
+  type TtsLifecycleState,
+  type TurnLifecycleState,
+  type UserNotice,
+  type VoiceCaptureState
+} from "../state/interactionState";
 
 export type VoxQueryAuthMode = "fake" | "clerk";
 
@@ -29,6 +39,14 @@ export type VoxQueryAuthRelay = {
   signedIn: boolean;
   getToken: () => Promise<string | null>;
 };
+
+type VoiceDraft = {
+  rawTranscript: string;
+  sttConfidence: number;
+};
+
+/** Exposed so the review panel can display the original raw transcript. */
+export type { VoiceDraft };
 
 export type VoxQueryEngine = {
   authMode: VoxQueryAuthMode;
@@ -41,15 +59,21 @@ export type VoxQueryEngine = {
   pipelineInFlight: boolean;
   pipelineStage: string | null;
   lastResult: LastResult | null;
+  turnHistory: LastResult[];
   clarification: ClarificationState;
-  notice: string;
+  notice: UserNotice;
 
   micPermission: MicPermission;
-  recordingState: RecordingState;
+  voiceState: VoiceCaptureState;
+  turnState: TurnLifecycleState;
+  ttsState: TtsLifecycleState;
+  recordingState: ReturnType<typeof mapVoiceToRecordingState>;
   audioAnalyserNode: AnalyserNode | null;
   isMuted: boolean;
+  voiceDraft: VoiceDraft | null;
 
   feedbackSubmitted: boolean;
+  feedbackRating: -1 | 1 | null;
 
   setSubmittedText: (value: string) => void;
   startRecording: () => Promise<void>;
@@ -59,7 +83,7 @@ export type VoxQueryEngine = {
   submitCurrentQuery: () => Promise<void>;
   submitQuery: (text: string) => Promise<void>;
   submitClarification: (selection: string | null) => Promise<void>;
-  submitFeedback: (rating?: -1) => Promise<void>;
+  submitFeedback: (rating?: -1 | 1) => Promise<void>;
   resetConversation: () => Promise<void>;
   muteTTS: () => void;
   unmuteTTS: () => void;
@@ -70,58 +94,90 @@ const tenantId =
   process.env.NEXT_PUBLIC_FAKE_TENANT_ID ??
   "00000000-0000-0000-0000-000000000101";
 
-function parseSocketEvent<T>(data: string): T | null {
-  try {
-    return JSON.parse(data) as T;
-  } catch {
-    return null;
-  }
-}
-
 function errorMessage(error: unknown, fallback: string) {
   if (error instanceof Error) return error.message;
   return fallback;
 }
 
+function normalizeTranscript(value: string) {
+  return value.trim().toLowerCase().split(/\s+/).join(" ");
+}
+
+type WindowWithWebkitAudio = Window &
+  typeof globalThis & {
+    webkitAudioContext?: typeof AudioContext;
+  };
+
+function createBrowserAudioContext(options?: AudioContextOptions) {
+  const audioWindow = window as WindowWithWebkitAudio;
+  const AudioContextConstructor = window.AudioContext ?? audioWindow.webkitAudioContext;
+  if (!AudioContextConstructor) {
+    throw new Error("AudioContext is unavailable.");
+  }
+  return new AudioContextConstructor(options);
+}
+
 export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
   const [session, setSession] = useState<SessionState>({ sessionId: null, conversationId: null });
   const [micPermission, setMicPermission] = useState<MicPermission>("unknown");
-  const [recordingState, setRecordingState] = useState<RecordingState>("idle");
+  const [voiceState, setVoiceState] = useState<VoiceCaptureState>("idle");
   const [partialTranscript, setPartialTranscript] = useState("");
   const [submittedText, setSubmittedText] = useState("");
   const [pipelineInFlight, setPipelineInFlight] = useState(false);
   const [currentTurnId, setCurrentTurnId] = useState<string | null>(null);
   const [pipelineStage, setPipelineStage] = useState<string | null>(null);
+  const [turnState, setTurnState] = useState<TurnLifecycleState>("idle");
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  const [feedbackRating, setFeedbackRating] = useState<-1 | 1 | null>(null);
   const [clarification, setClarification] = useState<ClarificationState>({
     pending: false,
     question: null,
-    options: [],
-    secondsRemaining: 30
+    options: []
   });
   const [lastResult, setLastResult] = useState<LastResult | null>(null);
-  const [notice, setNotice] = useState(
-    auth.mode === "clerk"
-      ? "Clerk auth mode active. Requests use the signed-in session token."
-      : "Local fake mode active. No external credentials are required."
+  const [turnHistory, setTurnHistory] = useState<LastResult[]>([]);
+  const [voiceDraft, setVoiceDraft] = useState<VoiceDraft | null>(null);
+  const [notice, setNoticeState] = useState<UserNotice>(
+    createNotice(
+      auth.mode === "clerk"
+        ? "Clerk auth mode active. Requests use the signed-in session token."
+        : "Local fake mode active. No external credentials are required."
+    )
   );
   const modeLabel = auth.mode === "clerk" ? "clerk auth mode" : "local fake mode";
+  const recordingState = useMemo(() => mapVoiceToRecordingState(voiceState), [voiceState]);
+  const setNotice = useCallback((message: string, severity: NoticeSeverity = "info") => {
+    setNoticeState(createNotice(message, severity));
+  }, []);
 
   const audioSocketRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioWorkletRef = useRef<AudioWorkletNode | null>(null);
+  const currentTurnIdRef = useRef<string | null>(null);
+  const currentTurnRequestRef = useRef<{ submittedText: string; parentTurnId: string | null } | null>(null);
   const [audioAnalyserNode, setAudioAnalyserNode] = useState<AnalyserNode | null>(null);
 
   const ttsAudioContextRef = useRef<AudioContext | null>(null);
   const ttsSocketRef = useRef<WebSocket | null>(null);
+  const activeTtsSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextPlayTimeRef = useRef<number>(0);
   const [isMuted, setIsMuted] = useState(false);
+  const [ttsState, setTtsState] = useState<TtsLifecycleState>("idle");
 
   const isReady = useMemo(
     () => auth.ready && auth.signedIn && Boolean(session.sessionId),
     [auth.ready, auth.signedIn, session.sessionId]
   );
+
+  function setActiveTurnId(turnId: string | null) {
+    currentTurnIdRef.current = turnId;
+    setCurrentTurnId(turnId);
+  }
+
+  function setActiveTurnRequest(submitted: string, parentTurnId: string | null) {
+    currentTurnRequestRef.current = { submittedText: submitted, parentTurnId };
+  }
 
   const ensureSession = useCallback(async () => {
     if (!auth.ready || !auth.signedIn) {
@@ -143,14 +199,18 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
   const resetConversation = useCallback(async () => {
     setPipelineInFlight(false);
     setPipelineStage(null);
-    setCurrentTurnId(null);
+    setActiveTurnId(null);
     setPartialTranscript("");
     setSubmittedText("");
-    setRecordingState("idle");
+    setVoiceDraft(null);
+    setVoiceState("idle");
+    setTurnState("idle");
     setFeedbackSubmitted(false);
-    setClarification({ pending: false, question: null, options: [], secondsRemaining: 30 });
+    setFeedbackRating(null);
+    setClarification({ pending: false, question: null, options: [] });
     setLastResult(null);
-    stopTTS();
+    setTurnHistory([]);
+    stopTTS("idle");
     recorderCleanup();
     if (session.sessionId) {
       try {
@@ -171,11 +231,24 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     } catch (error) {
       setNotice(errorMessage(error, "Could not create a new local conversation."));
     }
-  }, [auth, session.sessionId]);
+  }, [auth, session.sessionId, setNotice]);
 
   useEffect(() => {
-    ensureSession().catch(() => setNotice("Could not create a local session. Is the backend running?"));
-  }, [ensureSession]);
+    let cancelled = false;
+    async function startSession() {
+      try {
+        await ensureSession();
+      } catch {
+        if (!cancelled) {
+          setNotice("Could not create a local session. Is the backend running?");
+        }
+      }
+    }
+    void startSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [ensureSession, setNotice]);
 
   useEffect(() => {
     if (typeof navigator === "undefined" || !navigator.permissions) {
@@ -193,64 +266,75 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       });
   }, []);
 
+  const getTokenRef = useRef(auth.getToken);
+  useEffect(() => {
+    getTokenRef.current = auth.getToken;
+  }, [auth.getToken]);
+
   useEffect(() => {
     if (!session.sessionId || !auth.ready || !auth.signedIn) {
       return;
     }
     let socket: WebSocket | null = null;
     let cancelled = false;
-    auth
-      .getToken()
+    getTokenRef.current()
       .then((token) => {
         if (cancelled || !session.sessionId) {
           return;
         }
         socket = new WebSocket(pipelineSocketUrl(session.sessionId, token));
         socket.onmessage = (message) => {
-          const event = parseSocketEvent<PipelineEvent>(message.data);
+          const event = parsePipelineEvent(message.data);
           if (!event) {
             return;
           }
           if (event.type === "pipeline_progress") {
+            if (currentTurnIdRef.current && event.turn_id !== currentTurnIdRef.current) {
+              return;
+            }
             setPipelineStage(event.stage);
+            setTurnState(turnPhaseFromPipelineStage(event.stage));
             return;
           }
           if (event.type === "clarification_request") {
-            setCurrentTurnId(event.turn_id);
+            if (currentTurnIdRef.current && event.turn_id !== currentTurnIdRef.current) {
+              return;
+            }
+            setActiveTurnId(event.turn_id);
             setClarification({
               pending: true,
               question: event.question,
-              options: event.options,
-              secondsRemaining: event.timeout_seconds
+              options: event.options
             });
             setPipelineInFlight(false);
             setPipelineStage("clarification_pending");
-            setNotice("Clarification required before executing the query.");
-            return;
-          }
-          if (event.type === "clarification_timeout_warning") {
-            setClarification((current) => ({
-              ...current,
-              secondsRemaining: event.seconds_remaining
-            }));
-            setNotice("Clarification will time out soon. Choose an option or rephrase.");
+            setTurnState("clarification_required");
+            setNotice("Clarification required before executing the query.", "warning");
             return;
           }
           if (event.type === "result_ready") {
-            setCurrentTurnId(event.turn_id);
+            if (event.turn_id !== currentTurnIdRef.current) {
+              return;
+            }
             setPipelineInFlight(false);
+            setTurnState("preparing_answer");
             void loadResult(event.turn_id).catch((error) =>
-              setNotice(errorMessage(error, "Result is ready, but could not be loaded."))
+              setNotice(errorMessage(error, "Result is ready, but could not be loaded."), "error")
             );
             return;
           }
           if (event.type === "pipeline_error") {
+            if (event.turn_id !== currentTurnIdRef.current) {
+              return;
+            }
+            setClarification({ pending: false, question: null, options: [] });
             setPipelineInFlight(false);
             setPipelineStage(null);
-            setNotice(event.message);
+            setTurnState(event.code === "clarification_timeout" ? "recoverable_error" : "fatal_error");
+            setNotice(event.message, "error");
           }
         };
-        socket.onerror = () => setNotice("Pipeline event stream unavailable. Check that the backend is running.");
+        socket.onerror = () => setNotice("Pipeline event stream unavailable. Check that the backend is running.", "error");
         socket.onclose = (event) => {
           if (event.code !== 4002) {
             return;
@@ -271,7 +355,9 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       cancelled = true;
       socket?.close();
     };
-  }, [auth, session.sessionId]);
+  }, [auth.ready, auth.signedIn, session.sessionId, setNotice]);
+
+
 
   function recorderCleanup() {
     if (audioWorkletRef.current) {
@@ -305,27 +391,33 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       !navigator.mediaDevices ||
       typeof navigator.mediaDevices.getUserMedia !== "function"
     ) {
-      setNotice("Microphone is unavailable in this context. Use text input or Fake voice.");
+      setVoiceState("capture_error");
+      setNotice("Microphone is unavailable in this context. Use text input or Fake voice.", "error");
       return;
     }
     if (micPermission === "denied") {
-      setNotice("Microphone access denied. Allow access in browser settings or use text input.");
+      setVoiceState("permission_explaining");
+      setNotice("Microphone access denied. Allow access in browser settings or use text input.", "error");
       return;
     }
     if (!session.sessionId) {
-      setNotice("Session is not ready. Cannot start recording.");
+      setVoiceState("capture_error");
+      setNotice("Session is not ready. Cannot start recording.", "error");
       return;
     }
 
     try {
+      setVoiceDraft(null);
+      stopTTS("idle");
       ensureTTSContext();
+      setVoiceState((state) => transitionVoiceState(state, "request_permission"));
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       setMicPermission("granted");
 
       const token = await auth.getToken();
       await postTelemetry({ event: "stt.mic.permission", outcome: "granted", session_id: session.sessionId }, token).catch(console.error);
 
-      setRecordingState("connecting");
+      setVoiceState((state) => transitionVoiceState(state, "permission_granted"));
       setNotice("Microphone access granted. Connecting...");
 
       const socket = new WebSocket(audioSocketUrl(session.sessionId, token));
@@ -334,7 +426,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
 
       socket.onopen = async () => {
         try {
-          const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const audioContext = createBrowserAudioContext();
           audioContextRef.current = audioContext;
 
           await audioContext.audioWorklet.addModule("/audio-processor.js");
@@ -361,18 +453,18 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
           worklet.connect(zeroGain);
           zeroGain.connect(audioContext.destination);
 
-          setRecordingState("recording");
+          setVoiceState((state) => transitionVoiceState(state, "connected"));
           setNotice("Recording...");
         } catch (error) {
           console.error("Audio processor initialization error:", error);
-          setRecordingState("idle");
-          setNotice("Failed to initialize audio processing.");
+          setVoiceState("capture_error");
+          setNotice("Failed to initialize audio processing.", "error");
           recorderCleanup();
         }
       };
 
       socket.onmessage = (message) => {
-        const event = parseSocketEvent<AudioEvent>(message.data);
+        const event = parseAudioEvent(message.data);
         if (!event) return;
 
         if (event.type === "interim_transcript") {
@@ -380,24 +472,27 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
         } else if (event.type === "final_transcript") {
           setPartialTranscript(event.text);
           setSubmittedText(event.text);
-          setRecordingState("idle");
+          setVoiceDraft({ rawTranscript: event.text, sttConfidence: event.confidence });
+          setVoiceState((state) => transitionVoiceState(state, "transcript_ready"));
           setNotice("Transcript received. Review or edit before submitting.");
           recorderCleanup();
         } else if (event.type === "error") {
-          setRecordingState("idle");
-          setNotice(event.message);
+          setVoiceState("capture_error");
+          setNotice(event.message, "error");
           recorderCleanup();
         }
       };
 
       socket.onerror = () => {
-        setRecordingState("idle");
-        setNotice("Audio WebSocket unavailable or error occurred.");
+        setVoiceState("capture_error");
+        setNotice("Audio WebSocket unavailable or error occurred.", "error");
         recorderCleanup();
       };
 
       socket.onclose = () => {
-        setRecordingState((prev) => (prev === "recording" || prev === "processing" ? "idle" : prev));
+        setVoiceState((state) =>
+          state === "listening" || state === "stopping" || state === "finalizing" ? "idle" : state
+        );
         if (audioSocketRef.current === socket) {
           audioSocketRef.current = null;
         }
@@ -411,11 +506,11 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
         if (session.sessionId) {
           await postTelemetry({ event: "stt.mic.permission", outcome: "denied", session_id: session.sessionId }, token).catch(console.error);
         }
-        setNotice("Microphone access denied. Allow access in browser settings or use text input.");
-        setRecordingState("idle");
+        setVoiceState("capture_error");
+        setNotice("Microphone access denied. Allow access in browser settings or use text input.", "error");
       } else {
-        setNotice("Could not access microphone. Try again or use text input.");
-        setRecordingState("idle");
+        setVoiceState("capture_error");
+        setNotice("Could not access microphone. Try again or use text input.", "error");
       }
     }
   }
@@ -430,7 +525,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     if (audioSocketRef.current && audioSocketRef.current.readyState === WebSocket.OPEN) {
       audioSocketRef.current.send(JSON.stringify({ type: "stop_recording" }));
     }
-    setRecordingState("processing");
+    setVoiceState((state) => transitionVoiceState(state, "stop_requested"));
     setNotice("Recording stopped. Processing transcript...");
   }
 
@@ -452,17 +547,19 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       return;
     }
     ensureTTSContext();
-    setRecordingState("connecting");
+    stopTTS("idle");
+    setVoiceDraft(null);
+    setVoiceState("connecting");
     setNotice("Connecting to local fake STT WebSocket.");
     const socket = new WebSocket(audioSocketUrl(session.sessionId, await auth.getToken()));
     socket.onopen = () => {
-      setRecordingState("recording");
+      setVoiceState("listening");
       socket.send(new Uint8Array([1, 2, 3]));
-      setRecordingState("processing");
+      setVoiceState("finalizing");
       socket.send(JSON.stringify({ type: "stop_recording" }));
     };
     socket.onmessage = (message) => {
-      const event = parseSocketEvent<AudioEvent>(message.data);
+      const event = parseAudioEvent(message.data);
       if (!event) {
         return;
       }
@@ -473,63 +570,78 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       if (event.type === "final_transcript") {
         setPartialTranscript(event.text);
         setSubmittedText(event.text);
-        setRecordingState("idle");
+        setVoiceDraft({ rawTranscript: event.text, sttConfidence: event.confidence });
+        setVoiceState("reviewing");
         setNotice("Fake voice transcript received. Review or edit before submitting.");
         socket.close();
         return;
       }
       if (event.type === "error") {
-        setRecordingState("idle");
-        setNotice(event.message);
+        setVoiceState("capture_error");
+        setNotice(event.message, "error");
       }
     };
     socket.onerror = () => {
-      setRecordingState("idle");
-      setNotice("Fake voice WebSocket unavailable. Check that the backend is running.");
+      setVoiceState("capture_error");
+      setNotice("Fake voice WebSocket unavailable. Check that the backend is running.", "error");
     };
-    socket.onclose = () => setRecordingState("idle");
+    socket.onclose = () => setVoiceState((state) => (state === "finalizing" ? "idle" : state));
   }
 
   async function submitQuery(text: string) {
     if (pipelineInFlight) {
-      setNotice("A query is already running. Please wait for it to complete.");
+      setNotice("A query is already running. Please wait for it to complete.", "warning");
       return;
     }
     if (!session.sessionId || !text.trim()) {
-      setNotice("Please enter a question before submitting.");
+      setNotice("Please enter a question before submitting.", "warning");
       return;
     }
 
-    const isFollowUp = !!lastResult;
-    const fullText = (isFollowUp && submittedText) ? `${submittedText} → ${text}` : text;
-    setSubmittedText(fullText);
+    const submitted = text.trim();
+    const parentTurnId = lastResult?.turnId ?? null;
+    const activeVoiceDraft = voiceDraft;
+    const transcriptEdited = activeVoiceDraft
+      ? normalizeTranscript(submitted) !== normalizeTranscript(activeVoiceDraft.rawTranscript)
+      : false;
+    setSubmittedText(submitted);
 
     setPipelineInFlight(true);
     setPipelineStage("sql_generation");
+    setTurnState("submitting");
     setLastResult(null);
     setFeedbackSubmitted(false);
-    setClarification({ pending: false, question: null, options: [], secondsRemaining: 30 });
+    setFeedbackRating(null);
+    setVoiceState("idle");
+    setClarification({ pending: false, question: null, options: [] });
     try {
+      stopTTS("idle", false);
       ensureTTSContext();
       const accepted = await submitQueryApi(
         {
           session_id: session.sessionId,
-          submitted_text: fullText,
-          input_modality: "text",
-          raw_transcript: null,
-          stt_confidence: null
+          parent_turn_id: parentTurnId,
+          submitted_text: submitted,
+          input_modality: activeVoiceDraft ? "voice" : "text",
+          raw_transcript: activeVoiceDraft?.rawTranscript ?? null,
+          stt_confidence: activeVoiceDraft?.sttConfidence ?? null,
+          transcript_edited: transcriptEdited
         },
         await auth.getToken()
       );
-      setCurrentTurnId(accepted.turn_id);
+      setActiveTurnId(accepted.turn_id);
+      setActiveTurnRequest(submitted, parentTurnId);
+      setVoiceDraft(null);
       setFeedbackSubmitted(false);
+      setFeedbackRating(null);
+      setTurnState("accepted");
       setNotice("Query submitted. Waiting for pipeline events.");
     } catch (error) {
       setPipelineInFlight(false);
-      setNotice(errorMessage(error, "Query failed. Check that the backend is running."));
+      setTurnState("recoverable_error");
+      setNotice(errorMessage(error, "Query failed. Check that the backend is running."), "error");
     }
   }
-
   async function submitCurrentQuery() {
     await submitQuery(submittedText);
   }
@@ -549,18 +661,21 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
           },
           await auth.getToken()
         );
-        setClarification({ pending: false, question: null, options: [], secondsRemaining: 30 });
+        setClarification({ pending: false, question: null, options: [] });
         setPipelineStage(null);
-        setCurrentTurnId(null);
+        setActiveTurnId(null);
+        setTurnState("idle");
         setNotice("Clarification escaped. Edit your question and submit again.");
       } catch (error) {
-        setNotice(errorMessage(error, "Could not escape clarification. Try submitting again."));
+        setTurnState("recoverable_error");
+        setNotice(errorMessage(error, "Could not escape clarification. Try submitting again."), "error");
       }
       return;
     }
 
     setPipelineInFlight(true);
     setPipelineStage("snowflake_executing");
+    setTurnState("clarification_submitting");
     try {
       await postClarification(
         {
@@ -571,31 +686,43 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
         },
         await auth.getToken()
       );
-      setClarification({ pending: false, question: null, options: [], secondsRemaining: 30 });
+      setClarification({ pending: false, question: null, options: [] });
+      setTurnState("executing");
       setNotice("Clarification submitted. Waiting for pipeline result.");
     } catch (error) {
       setPipelineInFlight(false);
-      setNotice(errorMessage(error, "Could not resolve clarification. Try submitting again."));
+      setTurnState("recoverable_error");
+      setNotice(errorMessage(error, "Could not resolve clarification. Try submitting again."), "error");
     }
   }
 
   async function loadResult(turnId: string) {
     setPipelineStage("rendering");
+    setTurnState("preparing_answer");
     const result = await fetchResult(turnId, await auth.getToken());
-    setLastResult({
+    if (turnId !== currentTurnIdRef.current || result.turn_id !== turnId) {
+      return;
+    }
+    const request = currentTurnRequestRef.current;
+    const completedResult: LastResult = {
       turnId,
+      submittedText: request?.submittedText ?? submittedText,
+      parentTurnId: request?.parentTurnId ?? null,
       confidenceTier: result.confidence_tier,
       chartType: result.chart_type,
       chartRationale: result.chart_rationale,
       resultData: result,
-      proactiveQuestions: [
-        "Show that by quarter",
-        "Compare this with last month",
-        "Break it down by customer segment"
-      ]
-    });
+      proactiveQuestions: result.proactive_questions
+    };
+    setLastResult(completedResult);
+    setTurnHistory((history) => [
+      ...history.filter((item) => item.turnId !== turnId),
+      completedResult
+    ].slice(-6));
     setPipelineInFlight(false);
     setPipelineStage(null);
+    setTurnState("completed");
+    setClarification({ pending: false, question: null, options: [] });
     setNotice("Result ready.");
 
     const token = await auth.getToken();
@@ -604,7 +731,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
 
   function ensureTTSContext() {
     if (!ttsAudioContextRef.current || ttsAudioContextRef.current.state === "closed") {
-      ttsAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      ttsAudioContextRef.current = createBrowserAudioContext({ sampleRate: 16000 });
     }
     if (ttsAudioContextRef.current.state === "suspended") {
       ttsAudioContextRef.current.resume().catch(console.error);
@@ -620,6 +747,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       ttsSocketRef.current = null;
     }
     setIsMuted(false);
+    setTtsState("loading");
 
     try {
       const audioCtx = ensureTTSContext();
@@ -631,40 +759,78 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
 
       socket.onmessage = (event) => {
         if (ttsAudioContextRef.current?.state === "closed") return;
+        
+        if (!(event.data instanceof ArrayBuffer)) {
+          return;
+        }
 
         const buffer = event.data as ArrayBuffer;
-        const int16Array = new Int16Array(buffer);
+        const safeBuffer = buffer.byteLength % 2 !== 0 ? buffer.slice(0, buffer.byteLength - 1) : buffer;
+        const int16Array = new Int16Array(safeBuffer);
+        
+        if (int16Array.length === 0) return;
+
+        setTtsState("playing");
         const float32Array = new Float32Array(int16Array.length);
         for (let i = 0; i < int16Array.length; i++) {
           float32Array[i] = int16Array[i] / 32768.0;
         }
 
-        const audioBuffer = audioCtx.createBuffer(1, float32Array.length, 16000);
-        audioBuffer.getChannelData(0).set(float32Array);
+        try {
+          const audioBuffer = audioCtx.createBuffer(1, float32Array.length, 16000);
+          audioBuffer.getChannelData(0).set(float32Array);
 
-        const source = audioCtx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(audioCtx.destination);
+          const source = audioCtx.createBufferSource();
+          source.buffer = audioBuffer;
+          source.connect(audioCtx.destination);
+        
+          activeTtsSourcesRef.current.add(source);
+          source.onended = () => {
+            activeTtsSourcesRef.current.delete(source);
+          };
 
-        const startTime = Math.max(nextPlayTimeRef.current, audioCtx.currentTime);
-        source.start(startTime);
-        nextPlayTimeRef.current = startTime + audioBuffer.duration;
+          const startTime = Math.max(nextPlayTimeRef.current, audioCtx.currentTime);
+          source.start(startTime);
+          nextPlayTimeRef.current = startTime + audioBuffer.duration;
+        } catch (err) {
+          console.error("Audio buffer error:", err);
+        }
+      };
+      socket.onerror = () => {
+        setTtsState("failed");
+        setNotice("Voice playback failed. The text answer is still available.", "warning");
+      };
+      socket.onclose = () => {
+        if (ttsSocketRef.current === socket) {
+          ttsSocketRef.current = null;
+        }
+        setTtsState((state) => (state === "loading" || state === "playing" ? "ended" : state));
       };
     } catch (e) {
       console.error("TTS playback failed to initialize", e);
+      setTtsState("failed");
+      setNotice("Voice playback failed to initialize. The text answer is still available.", "warning");
     }
   }
 
-  function stopTTS() {
-    setIsMuted(true);
+  function stopTTS(nextState: TtsLifecycleState = "ended", shouldMute = true) {
+    if (shouldMute) {
+      setIsMuted(true);
+    }
     if (ttsSocketRef.current) {
       ttsSocketRef.current.close();
       ttsSocketRef.current = null;
     }
-    if (ttsAudioContextRef.current && ttsAudioContextRef.current.state !== "closed") {
-      ttsAudioContextRef.current.close().catch(console.error);
-      ttsAudioContextRef.current = null;
-    }
+    activeTtsSourcesRef.current.forEach((source) => {
+      try {
+        source.stop();
+      } catch (e) {
+        // ignore if already stopped
+      }
+    });
+    activeTtsSourcesRef.current.clear();
+    nextPlayTimeRef.current = 0;
+    setTtsState(nextState);
   }
 
   function muteTTS() {
@@ -675,7 +841,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     setIsMuted(false);
   }
 
-  async function submitFeedback(rating?: -1) {
+  async function submitFeedback(rating?: -1 | 1) {
     if (!session.sessionId || !lastResult) {
       return;
     }
@@ -689,6 +855,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
         await auth.getToken()
       );
       setFeedbackSubmitted(true);
+      setFeedbackRating(rating ?? -1);
       setNotice("Feedback recorded for threshold tuning.");
     } catch (error) {
       setNotice(errorMessage(error, "Could not record feedback."));
@@ -705,13 +872,19 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     pipelineInFlight,
     pipelineStage,
     lastResult,
+    turnHistory,
     clarification,
     notice,
     micPermission,
+    voiceState,
+    turnState,
+    ttsState,
     recordingState,
     audioAnalyserNode,
     isMuted,
+    voiceDraft,
     feedbackSubmitted,
+    feedbackRating,
     setSubmittedText,
     startRecording,
     stopRecording,

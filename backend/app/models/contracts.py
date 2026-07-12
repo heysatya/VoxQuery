@@ -5,7 +5,7 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class InputModality(StrEnum):
@@ -72,6 +72,7 @@ class ErrorCode(StrEnum):
     turn_forbidden = "turn_forbidden"
     turn_processing = "turn_processing"
     feedback_duplicate = "feedback_duplicate"
+    rag_unavailable = "rag_unavailable"
     warehouse_timeout = "warehouse_timeout"
     warehouse_error = "warehouse_error"
     sql_generation_failed = "sql_generation_failed"
@@ -93,6 +94,9 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.turn_forbidden: "You don't have access to this result.",
     ErrorCode.turn_processing: "Still processing - please wait.",
     ErrorCode.feedback_duplicate: "Feedback already recorded for this query.",
+    ErrorCode.rag_unavailable: (
+        "Schema retrieval is temporarily unavailable. Check the RAG provider configuration and try again."
+    ),
     ErrorCode.warehouse_timeout: (
         "Query timed out - the data warehouse may need a moment to wake up. "
         "Try again in 30 seconds."
@@ -147,10 +151,12 @@ class SessionCreateResponse(BaseModel):
 
 class QueryRequest(BaseModel):
     session_id: UUID
+    parent_turn_id: UUID | None = None
     submitted_text: str = Field(..., max_length=500)
-    input_modality: Literal[InputModality.text] = InputModality.text
+    input_modality: InputModality = InputModality.text
     raw_transcript: str | None = None
     stt_confidence: float | None = Field(default=None, ge=0, le=1)
+    transcript_edited: bool = False
 
     @field_validator("submitted_text")
     @classmethod
@@ -158,6 +164,31 @@ class QueryRequest(BaseModel):
         if not value.strip():
             raise ValueError("submitted_text must not be empty")
         return value.strip()
+
+    @field_validator("raw_transcript")
+    @classmethod
+    def raw_transcript_not_blank(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("raw_transcript must not be empty when provided")
+        return value.strip() if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_modality_contract(self) -> "QueryRequest":
+        if self.input_modality == InputModality.text:
+            if self.raw_transcript is not None or self.stt_confidence is not None:
+                raise ValueError("text input must not include voice metadata")
+            if self.transcript_edited:
+                raise ValueError("text input must not set transcript_edited")
+            return self
+
+        if self.raw_transcript is None:
+            raise ValueError("voice input requires raw_transcript")
+        if self.stt_confidence is None:
+            raise ValueError("voice input requires stt_confidence")
+        expected_edited = _normalize_transcript(self.submitted_text) != _normalize_transcript(self.raw_transcript)
+        if self.transcript_edited != expected_edited:
+            raise ValueError("transcript_edited must match submitted_text/raw_transcript difference")
+        return self
 
 
 class QueryAcceptedResponse(BaseModel):
@@ -168,7 +199,6 @@ class QueryAcceptedResponse(BaseModel):
 class ClarificationResolutionType(StrEnum):
     option_selected = "option_selected"
     escaped = "escaped"
-    timeout = "timeout"
 
 
 class ClarificationRequest(BaseModel):
@@ -190,9 +220,9 @@ class FeedbackRequest(BaseModel):
 
     @field_validator("rating")
     @classmethod
-    def rating_is_thumbs_down(cls, value: int) -> int:
-        if value != -1:
-            raise ValueError("MVP only accepts thumbs-down rating -1")
+    def rating_is_supported_feedback(cls, value: int) -> int:
+        if value not in {-1, 1}:
+            raise ValueError("Feedback rating must be thumbs-up 1 or thumbs-down -1")
         return value
 
 
@@ -215,10 +245,106 @@ class ResultShape(BaseModel):
     aggregate_summary: str
 
 
+class ResultColumnSemantic(BaseModel):
+    name: str
+    display_name: str
+    role: Literal["dimension", "metric", "time", "identifier", "unknown"]
+    value_type: Literal["string", "number", "date", "datetime", "boolean", "null", "mixed"]
+
+
 class ResultPayload(BaseModel):
     columns: list[str]
     rows: list[list[Any]]
     row_count: int = Field(ge=0)
+    semantic_columns: list[ResultColumnSemantic] = Field(default_factory=list)
+    preview_row_count: int = Field(default=0, ge=0)
+    is_truncated: bool = False
+
+    @model_validator(mode="after")
+    def populate_semantics(self) -> "ResultPayload":
+        if not self.semantic_columns:
+            self.semantic_columns = [
+                infer_result_column_semantic(name, index, self.rows)
+                for index, name in enumerate(self.columns)
+            ]
+        if self.preview_row_count == 0 and self.rows:
+            self.preview_row_count = len(self.rows)
+        self.is_truncated = len(self.rows) < self.row_count
+        return self
+
+
+class ResultTrust(BaseModel):
+    confidence_tier: ConfidenceTier
+    row_count: int = Field(ge=0)
+    warning_count: int = Field(ge=0)
+    generated_sql_present: bool
+    semantic_columns_present: bool
+
+
+def infer_result_column_semantic(
+    name: str,
+    index: int,
+    rows: list[list[Any]],
+) -> ResultColumnSemantic:
+    values = [row[index] for row in rows if index < len(row)]
+    value_type = infer_result_value_type(values)
+    lowered = name.lower()
+    if any(token in lowered for token in ("date", "month", "year", "quarter", "week", "day", "time")):
+        role: Literal["dimension", "metric", "time", "identifier", "unknown"] = "time"
+    elif lowered.endswith("_id") or lowered == "id":
+        role = "identifier"
+    elif value_type == "number" and index > 0:
+        role = "metric"
+    elif value_type == "number" and len(rows) == 1:
+        role = "metric"
+    elif value_type in {"string", "date", "datetime", "boolean"}:
+        role = "dimension"
+    else:
+        role = "unknown"
+    return ResultColumnSemantic(
+        name=name,
+        display_name=name.replace("_", " ").title(),
+        role=role,
+        value_type=value_type,
+    )
+
+
+def infer_result_value_type(
+    values: list[Any],
+) -> Literal["string", "number", "date", "datetime", "boolean", "null", "mixed"]:
+    non_null = [value for value in values if value is not None]
+    if not non_null:
+        return "null"
+    if all(isinstance(value, bool) for value in non_null):
+        return "boolean"
+    if all(isinstance(value, int | float) and not isinstance(value, bool) for value in non_null):
+        return "number"
+    if all(isinstance(value, datetime) for value in non_null):
+        return "datetime"
+    if all(isinstance(value, str) for value in non_null):
+        return "string"
+    return "mixed"
+
+
+def valid_visualizations_for_result(result: ResultPayload) -> list[ChartType]:
+    roles = [column.role for column in result.semantic_columns]
+    value_types = [column.value_type for column in result.semantic_columns]
+    options: list[ChartType] = [ChartType.table]
+    has_metric = "metric" in roles or "number" in value_types
+    has_dimension = any(role in {"dimension", "time"} for role in roles)
+    if result.row_count == 1 and has_metric:
+        options.append(ChartType.stat)
+    if len(result.columns) >= 2 and has_dimension and has_metric:
+        options.append(ChartType.bar)
+    if len(result.columns) >= 2 and roles and roles[0] == "time" and has_metric:
+        options.append(ChartType.line)
+    return options
+
+
+class ResultWarning(BaseModel):
+    code: Literal["possible_duplication"]
+    message: str
+    suggested_sql: str | None = None
 
 
 class ResultResponse(BaseModel):
@@ -229,7 +355,21 @@ class ResultResponse(BaseModel):
     generated_sql: str
     result: ResultPayload
     tts_text: str
+    proactive_questions: list[str] = Field(default_factory=list)
+    warnings: list[ResultWarning] = Field(default_factory=list)
+    valid_visualizations: list[ChartType] = Field(default_factory=list)
+    trust: ResultTrust | None = None
     from_cache: bool = False
+
+
+class ColumnInfo(BaseModel):
+    name: str
+    data_type: str
+
+
+class SchemaTable(BaseModel):
+    table_name: str
+    columns: list[ColumnInfo] = Field(default_factory=list)
 
 
 class SchemaChunk(BaseModel):
@@ -304,7 +444,7 @@ class AmbiguityDetectionResult(BaseModel):
 class ConfidenceInput(BaseModel):
     rag_score: float = Field(ge=0, le=1)
     validation_passed: bool
-    llm_self_confidence: float = Field(ge=0, le=1)
+    llm_self_confidence: float | None = Field(default=None, ge=0, le=1)
     ambiguity_signals: list[AmbiguitySignal]
     threshold: float
 
@@ -315,6 +455,33 @@ class ConfidenceResult(BaseModel):
     clarification_triggered: bool
     ambiguity_penalty_total: float
     formula_weights: dict[str, Any]
+
+
+class ConfidenceEvidence(BaseModel):
+    attempt_id: UUID
+    sql_hash: str
+    retrieval_score: float
+    validation_outcome: bool
+    ambiguity_signals: list[AmbiguitySignal]
+    retry_count: int
+    inputs_present: list[str]
+    inputs_absent: list[str]
+    final_score: float
+    final_tier: ConfidenceTier
+
+
+class AnalyticalAttempt(BaseModel):
+    attempt_id: UUID = Field(default_factory=uuid4)
+    turn_id: UUID
+    attempt_number: int
+    generated_sql: str
+    validation_passed: bool
+    validation_error: str | None = None
+    confidence_inputs: ConfidenceInput | None = None
+    confidence_result: ConfidenceResult | None = None
+    confidence_evidence: ConfidenceEvidence | None = None
+    sql_hash: str
+    executed_sql_hash: str | None = None
 
 
 class PipelineProgressEvent(BaseModel):
@@ -329,13 +496,7 @@ class ClarificationRequestEvent(BaseModel):
     turn_id: UUID
     question: str
     options: list[str]
-    timeout_seconds: int
 
-
-class ClarificationTimeoutWarningEvent(BaseModel):
-    type: str = "clarification_timeout_warning"
-    turn_id: UUID
-    seconds_remaining: int
 
 
 class ResultReadyEvent(BaseModel):
@@ -379,11 +540,13 @@ class TurnRecord(BaseModel):
     turn_id: UUID = Field(default_factory=uuid4)
     session_id: UUID
     conversation_id: UUID
+    parent_turn_id: UUID | None = None
     user_id: UUID
     tenant_id: UUID
     user_input: str
     raw_transcript: str | None = None
     deepgram_confidence_raw: float | None = None
+    transcript_edited: bool = False
     generated_sql: str = ""
     result_json: ResultShape | None = None
     chart_type: ChartType | None = None
@@ -399,5 +562,11 @@ class TurnRecord(BaseModel):
     completed: bool = False
     feedback_submitted: bool = False
     full_result: ResultPayload | None = None
+    result_warnings: list[ResultWarning] = Field(default_factory=list)
     tts_text: str = ""
     from_cache: bool = False
+    attempts: list[AnalyticalAttempt] = Field(default_factory=list)
+
+
+def _normalize_transcript(value: str) -> str:
+    return " ".join(value.strip().casefold().split())

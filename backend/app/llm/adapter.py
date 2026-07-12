@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 
-from app.models.contracts import ResultShape
+from app.models.contracts import ResultShape, SchemaChunk, SessionHistoryTurn
 
 class SqlGenerationResult:
-    def __init__(self, sql: str, llm_self_confidence: float, validation_passed: bool, validation_error: str | None = None) -> None:
+    def __init__(self, sql: str, llm_self_confidence: float | None = None, validation_passed: bool = True, validation_error: str | None = None) -> None:
         self.sql = sql
         self.llm_self_confidence = llm_self_confidence
         self.validation_passed = validation_passed
@@ -15,7 +16,16 @@ class SqlGenerationResult:
 
 class LlmAdapter(ABC):
     @abstractmethod
-    async def generate_sql(self, submitted_text: str, *, resolved_metric: str | None = None, feedback: str | None = None) -> SqlGenerationResult:
+    async def generate_sql(
+        self, 
+        submitted_text: str, 
+        schema_chunks: list[SchemaChunk],
+        conversation_history: list[SessionHistoryTurn],
+        *, 
+        resolved_entities: dict[str, Any] | None = None, 
+        feedback: str | None = None,
+        previous_sql: str | None = None,
+    ) -> SqlGenerationResult:
         """Generate SQL without exposing provider-specific prompt mechanics upstream."""
 
     @abstractmethod

@@ -69,28 +69,24 @@ def test_pipeline_socket_receives_clarification_and_result_after_selection():
         assert result["turn_id"] == query.json()["turn_id"]
 
 
-def test_pipeline_socket_receives_clarification_timeout_warning():
-    settings = get_settings()
-    original_timeout = settings.clarification_timeout_seconds
-    settings.clarification_timeout_seconds = 10
-    try:
-        session = client.post("/api/session", json={"tenant_id": TENANT_ID}).json()
-        with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
-            query = client.post(
-                "/api/query",
-                json={
-                    "session_id": session["session_id"],
-                    "submitted_text": "Show revenue by region",
-                    "input_modality": "text",
-                },
-            )
-            clarification = receive_until(ws, "clarification_request")
-            assert clarification["turn_id"] == query.json()["turn_id"]
-            warning = receive_until(ws, "clarification_timeout_warning")
-            assert warning["turn_id"] == query.json()["turn_id"]
-            assert warning["seconds_remaining"] == 10
-    finally:
-        settings.clarification_timeout_seconds = original_timeout
+def test_pipeline_socket_clarifies_vague_top_item_query():
+    session = client.post("/api/session", json={"tenant_id": TENANT_ID}).json()
+    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
+        query = client.post(
+            "/api/query",
+            json={
+                "session_id": session["session_id"],
+                "submitted_text": "What is the top item?",
+                "input_modality": "text",
+            },
+        )
+        clarification = receive_until(ws, "clarification_request")
+
+        assert query.status_code == 202
+        assert clarification["turn_id"] == query.json()["turn_id"]
+        assert clarification["type"] == "clarification_request"
+
+
 
 
 def receive_until(ws, event_type: str):

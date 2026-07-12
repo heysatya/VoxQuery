@@ -85,16 +85,19 @@ class InMemorySessionStore:
             {term: entity.model_dump(mode="json") for term, entity in session.resolved_entities.items()}
         )
         remaining = max(0, self.settings.token_budget - resolved_token_count)
+        
+        ok_history = [t for t in session.history if t.quality_flag == QualityFlag.ok]
+        
         selected_reversed: list[SessionHistoryTurn] = []
         used = 0
-        for turn in reversed(session.history):
+        for turn in reversed(ok_history):
             turn_tokens = self.counter.count_json(turn.model_dump(mode="json"))
             if used + turn_tokens > remaining:
                 continue
             selected_reversed.append(turn)
             used += turn_tokens
         selected = list(reversed(selected_reversed))
-        turns_dropped = len(session.history) - len(selected)
+        turns_dropped = len(ok_history) - len(selected)
         return SessionContextBlock(
             history=selected,
             resolved_entities=session.resolved_entities,
@@ -261,12 +264,15 @@ class RedisSessionStore(InMemorySessionStore):
             raise RuntimeError("UPSTASH_REDIS_URL is required when SESSION_STORE=redis.")
         import redis
 
-        return redis.Redis.from_url(
-            settings.upstash_redis_url,
-            decode_responses=True,
-            socket_connect_timeout=2,
-            socket_timeout=2,
-        )
+        try:
+            return redis.Redis.from_url(
+                settings.upstash_redis_url,
+                decode_responses=True,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Failed to initialize Redis client: {type(exc).__name__}") from None
 
 
 def build_session_store(settings: Settings | None = None) -> InMemorySessionStore:

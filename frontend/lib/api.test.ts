@@ -7,7 +7,7 @@ describe("api token relay", () => {
   });
 
   it("adds bearer tokens to REST requests when provided", async () => {
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
       new Response(
         JSON.stringify({
           session_id: "session-1",
@@ -32,7 +32,7 @@ describe("api token relay", () => {
   });
 
   it("keeps REST requests credential-free when no token is provided", async () => {
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
       new Response(JSON.stringify({ turn_id: "turn-1", status: "processing" }), {
         status: 202,
         headers: { "Content-Type": "application/json" }
@@ -42,10 +42,12 @@ describe("api token relay", () => {
 
     await submitQuery({
       session_id: "session-1",
+      parent_turn_id: null,
       submitted_text: "Show net revenue by customer segment",
       input_modality: "text",
       raw_transcript: null,
-      stt_confidence: null
+      stt_confidence: null,
+      transcript_edited: false
     });
 
     const init = fetchMock.mock.calls[0][1] as RequestInit;

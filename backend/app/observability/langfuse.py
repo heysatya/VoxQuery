@@ -5,6 +5,7 @@ import contextlib
 from langfuse import Langfuse, propagate_attributes
 from app.services.telemetry import emit
 from app.models.contracts import TurnRecord
+from app.config import get_settings
 
 # We do not want Langfuse internals to raise to the pipeline.
 # We wrap it in a class that catches exceptions and logs them to our telemetry tier 2.
@@ -12,7 +13,11 @@ from app.models.contracts import TurnRecord
 class LangfuseTracer:
     def __init__(self):
         try:
-            self.langfuse = Langfuse()
+            from app.config import get_settings
+            if get_settings().app_env == "test":
+                self.langfuse = None
+            else:
+                self.langfuse = Langfuse()
         except Exception as e:
             emit("langfuse.init.error", tier=2, error=str(e))
             self.langfuse = None
@@ -42,6 +47,7 @@ class LangfuseTracer:
                     "conversation_id": str(turn.conversation_id) if turn.conversation_id else None,
                     "tenant_id": str(turn.tenant_id) if turn.tenant_id else None,
                     "input_modality": turn.input_modality,
+                    "model_name": get_settings().canonical_sql_model,
                 }
             ):
                 with self.langfuse.start_as_current_observation(
@@ -172,35 +178,41 @@ class LangfuseTracer:
             child.end()
         self._safe_call(_span)
 
-    def span_turn_completed(self, trace, latency_ms: int, success: bool = True):
+    def span_turn_completed(self, trace, latency_ms: int, success: bool = True, error_code: str | None = None):
         if not trace:
             return
         def _span():
-            trace.update(metadata={
-                **(trace.metadata or {}),
+            trace_metadata = {
                 "latency_ms": latency_ms,
                 "success": success
-            })
+            }
+            if error_code:
+                trace_metadata["error_code"] = error_code
+
+            trace.update(metadata=trace_metadata)
             child = trace.start_observation(
                 name="turn_completed",
                 as_type="span",
                 output={
                     "latency_ms": latency_ms,
-                    "success": success
+                    "success": success,
+                    "error_code": error_code
                 }
             )
             child.end()
         self._safe_call(_span)
         
-    def score_feedback(self, turn_id: UUID, composite_score: float, confidence_tier: str, clarification_triggered: bool, option_selected: str | None):
+    def score_feedback(self, turn_id: UUID, rating: int, composite_score: float, confidence_tier: str, clarification_triggered: bool, option_selected: str | None):
         if self.langfuse is None:
             return
         def _score():
+            comment = "thumbs-up" if rating == 1 else "thumbs-down"
             self.langfuse.create_score(
                 trace_id=turn_id.hex,
-                name="user_feedback",
-                value=-1,
-                comment="thumbs-down",
+                name="user-thumbs",
+                value=rating,
+                data_type="NUMERIC",
+                comment=comment,
                 metadata={
                     "turn_id": str(turn_id),
                     "confidence_score": composite_score,

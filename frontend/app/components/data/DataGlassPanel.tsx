@@ -2,17 +2,32 @@
 
 import React, { useState } from "react";
 import { motion } from "framer-motion";
-import { ThumbsDown, Code, Download, ChevronDown } from "lucide-react";
+import { ThumbsDown, ThumbsUp, Code, Download, ChevronDown } from "lucide-react";
 import { cn } from "../../../lib/utils";
 import type { LastResult } from "../../../lib/types";
+import {
+  chartRationaleFor,
+  deriveCaveatText,
+  displayNameForColumn,
+  formatResultValue,
+  resultRowSummary,
+  selectedChartType,
+  semanticColumns,
+  type ChartType,
+  type ResultCell,
+  validChartOptions
+} from "../../../lib/resultSemantics";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
   LineChart, Line
 } from "recharts";
+import { TrustPanel } from "./TrustPanel";
 
 /* ── Chart Renderer ────────────────────────────────────────────── */
 
-function ChartRenderer({ type, data }: { type: string; data: { columns: string[]; rows: any[][] } }) {
+function ChartRenderer({ type, result }: { type: ChartType; result: LastResult["resultData"] }) {
+  const data = result.result;
+  const columnSemantics = semanticColumns(result);
   if (!data.columns || !data.rows || data.rows.length === 0) {
     return <div className="p-8 text-center text-[var(--text-muted)]">No data to display</div>;
   }
@@ -22,10 +37,10 @@ function ChartRenderer({ type, data }: { type: string; data: { columns: string[]
     return (
       <div className="flex flex-col items-center justify-center py-12">
         <span className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-widest mb-2">
-          {data.columns[0]}
+          {displayNameForColumn(result, data.columns[0])}
         </span>
         <span className="text-5xl md:text-6xl font-bold bg-gradient-to-r from-[var(--chart-1)] to-[var(--chart-2)] bg-clip-text text-transparent">
-          {String(data.rows[0][0])}
+          {formatResultValue(data.rows[0][0], columnSemantics[0])}
         </span>
       </div>
     );
@@ -38,7 +53,7 @@ function ChartRenderer({ type, data }: { type: string; data: { columns: string[]
           <thead className="border-b border-[var(--border)]">
             <tr>
               {data.columns.map((col, i) => (
-                <th key={i} className="px-4 py-3 font-semibold text-[var(--text-secondary)] whitespace-nowrap text-xs uppercase tracking-wider">{col}</th>
+                <th key={i} className="px-4 py-3 font-semibold text-[var(--text-secondary)] whitespace-nowrap text-xs uppercase tracking-wider">{displayNameForColumn(result, col)}</th>
               ))}
             </tr>
           </thead>
@@ -46,7 +61,7 @@ function ChartRenderer({ type, data }: { type: string; data: { columns: string[]
             {data.rows.map((row, i) => (
               <tr key={i} className="hover:bg-white/[0.02] transition-colors">
                 {row.map((cell, j) => (
-                  <td key={j} className="px-4 py-3 text-[var(--text-primary)] whitespace-nowrap">{String(cell)}</td>
+                  <td key={j} className="px-4 py-3 text-[var(--text-primary)] whitespace-nowrap">{formatResultValue(cell, columnSemantics[j])}</td>
                 ))}
               </tr>
             ))}
@@ -57,9 +72,9 @@ function ChartRenderer({ type, data }: { type: string; data: { columns: string[]
   }
 
   const chartData = data.rows.map(row => {
-    const obj: any = {};
+    const obj: Record<string, ResultCell> = {};
     data.columns.forEach((col, i) => {
-      obj[col] = typeof row[i] === "number" ? row[i] : String(row[i]);
+      obj[col] = row[i];
     });
     return obj;
   });
@@ -116,34 +131,52 @@ function ChartRenderer({ type, data }: { type: string; data: { columns: string[]
 
 type DataGlassPanelProps = {
   result: LastResult;
-  feedbackSubmitted: boolean;
+  feedbackRating: -1 | 1 | null;
   isMuted: boolean;
-  onFeedback: () => void | Promise<void>;
+  onFeedback: (rating: -1 | 1) => void | Promise<void>;
   onMute: () => void;
   onUnmute: () => void;
 };
 
 export function DataGlassPanel({
   result,
-  feedbackSubmitted,
+  feedbackRating,
   onFeedback,
 }: DataGlassPanelProps) {
   const [showSql, setShowSql] = useState(false);
   const [userChartOverride, setUserChartOverride] = useState<string | null>(null);
+  const chartOptions = validChartOptions(result.resultData);
+  const chartType = selectedChartType(result.resultData, userChartOverride);
+  const chartRationale = chartRationaleFor(result.resultData, chartType);
+  const rowSummary = resultRowSummary(result.resultData);
 
-  const confidenceDot =
-    result.confidenceTier === "High" ? "bg-[var(--accent-green)]" :
-    result.confidenceTier === "Medium" ? "bg-[var(--accent-amber)]" :
-    "bg-[var(--accent-rose)]";
+  // 4.2 Evidence-derived caveat — not hardcoded
+  const caveatText = deriveCaveatText(result.resultData);
 
   function downloadCSV() {
     const { columns, rows } = result.resultData.result;
+    const formatHeader = (v: string) => {
+      const str = String(v);
+      if (str.includes('"') || str.includes(",") || str.includes("\n") || str.includes("\r")) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+    const formatCell = (v: ResultCell | undefined) => {
+      if (v === null || v === undefined) return "";
+      if (typeof v === "string") {
+        return `"${v.replace(/"/g, '""')}"`;
+      }
+      const str = String(v);
+      if (str.includes('"') || str.includes(",") || str.includes("\n") || str.includes("\r")) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
     const csvContent = [
-      columns.join(","),
-      ...rows.map((row) =>
-        row.map((v) => typeof v === "string" ? `"${v.replace(/"/g, '""')}"` : String(v)).join(",")
-      )
-    ].join("\\n");
+      columns.map(formatHeader).join(","),
+      ...rows.map((row) => row.map(formatCell).join(","))
+    ].join("\n");
     const blob = new Blob([csvContent], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -162,30 +195,37 @@ export function DataGlassPanel({
       transition={{ duration: 0.5, delay: 0.3 }}
       className="glass-card p-6 md:p-8"
     >
-      {/* Medium confidence caveat */}
-      {result.confidenceTier === "Medium" && (
+      {/* 4.2 Evidence-derived caveat — only shown for Medium/Low, derived from backend */}
+      {caveatText && (
         <div className="mb-6 px-4 py-3 rounded-xl bg-[var(--accent-amber)]/10 border border-[var(--accent-amber)]/20 text-[var(--accent-amber)] text-sm">
-          I'm moderately confident — the query joined tables I'm less familiar with. You may want to review the SQL below.
+          {caveatText}
         </div>
       )}
 
+      {result.resultData.warnings.map((warning) => (
+        <div
+          key={warning.code}
+          className="mb-6 px-4 py-3 rounded-xl bg-[var(--accent-amber)]/10 border border-[var(--accent-amber)]/20 text-[var(--accent-amber)] text-sm"
+        >
+          {warning.message}
+        </div>
+      ))}
+
       {/* Chart */}
+      <div className="sr-only">
+        Chart data alternative: {result.resultData.result.columns.join(", ")}; {rowSummary}.
+      </div>
       <ChartRenderer
-        type={userChartOverride ?? result.chartType}
-        data={result.resultData.result}
+        type={chartType}
+        result={result.resultData}
       />
 
-      {/* Trust & Actions Bar */}
+      {/* Actions bar */}
       <div className="mt-6 pt-5 border-t border-[var(--border)] flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-4 text-sm text-[var(--text-secondary)]">
-          {/* Confidence */}
-          <div className="flex items-center gap-2">
-            <span className={cn("w-2 h-2 rounded-full", confidenceDot)} />
-            <span>{result.confidenceTier} confidence</span>
-          </div>
           {/* Chart rationale */}
-          {result.chartRationale && (
-            <span className="hidden md:inline text-[var(--text-muted)]">· {result.chartRationale}</span>
+          {chartRationale && (
+            <span className="hidden md:inline text-[var(--text-muted)] text-xs">{chartRationale}</span>
           )}
         </div>
 
@@ -193,34 +233,49 @@ export function DataGlassPanel({
           {/* Chart type override */}
           <select
             aria-label="Chart Type"
-            value={userChartOverride ?? result.chartType}
+            value={chartType}
             onChange={(e) => setUserChartOverride(e.target.value)}
-            className="mr-2 bg-transparent border border-[var(--border)] rounded-lg py-1.5 px-2 text-xs text-[var(--text-secondary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-blue)] cursor-pointer"
+            className="mr-2 bg-transparent border border-[var(--border)] rounded-lg py-1.5 px-2 text-xs text-[var(--text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue)] cursor-pointer"
           >
-            <option value="bar">Bar</option>
-            <option value="line">Line</option>
-            <option value="table">Table</option>
-            <option value="stat">Stat</option>
+            {chartOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
           </select>
 
           {/* Download CSV */}
-          <button type="button" onClick={downloadCSV} className="p-2 text-[var(--text-muted)] hover:text-[var(--accent-blue)] rounded-lg transition-colors" title="Download CSV">
+          <button type="button" onClick={downloadCSV} className="p-2 text-[var(--text-muted)] hover:text-[var(--accent-blue)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] rounded-lg transition-colors" title="Download CSV">
             <Download className="h-4 w-4" />
           </button>
 
           {/* Feedback */}
           <button
             type="button"
-            onClick={onFeedback}
+            onClick={() => onFeedback(1)}
             className={cn(
-              "p-2 rounded-lg transition-colors",
-              feedbackSubmitted ? "text-[var(--accent-rose)] cursor-default" : "text-[var(--text-muted)] hover:text-[var(--accent-rose)]"
+              "p-2 rounded-lg transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)]",
+              feedbackRating === 1 ? "text-[var(--accent-green)]" : "text-[var(--text-muted)] hover:text-[var(--accent-green)]"
             )}
-            title={feedbackSubmitted ? "Feedback recorded" : "Flag this result"}
+            title={feedbackRating === 1 ? "Feedback recorded" : "Mark helpful"}
           >
-            <ThumbsDown className={cn("h-4 w-4", feedbackSubmitted && "fill-current")} />
+            <ThumbsUp className={cn("h-4 w-4", feedbackRating === 1 && "fill-current")} />
+          </button>
+          <button
+            type="button"
+            onClick={() => onFeedback(-1)}
+            className={cn(
+              "p-2 rounded-lg transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)]",
+              feedbackRating === -1 ? "text-[var(--accent-rose)]" : "text-[var(--text-muted)] hover:text-[var(--accent-rose)]"
+            )}
+            title={feedbackRating === -1 ? "Feedback recorded" : "Flag this result"}
+          >
+            <ThumbsDown className={cn("h-4 w-4", feedbackRating === -1 && "fill-current")} />
           </button>
         </div>
+      </div>
+
+      {/* 4.1 Trust Panel — full expandable section */}
+      <div className="mt-4">
+        <TrustPanel result={result} />
       </div>
 
       {/* View SQL — collapsed by default */}
@@ -228,7 +283,7 @@ export function DataGlassPanel({
         <button
           type="button"
           onClick={() => setShowSql(!showSql)}
-          className="flex items-center gap-2 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+          className="flex items-center gap-2 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] transition-colors"
         >
           <Code className="h-3.5 w-3.5" />
           <span>{showSql ? "Hide SQL" : "View generated SQL"}</span>

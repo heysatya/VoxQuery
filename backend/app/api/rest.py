@@ -15,9 +15,11 @@ from app.models.contracts import (
     QueryAcceptedResponse,
     QueryRequest,
     ResultResponse,
+    ResultTrust,
     SessionCreateRequest,
     SessionCreateResponse,
     StatusResponse,
+    valid_visualizations_for_result,
 )
 from app.services.pipeline import PipelineOrchestrator
 
@@ -91,17 +93,6 @@ async def submit_clarification(
     return ClarificationResponse(turn_id=request.turn_id)
 
 
-@router.post("/api/dev/clarification-timeout", response_model=ClarificationResponse)
-async def force_clarification_timeout(
-    request: ClarificationRequest,
-    claims: AuthClaims = Depends(get_current_user),
-    pipeline: PipelineOrchestrator = Depends(get_pipeline),
-    settings: Settings = Depends(get_settings),
-) -> ClarificationResponse:
-    if settings.app_env not in {"development", "test"}:
-        raise ApiError(ErrorCode.turn_not_found, status_code=404)
-    turn = await pipeline.force_timeout(request.session_id, claims)
-    return ClarificationResponse(turn_id=turn.turn_id)
 
 
 @router.get("/api/result/{turn_id}", response_model=ResultResponse)
@@ -123,6 +114,16 @@ async def get_result(
         generated_sql=turn.generated_sql,
         result=turn.full_result,
         tts_text=turn.tts_text,
+        proactive_questions=[],
+        warnings=turn.result_warnings,
+        valid_visualizations=valid_visualizations_for_result(turn.full_result),
+        trust=ResultTrust(
+            confidence_tier=turn.confidence_tier,
+            row_count=turn.full_result.row_count,
+            warning_count=len(turn.result_warnings),
+            generated_sql_present=bool(turn.generated_sql),
+            semantic_columns_present=bool(turn.full_result.semantic_columns),
+        ),
         from_cache=turn.from_cache,
     )
 
@@ -142,10 +143,12 @@ async def submit_feedback(
         raise ApiError(ErrorCode.session_not_found, status_code=404)
     from app.observability.langfuse import tracer
     
-    sessions.mark_low_quality(session, request.turn_id)
+    quality_flag = "low" if request.rating == -1 else "ok"
+    if request.rating == -1:
+        sessions.mark_low_quality(session, request.turn_id)
     turn.feedback_submitted = True
-    turn.quality_flag = "low"
-    pipeline.audit.enqueue_feedback(str(request.turn_id), "low")
+    turn.quality_flag = quality_flag
+    pipeline.audit.enqueue_feedback(str(request.turn_id), quality_flag)
     
     # Optional option_selected resolution for the metadata
     option_selected = None
@@ -157,6 +160,7 @@ async def submit_feedback(
     
     tracer.score_feedback(
         request.turn_id,
+        request.rating,
         turn.composite_score,
         turn.confidence_tier,
         turn.clarification_triggered,

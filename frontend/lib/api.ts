@@ -94,7 +94,7 @@ export async function fetchResult(
 export async function postFeedback(payload: {
   session_id: string;
   turn_id: string;
-  rating: -1;
+  rating: -1 | 1;
 }, authToken?: string | null): Promise<void> {
   await request("/api/feedback", {
     method: "POST",

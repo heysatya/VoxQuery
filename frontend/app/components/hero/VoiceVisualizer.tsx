@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef } from "react";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { Mic, Square, Loader2 } from "lucide-react";
 import { cn } from "../../../lib/utils";
 import type { RecordingState } from "../../../lib/types";
@@ -27,9 +27,10 @@ export function VoiceVisualizer({
 }: VoiceVisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number>();
+  const prefersReducedMotion = useReducedMotion();
 
   useEffect(() => {
-    if (!analyser || state !== "recording" || !canvasRef.current) {
+    if (prefersReducedMotion || !analyser || state !== "recording" || !canvasRef.current) {
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
       return;
     }
@@ -70,7 +71,7 @@ export function VoiceVisualizer({
 
     draw();
     return () => { if (animationRef.current) cancelAnimationFrame(animationRef.current); };
-  }, [analyser, state]);
+  }, [analyser, state, prefersReducedMotion]);
 
   const isRecording = state === "recording";
   const isConnecting = state === "connecting";
@@ -100,12 +101,15 @@ export function VoiceVisualizer({
       style={{ width: 280, height: 280 }}
     >
       <motion.div
-        animate={{
+        animate={prefersReducedMotion ? {
+          scale: 1,
+          rotate: 0,
+        } : {
           scale: isRecording ? [1, 1.08, 1] : isProcessing ? [1, 1.04, 1] : [1, 1.03, 1],
           rotate: isProcessing ? 360 : 0,
         }}
         transition={{
-          repeat: Infinity,
+          repeat: prefersReducedMotion ? 0 : Infinity,
           duration: isRecording ? 1.5 : isProcessing ? 5 : 4,
           ease: isProcessing ? "linear" : "easeInOut",
         }}
@@ -129,7 +133,8 @@ export function VoiceVisualizer({
           disabled
             ? "bg-[#4A4E69] cursor-not-allowed"
             : `bg-gradient-to-br ${buttonGradient}`,
-          !disabled && !isProcessing && !isConnecting && "hover:scale-105"
+          !disabled && !isProcessing && !isConnecting && "hover:scale-105",
+          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--accent-blue)]"
         )}
       >
         {isRecording ? (

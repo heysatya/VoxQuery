@@ -88,7 +88,7 @@ async def lifespan(app: FastAPI):
     
     if settings.rag_provider == "pgvector" and settings.supabase_database_url:
         pool = await asyncpg.create_pool(settings.supabase_database_url, min_size=1, max_size=4, statement_cache_size=0)
-        openai_client = AsyncOpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else AsyncOpenAI()
+        openai_client = AsyncOpenAI()
         schema_retriever = PgVectorSchemaRetriever(openai_client=openai_client, db_pool=pool)
         
     if settings.llm_provider == "claude":
@@ -99,7 +99,8 @@ async def lifespan(app: FastAPI):
     if settings.warehouse_provider == "snowflake":
         # Snowflake doesn't need an async initialization pool for this MVP slice
         # The connector will handle it during execute_readonly
-        warehouse_connector = SnowflakeWarehouseConnector(dsn="dummy_dsn")
+        dsn = settings.snowflake_dsn or "dummy_dsn"
+        warehouse_connector = SnowflakeWarehouseConnector(dsn=dsn)
         
     await audit_store.start()
     

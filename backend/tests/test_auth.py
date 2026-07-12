@@ -208,6 +208,10 @@ def test_clerk_startup_requires_metadata_and_https_in_hosted_envs():
         WAREHOUSE_PROVIDER="snowflake",
         CLERK_ISSUER=ISSUER,
         CLERK_JWKS_URL=JWKS_URL,
+        DEEPGRAM_API_KEY="dummy",
+        ANTHROPIC_API_KEY="dummy",
+        OPENAI_API_KEY="dummy",
+        SUPABASE_DATABASE_URL="dummy",
     )
     configured.validate_startup()
 

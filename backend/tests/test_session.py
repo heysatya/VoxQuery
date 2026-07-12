@@ -228,6 +228,10 @@ def test_redis_mode_requires_tls_in_staging_and_production():
         UPSTASH_REDIS_URL="redis://example.com:6379",
         CLERK_ISSUER="https://clerk.voxquery.test",
         CLERK_JWKS_URL="https://clerk.voxquery.test/.well-known/jwks.json",
+        DEEPGRAM_API_KEY="dummy",
+        ANTHROPIC_API_KEY="dummy",
+        OPENAI_API_KEY="dummy",
+        SUPABASE_DATABASE_URL="dummy",
     )
     with pytest.raises(RuntimeError, match="rediss://"):
         staging.validate_startup()
@@ -244,6 +248,10 @@ def test_redis_mode_requires_tls_in_staging_and_production():
         UPSTASH_REDIS_URL="rediss://example.com:6379",
         CLERK_ISSUER="https://clerk.voxquery.test",
         CLERK_JWKS_URL="https://clerk.voxquery.test/.well-known/jwks.json",
+        DEEPGRAM_API_KEY="dummy",
+        ANTHROPIC_API_KEY="dummy",
+        OPENAI_API_KEY="dummy",
+        SUPABASE_DATABASE_URL="dummy",
     )
     production.validate_startup()
 

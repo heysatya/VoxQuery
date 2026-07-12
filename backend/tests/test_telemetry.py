@@ -16,9 +16,11 @@ Design contract:
 from __future__ import annotations
 
 import json
+from uuid import uuid4
 
 import pytest
 
+from app.observability.langfuse import LangfuseTracer
 from app.services.telemetry import StructuredLogger, emit
 
 
@@ -155,3 +157,51 @@ def test_empty_structured_logger_emits_valid_json(capsys):
     line = json.loads(out)
     assert line["event"] == "stt.test"
     assert line["tier"] == 3
+
+
+class FakeLangfuseScores:
+    def __init__(self):
+        self.scores = []
+
+    def create_score(self, **kwargs):
+        self.scores.append(kwargs)
+
+
+def test_langfuse_feedback_score_preserves_positive_and_negative_signals():
+    fake_langfuse = FakeLangfuseScores()
+    tracer = LangfuseTracer.__new__(LangfuseTracer)
+    tracer.langfuse = fake_langfuse
+
+    positive_turn_id = uuid4()
+    negative_turn_id = uuid4()
+
+    tracer.score_feedback(
+        positive_turn_id,
+        1,
+        0.92,
+        "high",
+        False,
+        None,
+    )
+    tracer.score_feedback(
+        negative_turn_id,
+        -1,
+        0.41,
+        "low",
+        True,
+        "Net revenue",
+    )
+
+    assert fake_langfuse.scores[0]["trace_id"] == positive_turn_id.hex
+    assert fake_langfuse.scores[0]["name"] == "user-thumbs"
+    assert fake_langfuse.scores[0]["value"] == 1
+    assert fake_langfuse.scores[0]["data_type"] == "NUMERIC"
+    assert fake_langfuse.scores[0]["comment"] == "thumbs-up"
+    assert fake_langfuse.scores[0]["metadata"]["confidence_score"] == 0.92
+
+    assert fake_langfuse.scores[1]["trace_id"] == negative_turn_id.hex
+    assert fake_langfuse.scores[1]["name"] == "user-thumbs"
+    assert fake_langfuse.scores[1]["value"] == -1
+    assert fake_langfuse.scores[1]["data_type"] == "NUMERIC"
+    assert fake_langfuse.scores[1]["comment"] == "thumbs-down"
+    assert fake_langfuse.scores[1]["metadata"]["option_selected"] == "Net revenue"

@@ -11,6 +11,10 @@ import { InsightNarrative } from "./components/insight/InsightNarrative";
 import { FollowUpSuggestions } from "./components/insight/FollowUpSuggestions";
 import { ClarificationOverlay } from "./components/clarification/ClarificationOverlay";
 import { QueryDock } from "./components/query/QueryDock";
+import { TranscriptReviewPanel } from "./components/transcript/TranscriptReviewPanel";
+import { ThreadHistory } from "./components/thread/ThreadHistory";
+import { FailureNotice } from "./components/notice/FailureNotice";
+import { getStatusLabel } from "./state/interactionState";
 
 const authMode = process.env.NEXT_PUBLIC_AUTH_MODE ?? "fake";
 
@@ -74,22 +78,6 @@ const fakeAuthRelay: VoxQueryAuthRelay = {
   getToken: async () => "fake"
 };
 
-/* ── Human-readable status mapping ───────────────────────────── */
-
-function getHumanStatus(pipelineStage: string | null): string {
-  if (!pipelineStage) return "Analyzing your data...";
-  const map: Record<string, string> = {
-    stt: "Processing your voice...",
-    rag_retrieval: "Understanding your question...",
-    sql_generation: "Crafting the query...",
-    sql_validation: "Verifying accuracy...",
-    sql_execution: "Running against your data...",
-    chart_selection: "Building your chart...",
-    tts_generation: "Preparing the summary...",
-  };
-  return map[pipelineStage] || "Analyzing your data...";
-}
-
 /* ── Starter questions ───────────────────────────────────────── */
 
 const STARTER_QUESTIONS = [
@@ -103,21 +91,29 @@ const STARTER_QUESTIONS = [
 function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
   const engine = useVoxQuerySession(auth);
 
+  // Phase 3.2: derive visible state from explicit lifecycle dimensions
+  const isReviewing = engine.voiceState === "reviewing";
   const isActive = engine.recordingState !== "idle" || engine.pipelineInFlight;
   const hasResult = !!engine.lastResult;
+  const isError = engine.turnState === "recoverable_error" || engine.turnState === "fatal_error";
 
-  // Three UI states: ready → active → insight
-  const uiState: "ready" | "active" | "insight" =
-    isActive ? "active" : hasResult ? "insight" : "ready";
+  // Deterministic UI state
+  const uiState: "ready" | "reviewing" | "active" | "insight" =
+    isReviewing ? "reviewing" :
+    isActive ? "active" :
+    hasResult ? "insight" : "ready";
+
+  // Phase 3.2: status label derived from explicit state
+  const statusLabel = getStatusLabel(engine.voiceState, engine.turnState, engine.ttsState);
 
   return (
     <main className="min-h-screen flex flex-col relative">
-      {/* Scrollable content */}
-      <div className="flex-1 flex flex-col items-center px-4 md:px-8 pb-40 overflow-y-auto scrollbar-hide">
+      {/* Scrollable content area */}
+      <div className="flex-1 flex flex-col items-center px-4 md:px-8 pb-44 overflow-y-auto scrollbar-hide">
 
         <AnimatePresence mode="wait">
 
-          {/* ── STATE 1: READY ──────────────────────────────── */}
+          {/* ── STATE 1: READY ──────────────────────────────────── */}
           {uiState === "ready" && (
             <motion.div
               key="ready"
@@ -154,16 +150,54 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                       engine.submitQuery(q);
                     }}
                     disabled={!engine.isReady}
-                    className="px-4 py-2.5 rounded-full border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--accent-blue)]/30 hover:bg-[var(--bg-elevated)] transition-all disabled:opacity-50"
+                    className="px-4 py-2.5 rounded-full border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--accent-blue)]/30 hover:bg-[var(--bg-elevated)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] transition-all disabled:opacity-50"
                   >
                     {q}
                   </button>
                 ))}
               </div>
+
+              {/* Phase 3.3: show error notice in ready state if a prior query failed */}
+              {isError && (
+                <div className="mt-6 w-full max-w-xl">
+                  <FailureNotice
+                    severity={engine.notice.severity}
+                    message={engine.notice.message}
+                    action={{ label: "Try again", onClick: engine.submitCurrentQuery }}
+                  />
+                </div>
+              )}
             </motion.div>
           )}
 
-          {/* ── STATE 2: ACTIVE (recording / processing) ──── */}
+          {/* ── STATE 2: REVIEWING (transcript review) ──────────── */}
+          {uiState === "reviewing" && (
+            <motion.div
+              key="reviewing"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0, y: -16 }}
+              transition={{ duration: 0.3 }}
+              className="flex-1 flex flex-col items-center justify-center min-h-[60vh] max-w-2xl w-full pt-10"
+            >
+              <h2 className="text-xl font-light text-[var(--text-primary)] text-center mb-6">
+                Review before sending
+              </h2>
+              <TranscriptReviewPanel
+                rawTranscript={engine.voiceDraft?.rawTranscript ?? engine.submittedText}
+                editedText={engine.submittedText}
+                disabled={!engine.isReady}
+                onChange={engine.setSubmittedText}
+                onReRecord={() => {
+                  engine.setSubmittedText("");
+                  void engine.startRecording();
+                }}
+                onSubmit={engine.submitCurrentQuery}
+              />
+            </motion.div>
+          )}
+
+          {/* ── STATE 3: ACTIVE (recording / processing) ────────── */}
           {uiState === "active" && (
             <motion.div
               key="active"
@@ -192,7 +226,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 {engine.partialTranscript || engine.submittedText || "Listening..."}
               </motion.p>
 
-              {/* Human-readable status */}
+              {/* Phase 3.2: status label derived from explicit state */}
               {engine.pipelineInFlight && (
                 <motion.div
                   initial={{ opacity: 0 }}
@@ -207,14 +241,14 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                     />
                   </div>
                   <span className="text-sm text-[var(--accent-amber)]">
-                    {getHumanStatus(engine.pipelineStage)}
+                    {statusLabel}
                   </span>
                 </motion.div>
               )}
             </motion.div>
           )}
 
-          {/* ── STATE 3: INSIGHT ────────────────────────────── */}
+          {/* ── STATE 4: INSIGHT ────────────────────────────────── */}
           {uiState === "insight" && engine.lastResult && (
             <motion.div
               key="insight"
@@ -224,15 +258,31 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               transition={{ duration: 0.5, ease: [0.23, 1, 0.32, 1] }}
               className="w-full max-w-3xl pt-10 md:pt-16"
             >
+              {/* Phase 3.4: expandable thread history */}
+              <ThreadHistory
+                turns={engine.turnHistory}
+                activeTurnId={engine.lastResult.turnId}
+              />
+
               {/* Question echo */}
-              <div className="flex items-center gap-3 mb-8">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[var(--accent-blue)] to-indigo-600 flex-shrink-0" />
-                <p className="text-lg text-[var(--text-secondary)] font-light">
-                  {engine.submittedText}
+              <div className="flex items-start gap-3 mb-6">
+                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[var(--accent-blue)] to-indigo-600 flex-shrink-0 mt-0.5" />
+                <p className="text-base md:text-lg text-[var(--text-secondary)] font-light leading-snug">
+                  {engine.lastResult.submittedText}
                 </p>
               </div>
 
-              {/* Narrative — the hero */}
+              {/* Phase 3.3: TTS failure notice */}
+              {engine.ttsState === "failed" && (
+                <div className="mb-4">
+                  <FailureNotice
+                    severity="warning"
+                    message="Voice playback failed. The text answer below is still available."
+                  />
+                </div>
+              )}
+
+              {/* Narrative */}
               <InsightNarrative
                 text={engine.lastResult.resultData.tts_text}
                 isMuted={engine.isMuted}
@@ -242,9 +292,9 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               {/* Chart card */}
               <DataGlassPanel
                 result={engine.lastResult}
-                feedbackSubmitted={engine.feedbackSubmitted}
+                feedbackRating={engine.feedbackRating}
                 isMuted={engine.isMuted}
-                onFeedback={() => engine.submitFeedback(-1)}
+                onFeedback={engine.submitFeedback}
                 onMute={engine.muteTTS}
                 onUnmute={engine.unmuteTTS}
               />
@@ -257,11 +307,12 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               />
 
               {/* New conversation button */}
-              <div className="mt-10 flex justify-center">
+              <div className="mt-10 mb-4 flex justify-center">
                 <button
                   type="button"
                   onClick={engine.resetConversation}
-                  className="flex items-center gap-2 px-4 py-2 rounded-full text-sm text-[var(--text-muted)] hover:text-[var(--text-secondary)] border border-[var(--border)] hover:border-[var(--border)] hover:bg-[var(--bg-surface)] transition-all"
+                  aria-label="New conversation"
+                  className="flex items-center gap-2 px-4 py-2 rounded-full text-sm text-[var(--text-muted)] hover:text-[var(--text-secondary)] border border-[var(--border)] hover:bg-[var(--bg-surface)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] transition-all"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   <span>New conversation</span>
@@ -273,16 +324,33 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
         </AnimatePresence>
       </div>
 
-      {/* ── Fixed bottom dock ──────────────────────────────── */}
+      {/* ── Fixed bottom dock ─────────────────────────────────── */}
       <div className="fixed bottom-0 left-0 right-0 p-4 md:p-6 bg-gradient-to-t from-[var(--bg-base)] via-[var(--bg-base)]/95 to-transparent pointer-events-none z-20">
-        <div className="pointer-events-auto">
+        <div className="pointer-events-auto max-w-2xl mx-auto space-y-2">
+          {/* Phase 3.3: error/warning notices rendered above the dock */}
+          <AnimatePresence>
+            {(engine.notice.severity === "error" || engine.notice.severity === "warning") &&
+              uiState !== "ready" && (
+              <FailureNotice
+                key="dock-notice"
+                severity={engine.notice.severity}
+                message={engine.notice.message}
+                action={
+                  engine.turnState === "recoverable_error"
+                    ? { label: "Retry", onClick: engine.submitCurrentQuery }
+                    : undefined
+                }
+              />
+            )}
+          </AnimatePresence>
+
           <QueryDock
             value={engine.submittedText}
             disabled={!engine.isReady || engine.pipelineInFlight}
             isReady={engine.isReady}
             recordingState={engine.recordingState}
             notice={engine.notice}
-            modeLabel={engine.modeLabel}
+            modeLabel={engine.authMode === "clerk" ? "clerk auth mode" : "local fake mode"}
             onChange={engine.setSubmittedText}
             onSubmit={engine.submitCurrentQuery}
             onFakeVoice={engine.startFakeVoice}
@@ -291,7 +359,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
         </div>
       </div>
 
-      {/* ── Clarification overlay ──────────────────────────── */}
+      {/* ── Clarification overlay ─────────────────────────────── */}
       <AnimatePresence>
         {engine.clarification.pending && (
           <ClarificationOverlay

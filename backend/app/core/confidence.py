@@ -21,7 +21,7 @@ DEFAULT_PENALTIES: dict[AmbiguitySignal, float] = {
 def compute_confidence(
     rag_score: float,
     validation_passed: bool,
-    llm_self_confidence: float,
+    llm_self_confidence: float | None,
     ambiguity_signals: list[AmbiguitySignal],
     *,
     threshold: float | None = None,
@@ -36,12 +36,26 @@ def compute_confidence(
         ambiguity_signals=ambiguity_signals,
         threshold=effective_threshold,
     )
+    
+    # Determine active weights and renormalize
+    active_weights = {
+        "rag": DEFAULT_WEIGHTS["rag"],
+        "validation": DEFAULT_WEIGHTS["validation"],
+    }
+    if payload.llm_self_confidence is not None:
+        active_weights["llm"] = DEFAULT_WEIGHTS["llm"]
+        
+    total_weight = sum(active_weights.values())
+    normalized_weights = {k: v / total_weight for k, v in active_weights.items()}
+    
     validation_score = 1.0 if payload.validation_passed else 0.0
     base_score = (
-        DEFAULT_WEIGHTS["rag"] * payload.rag_score
-        + DEFAULT_WEIGHTS["validation"] * validation_score
-        + DEFAULT_WEIGHTS["llm"] * payload.llm_self_confidence
+        normalized_weights["rag"] * payload.rag_score
+        + normalized_weights["validation"] * validation_score
     )
+    if "llm" in normalized_weights:
+        base_score += normalized_weights["llm"] * payload.llm_self_confidence
+
     penalty_total = min(
         0.65, sum(DEFAULT_PENALTIES.get(signal, 0.0) for signal in set(payload.ambiguity_signals))
     )
@@ -60,7 +74,7 @@ def compute_confidence(
         clarification_triggered=composite < effective_threshold,
         ambiguity_penalty_total=round(penalty_total, 4),
         formula_weights={
-            **DEFAULT_WEIGHTS,
+            **normalized_weights,
             "ambiguity_penalty_per_signal": {
                 signal.value: penalty for signal, penalty in DEFAULT_PENALTIES.items()
             },

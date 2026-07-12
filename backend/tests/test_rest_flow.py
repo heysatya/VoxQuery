@@ -98,8 +98,9 @@ def test_text_query_clarification_then_result_and_feedback(mock_score_feedback):
     # Verify telemetry linkage: tracer.score_feedback must be called with the correct turn_id
     mock_score_feedback.assert_called_once()
     assert mock_score_feedback.call_args[0][0] == UUID(body["turn_id"])
-    assert mock_score_feedback.call_args[0][3] is True # clarification_triggered
-    assert mock_score_feedback.call_args[0][4] == "Net revenue" # option_selected
+    assert mock_score_feedback.call_args[0][1] == -1
+    assert mock_score_feedback.call_args[0][4] is True # clarification_triggered
+    assert mock_score_feedback.call_args[0][5] == "Net revenue" # option_selected
 
     duplicate_feedback = client.post(
         "/api/feedback",
@@ -135,9 +136,43 @@ def test_clear_non_ambiguous_query_returns_before_result_ready():
     assert result.status_code == 200
     payload = result.json()
     assert payload["result"]["columns"] == ["customer_segment", "total_net_revenue"]
+    assert payload["result"]["semantic_columns"][0]["role"] == "dimension"
+    assert payload["result"]["semantic_columns"][1]["role"] == "metric"
+    assert payload["valid_visualizations"] == ["table", "bar"]
+    assert payload["trust"]["confidence_tier"] == payload["confidence_tier"]
+    assert payload["trust"]["row_count"] == payload["result"]["row_count"]
     assert "order_items" in payload["generated_sql"]
     assert "customers.customer_segment" in payload["generated_sql"]
     assert payload["chart_rationale"].endswith("customer_segment.")
+
+
+def test_positive_feedback_records_ok_quality_flag():
+    session = create_session()
+    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
+        query = client.post(
+            "/api/query",
+            json={
+                "session_id": session["session_id"],
+                "submitted_text": "Show net revenue by customer segment",
+                "input_modality": "text",
+            },
+        )
+        body = query.json()
+        receive_until(ws, "result_ready")
+
+    feedback = client.post(
+        "/api/feedback",
+        json={
+            "session_id": session["session_id"],
+            "turn_id": body["turn_id"],
+            "rating": 1,
+        },
+    )
+
+    assert feedback.status_code == 200
+    stored = app.state.sessions.get(UUID(TENANT_ID), UUID(session["session_id"]))
+    assert stored is not None
+    assert stored.history[-1].quality_flag == "ok"
 
 
 def test_clarification_escape_does_not_complete_turn():
@@ -172,33 +207,6 @@ def test_clarification_escape_does_not_complete_turn():
     assert result.status_code == 404
 
 
-def test_clarification_timeout_proceeds_with_original_query():
-    session = create_session()
-    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
-        query = client.post(
-            "/api/query",
-            json={
-                "session_id": session["session_id"],
-                "submitted_text": "Show revenue by region",
-                "input_modality": "text",
-            },
-        )
-        clarification_event = receive_until(ws, "clarification_request")
-    body = query.json()
-    assert clarification_event["turn_id"] == body["turn_id"]
-    stored = app.state.sessions.get(UUID(TENANT_ID), UUID(session["session_id"]))
-    assert stored is not None
-    assert stored.clarification_state is not None
-    stored.clarification_state.issued_at = datetime.now(UTC) - timedelta(seconds=31)
-
-    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
-        event = receive_until(ws, "result_ready")
-        assert event["turn_id"] == body["turn_id"]
-
-    result = client.get(f"/api/result/{body['turn_id']}")
-    assert result.status_code == 200
-    assert "order_items" in result.json()["generated_sql"]
-
 
 def test_ecommerce_dimensions_generate_expected_fake_sql():
     session = create_session()
@@ -230,17 +238,202 @@ def test_session_tenant_must_match_auth_claims():
     assert response.status_code == 401
 
 
-def test_query_endpoint_rejects_voice_modality():
+def test_query_endpoint_accepts_valid_text_contract():
     session = create_session()
     response = client.post(
         "/api/query",
         json={
             "session_id": session["session_id"],
-            "submitted_text": "Show revenue by region",
-            "input_modality": "voice",
+            "parent_turn_id": None,
+            "submitted_text": "Show net revenue by customer segment",
+            "input_modality": "text",
+            "raw_transcript": None,
+            "stt_confidence": None,
+            "transcript_edited": False,
         },
     )
+    assert response.status_code == 202
+
+
+def test_text_query_rejects_voice_metadata():
+    session = create_session()
+    base = {
+        "session_id": session["session_id"],
+        "submitted_text": "Show net revenue by customer segment",
+        "input_modality": "text",
+        "raw_transcript": None,
+        "stt_confidence": None,
+        "transcript_edited": False,
+    }
+
+    with_raw = {**base, "raw_transcript": "Show revenue"}
+    response = client.post("/api/query", json=with_raw)
     assert response.status_code == 400
+
+    with_confidence = {**base, "stt_confidence": 0.97}
+    response = client.post("/api/query", json=with_confidence)
+    assert response.status_code == 400
+
+    with_edited_flag = {**base, "transcript_edited": True}
+    response = client.post("/api/query", json=with_edited_flag)
+    assert response.status_code == 400
+
+
+def test_voice_query_contract_preserves_provenance():
+    session = create_session()
+    response = client.post(
+        "/api/query",
+        json={
+            "session_id": session["session_id"],
+            "parent_turn_id": None,
+            "submitted_text": "Show net revenue by customer segment",
+            "input_modality": "voice",
+            "raw_transcript": "Show net revenue by customer segment",
+            "stt_confidence": 0.97,
+            "transcript_edited": False,
+        },
+    )
+    assert response.status_code == 202
+    turn_id = UUID(response.json()["turn_id"])
+    turn = app.state.pipeline.turns[turn_id]
+    assert turn.input_modality == "voice"
+    assert turn.raw_transcript == "Show net revenue by customer segment"
+    assert turn.deepgram_confidence_raw == 0.97
+    assert turn.transcript_edited is False
+
+
+def test_voice_query_contract_accepts_truthful_edit_flag():
+    session = create_session()
+    response = client.post(
+        "/api/query",
+        json={
+            "session_id": session["session_id"],
+            "parent_turn_id": None,
+            "submitted_text": "Show net revenue by customer segment for enterprise",
+            "input_modality": "voice",
+            "raw_transcript": "Show net revenue by customer segment",
+            "stt_confidence": 0.91,
+            "transcript_edited": True,
+        },
+    )
+    assert response.status_code == 202
+
+
+def test_voice_query_rejects_missing_or_false_provenance():
+    session = create_session()
+    base = {
+        "session_id": session["session_id"],
+        "parent_turn_id": None,
+        "submitted_text": "Show net revenue by customer segment",
+        "input_modality": "voice",
+        "raw_transcript": "Show net revenue by customer segment",
+        "stt_confidence": 0.97,
+        "transcript_edited": False,
+    }
+
+    response = client.post("/api/query", json={**base, "raw_transcript": None})
+    assert response.status_code == 400
+
+    response = client.post("/api/query", json={**base, "stt_confidence": None})
+    assert response.status_code == 400
+
+    response = client.post("/api/query", json={**base, "submitted_text": "Show net revenue", "transcript_edited": False})
+    assert response.status_code == 400
+
+
+def test_followup_query_uses_first_class_parent_turn_id():
+    session = create_session()
+    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
+        first = client.post(
+            "/api/query",
+            json={
+                "session_id": session["session_id"],
+                "parent_turn_id": None,
+                "submitted_text": "Show net revenue in Germany.",
+                "input_modality": "text",
+                "raw_transcript": None,
+                "stt_confidence": None,
+                "transcript_edited": False,
+            },
+        )
+        first_body = first.json()
+        receive_until(ws, "result_ready")
+
+    response = client.post(
+        "/api/query",
+        json={
+            "session_id": session["session_id"],
+            "parent_turn_id": first_body["turn_id"],
+            "submitted_text": "Just enterprise customers.",
+            "input_modality": "text",
+            "raw_transcript": None,
+            "stt_confidence": None,
+            "transcript_edited": False,
+        },
+    )
+    assert response.status_code == 202
+    followup_turn = app.state.pipeline.turns[UUID(response.json()["turn_id"])]
+    assert str(followup_turn.parent_turn_id) == first_body["turn_id"]
+    assert followup_turn.user_input == "Just enterprise customers."
+    assert "→" not in followup_turn.user_input
+
+
+def test_followup_rejects_cross_session_parent_turn():
+    first_session = create_session()
+    with client.websocket_connect(f"/ws/pipeline?session_id={first_session['session_id']}&token=fake") as ws:
+        first = client.post(
+            "/api/query",
+            json={
+                "session_id": first_session["session_id"],
+                "submitted_text": "Show net revenue by customer segment",
+                "input_modality": "text",
+            },
+        )
+        first_body = first.json()
+        receive_until(ws, "result_ready")
+
+    second_session = create_session()
+    response = client.post(
+        "/api/query",
+        json={
+            "session_id": second_session["session_id"],
+            "parent_turn_id": first_body["turn_id"],
+            "submitted_text": "Just enterprise customers.",
+            "input_modality": "text",
+        },
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "turn_forbidden"
+
+
+def test_followup_rejects_incomplete_parent_turn():
+    session = create_session()
+    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
+        first = client.post(
+            "/api/query",
+            json={
+                "session_id": session["session_id"],
+                "submitted_text": "Show revenue by region",
+                "input_modality": "text",
+            },
+        )
+        first_body = first.json()
+        receive_until(ws, "clarification_request")
+
+    # Clear the active in-flight marker so this assertion reaches parent eligibility,
+    # not the single-flight guard for the already pending clarification.
+    app.state.pipeline._in_flight.discard(UUID(session["session_id"]))
+    response = client.post(
+        "/api/query",
+        json={
+            "session_id": session["session_id"],
+            "parent_turn_id": first_body["turn_id"],
+            "submitted_text": "Just enterprise customers.",
+            "input_modality": "text",
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "turn_processing"
 
 
 def test_health_reports_local_stub_dependencies():
@@ -250,37 +443,12 @@ def test_health_reports_local_stub_dependencies():
     assert response.json()["postgres"] in ("not_configured", "ok", "degraded")
 
 
-def test_dev_timeout_route_is_unavailable_outside_local_env():
-    session = create_session()
-    query = client.post(
-        "/api/query",
-        json={
-            "session_id": session["session_id"],
-            "submitted_text": "Show revenue by region",
-            "input_modality": "text",
-        },
-    )
-    settings = get_settings()
-    original = settings.app_env
-    settings.app_env = "production"
-    try:
-        response = client.post(
-            "/api/dev/clarification-timeout",
-            json={
-                "session_id": session["session_id"],
-                "turn_id": query.json()["turn_id"],
-                "selection": None,
-                "resolution_type": "timeout",
-            },
-        )
-    finally:
-        settings.app_env = original
-    assert response.status_code == 404
-
 
 def receive_until(ws, event_type: str):
     for _ in range(8):
         event = ws.receive_json()
+        if event["type"] == "pipeline_error" and event_type != "pipeline_error":
+            raise AssertionError(f"Received error instead of {event_type}: {event}")
         if event["type"] == event_type:
             return event
     raise AssertionError(f"Did not receive {event_type}")

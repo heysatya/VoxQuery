@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     )
     session_ttl_seconds: int = Field(default=14_400, alias="SESSION_TTL_SECONDS")
     token_budget: int = Field(default=2_500, alias="TOKEN_BUDGET")
-    clarification_timeout_seconds: int = Field(default=30, alias="CLARIFICATION_TIMEOUT_SECONDS")
+    result_cache_ttl_seconds: int = Field(default=300, alias="RESULT_CACHE_TTL_SECONDS")
     session_store: str = Field(default="memory", alias="SESSION_STORE")
     upstash_redis_url: str | None = Field(default=None, alias="UPSTASH_REDIS_URL")
     supabase_database_url: str | None = Field(default=None, alias="SUPABASE_DATABASE_URL")
@@ -41,8 +41,8 @@ class Settings(BaseSettings):
     llm_provider: str = Field(default="fake", alias="LLM_PROVIDER")
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
     rag_provider: str = Field(default="fake", alias="RAG_PROVIDER")
-    openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     warehouse_provider: str = Field(default="fake", alias="WAREHOUSE_PROVIDER")
+    snowflake_dsn: str | None = Field(default=None, alias="SNOWFLAKE_DSN")
 
 
     @field_validator("auth_mode")
@@ -75,6 +75,14 @@ class Settings(BaseSettings):
         allowed = {"fake", "deepgram"}
         if value not in allowed:
             raise ValueError(f"STT_PROVIDER must be one of {sorted(allowed)}")
+        return value
+
+    @field_validator("tts_provider")
+    @classmethod
+    def validate_tts_provider(cls, value: str) -> str:
+        allowed = {"fake", "deepgram"}
+        if value not in allowed:
+            raise ValueError(f"TTS_PROVIDER must be one of {sorted(allowed)}")
         return value
 
     @field_validator("clerk_issuer", "clerk_jwks_url", "clerk_audience", mode="before")
