@@ -54,12 +54,10 @@ describe("api token relay", () => {
     expect(init.headers).not.toHaveProperty("Authorization");
   });
 
-  it("relays encoded tokens through WebSocket query params", () => {
+  it("does not include tokens in WebSocket query params", () => {
     const token = "header.payload+/signature=";
 
-    expect(pipelineSocketUrl("session-1", token)).toContain(
-      `token=${encodeURIComponent(token)}`
-    );
-    expect(audioSocketUrl("session-1", token)).toContain(`token=${encodeURIComponent(token)}`);
+    expect(pipelineSocketUrl("session-1")).not.toContain("token=");
+    expect(audioSocketUrl("session-1")).not.toContain("token=");
   });
 });

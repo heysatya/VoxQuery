@@ -4,7 +4,7 @@ export class PcmProcessor {
   private sampleRate: number;
   
   private readonly targetSampleRate = 16000;
-  private readonly targetChunkSize = 1600; // 100ms at 16kHz
+  private readonly targetChunkSize = 320; // 20ms at 16kHz
 
   constructor(sourceSampleRate: number) {
     this.sampleRate = sourceSampleRate;
@@ -50,38 +50,47 @@ export class PcmProcessor {
     return result;
   }
 
+  private appendSamples(samples: Float32Array): void {
+    const requiredLength = this.bufferLength + samples.length;
+    if (requiredLength > this.buffer.length) {
+      const nextCapacity = Math.max(requiredLength, this.buffer.length * 2);
+      const nextBuffer = new Float32Array(nextCapacity);
+      nextBuffer.set(this.buffer.subarray(0, this.bufferLength), 0);
+      this.buffer = nextBuffer;
+    }
+
+    this.buffer.set(samples, this.bufferLength);
+    this.bufferLength = requiredLength;
+  }
+
+  private toPcmChunk(samples: Float32Array): ArrayBuffer {
+    const buffer = new ArrayBuffer(samples.length * 2);
+    const view = new DataView(buffer);
+
+    for (let i = 0; i < samples.length; i++) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      const int16 = Math.round(s < 0 ? s * 0x8000 : s * 0x7fff);
+      view.setInt16(i * 2, int16, true);
+    }
+
+    return buffer;
+  }
+
   public process(inputs: Float32Array[]): ArrayBuffer[] {
     if (inputs.length === 0 || inputs[0].length === 0) return [];
     
     const mono = this.mixToMono(inputs);
     const downsampled = this.downsample(mono, this.sampleRate, this.targetSampleRate);
-    
-    const newBuffer = new Float32Array(this.bufferLength + downsampled.length);
-    newBuffer.set(this.buffer.subarray(0, this.bufferLength), 0);
-    newBuffer.set(downsampled, this.bufferLength);
-    this.buffer = newBuffer;
-    this.bufferLength = newBuffer.length;
+    this.appendSamples(downsampled);
     
     const chunks: ArrayBuffer[] = [];
     
     while (this.bufferLength >= this.targetChunkSize) {
       const chunkSamples = this.buffer.subarray(0, this.targetChunkSize);
-      const buffer = new ArrayBuffer(this.targetChunkSize * 2);
-      const view = new DataView(buffer);
-      
-      for (let i = 0; i < chunkSamples.length; i++) {
-        const s = Math.max(-1, Math.min(1, chunkSamples[i]));
-        const int16 = Math.round(s < 0 ? s * 0x8000 : s * 0x7fff);
-        view.setInt16(i * 2, int16, true);
-      }
-      
-      chunks.push(buffer);
-      
-      const remainder = this.buffer.subarray(this.targetChunkSize);
-      const nextBuffer = new Float32Array(remainder.length + this.targetChunkSize * 4);
-      nextBuffer.set(remainder, 0);
-      this.buffer = nextBuffer;
-      this.bufferLength = remainder.length;
+      chunks.push(this.toPcmChunk(chunkSamples));
+
+      this.buffer.copyWithin(0, this.targetChunkSize, this.bufferLength);
+      this.bufferLength -= this.targetChunkSize;
     }
     
     return chunks;
@@ -91,17 +100,9 @@ export class PcmProcessor {
     if (this.bufferLength === 0) return null;
     
     const chunkSamples = this.buffer.subarray(0, this.bufferLength);
-    const buffer = new ArrayBuffer(this.bufferLength * 2);
-    const view = new DataView(buffer);
-    
-    for (let i = 0; i < chunkSamples.length; i++) {
-      const s = Math.max(-1, Math.min(1, chunkSamples[i]));
-      const int16 = Math.round(s < 0 ? s * 0x8000 : s * 0x7fff);
-      view.setInt16(i * 2, int16, true);
-    }
+    const buffer = this.toPcmChunk(chunkSamples);
     
     this.bufferLength = 0;
-    this.buffer = new Float32Array(0);
     return buffer;
   }
 }

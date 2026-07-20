@@ -38,7 +38,7 @@ async def test_exactly_one_correction_retry(claims, req):
     audit = MagicMock(spec=AuditStore)
     
     pipeline = PipelineOrchestrator(sessions, events, audit)
-    session, _ = sessions.create(claims)
+    session, _ = await sessions.create(claims)
     req.session_id = session.session_id
     
     pipeline.schema = MagicMock()
@@ -76,7 +76,7 @@ async def test_fails_after_two_failed_attempts(claims, req):
     audit = MagicMock(spec=AuditStore)
     
     pipeline = PipelineOrchestrator(sessions, events, audit)
-    session, _ = sessions.create(claims)
+    session, _ = await sessions.create(claims)
     req.session_id = session.session_id
     
     pipeline.schema = MagicMock()
@@ -135,7 +135,7 @@ async def test_schema_retrieval_failure_is_structured(claims, req):
     audit = MagicMock(spec=AuditStore)
 
     pipeline = PipelineOrchestrator(sessions, events, audit)
-    session, _ = sessions.create(claims)
+    session, _ = await sessions.create(claims)
     req.session_id = session.session_id
 
     pipeline.schema = MagicMock()
@@ -162,7 +162,7 @@ async def test_approved_sql_is_executed_sql(claims, req):
     audit = MagicMock(spec=AuditStore)
     
     pipeline = PipelineOrchestrator(sessions, events, audit)
-    session, _ = sessions.create(claims)
+    session, _ = await sessions.create(claims)
     req.session_id = session.session_id
     
     pipeline.schema = MagicMock()
@@ -182,7 +182,7 @@ async def test_approved_sql_is_executed_sql(claims, req):
     import asyncio
     await asyncio.sleep(0.5)
     
-    pipeline.warehouse.execute_readonly.assert_called_once_with("SELECT * FROM test LIMIT 10000", snowflake_role=claims.snowflake_role)
+    pipeline.warehouse.execute_readonly.assert_called_once_with("SELECT * FROM test LIMIT 10000", snowflake_role=claims.snowflake_role, tenant_id=claims.tenant_id)
     assert turn.generated_sql == "SELECT * FROM test LIMIT 10000"
 
 
@@ -193,7 +193,7 @@ async def test_rag_and_memory_context_propagation(claims, req):
     audit = MagicMock(spec=AuditStore)
     
     pipeline = PipelineOrchestrator(sessions, events, audit)
-    session, _ = sessions.create(claims)
+    session, _ = await sessions.create(claims)
     req.session_id = session.session_id
     
     # Setup schema chunks
@@ -264,7 +264,7 @@ async def test_followup_generation_receives_parent_context_without_concatenating
     audit = MagicMock(spec=AuditStore)
 
     pipeline = PipelineOrchestrator(sessions, events, audit)
-    session, _ = sessions.create(claims)
+    session, _ = await sessions.create(claims)
 
     parent_turn = TurnRecord(
         session_id=session.session_id,
@@ -285,7 +285,7 @@ async def test_followup_generation_receives_parent_context_without_concatenating
         completed=True,
     )
     pipeline.turns[parent_turn.turn_id] = parent_turn
-    sessions.append_turn(
+    await sessions.append_turn(
         session,
         turn_id=parent_turn.turn_id,
         user_query=parent_turn.user_input,
@@ -353,7 +353,7 @@ async def test_pipeline_history_filtering_by_quality_flag(claims, req):
     audit = MagicMock(spec=AuditStore)
     
     pipeline = PipelineOrchestrator(sessions, events, audit)
-    session, _ = sessions.create(claims)
+    session, _ = await sessions.create(claims)
     req.session_id = session.session_id
     
     # Setup schema chunks

@@ -50,6 +50,13 @@ class AuditStore(Protocol):
         """
         ...
         
+    async def get_low_quality_feedback(self, limit: int = 50, offset: int = 0) -> list[dict]:
+        """
+        Asynchronously retrieve a list of turns marked with 'low' quality feedback.
+        """
+        ...
+
+        
     async def check_health(self) -> str:
         """
         Check the health of the store.

@@ -9,8 +9,9 @@ from app.config import Settings
 DEEPGRAM_AURA_MODEL = "aura-asteria-en"
 DEEPGRAM_AURA_URL = (
     "https://api.deepgram.com/v1/speak"
-    f"?model={DEEPGRAM_AURA_MODEL}&encoding=linear16&sample_rate=16000"
+    f"?model={DEEPGRAM_AURA_MODEL}&encoding=linear16&sample_rate=16000&container=none"
 )
+DEEPGRAM_TTS_TIMEOUT = aiohttp.ClientTimeout(total=30, sock_connect=5, sock_read=10)
 
 
 class TTSUnavailableError(Exception):
@@ -46,6 +47,10 @@ class DeepgramTTSProvider:
         self.logger = logger or logging.getLogger("voxquery.tts")
 
     async def stream_audio(self, text: str) -> AsyncGenerator[bytes, None]:
+        text = text.strip()
+        if not text:
+            return
+
         headers = {
             "Authorization": f"Token {self.api_key}",
             "Content-Type": "application/json",
@@ -54,16 +59,29 @@ class DeepgramTTSProvider:
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(DEEPGRAM_AURA_URL, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                async with session.post(
+                    DEEPGRAM_AURA_URL,
+                    headers=headers,
+                    json=payload,
+                    timeout=DEEPGRAM_TTS_TIMEOUT,
+                ) as response:
                     if response.status != 200:
                         body = await response.text()
                         if self.api_key in body:
                             body = body.replace(self.api_key, "[REDACTED]")
                         self.logger.error("Deepgram TTS error %d: %s", response.status, body)
                         raise TTSUnavailableError(f"Deepgram returned HTTP {response.status}")
-                    
+
+                    yielded_audio = False
                     async for chunk in response.content.iter_chunked(4096):
-                        yield chunk
+                        if chunk:
+                            yielded_audio = True
+                            yield chunk
+
+                    if not yielded_audio:
+                        raise TTSUnavailableError("Deepgram returned an empty TTS stream")
+        except TimeoutError as exc:
+            raise TTSUnavailableError("Timed out waiting for Deepgram TTS") from exc
         except aiohttp.ClientError as exc:
             err_msg = str(exc)
             if self.api_key in err_msg:

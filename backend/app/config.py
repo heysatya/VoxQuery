@@ -40,9 +40,11 @@ class Settings(BaseSettings):
     canonical_sql_model: str = Field(default="claude-haiku-4-5-20251001", alias="CANONICAL_SQL_MODEL")
     llm_provider: str = Field(default="fake", alias="LLM_PROVIDER")
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
+    openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     rag_provider: str = Field(default="fake", alias="RAG_PROVIDER")
     warehouse_provider: str = Field(default="fake", alias="WAREHOUSE_PROVIDER")
     snowflake_dsn: str | None = Field(default=None, alias="SNOWFLAKE_DSN")
+    fernet_key: str | None = Field(default=None, alias="FERNET_KEY")
 
 
     @field_validator("auth_mode")
@@ -101,6 +103,14 @@ class Settings(BaseSettings):
             return stripped or None
         return value
 
+    @field_validator("openai_api_key", mode="before")
+    @classmethod
+    def empty_openai_key_is_unset(cls, value: str | None) -> str | None:
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.backend_cors_origins.split(",") if origin.strip()]
@@ -142,6 +152,15 @@ class Settings(BaseSettings):
             raise RuntimeError("UPSTASH_REDIS_URL must use rediss:// in staging/production.")
         if self.stt_provider == "deepgram" and not self.deepgram_api_key:
             raise RuntimeError("DEEPGRAM_API_KEY is required when STT_PROVIDER=deepgram.")
+            
+        if self.rag_provider == "pgvector" and not self.openai_api_key:
+            raise RuntimeError("OPENAI_API_KEY is required when RAG_PROVIDER=pgvector.")
+            
+        if self.app_env in {"staging", "production"}:
+            if not self.fernet_key:
+                raise RuntimeError("FERNET_KEY is required in staging/production.")
+            if not self.snowflake_dsn:
+                raise RuntimeError("SNOWFLAKE_DSN is required in staging/production.")
 
 
 @lru_cache

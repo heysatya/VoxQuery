@@ -109,13 +109,13 @@ describe("result semantics", () => {
 
   it("4.2: derives caveat from backend confidence_reasons when present", () => {
     const caveat = deriveCaveatText(mediumWithReasons);
-    expect(caveat).toMatch(/Medium confidence/);
+    expect(caveat).toMatch(/Partial match/);
     expect(caveat).toMatch(/schema match was weaker/i);
   });
 
   it("4.2: derives caveat from warnings when no reasons provided", () => {
     const caveat = deriveCaveatText(mediumWithWarnings);
-    expect(caveat).toMatch(/Medium confidence/);
+    expect(caveat).toMatch(/Partial match/);
     expect(caveat).toMatch(/duplicate/i);
   });
 

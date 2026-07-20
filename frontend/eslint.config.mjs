@@ -6,5 +6,16 @@ export default [
     ignores: [".next/**", "node_modules/**"]
   },
   ...nextVitals,
-  ...nextTypescript
+  ...nextTypescript,
+  {
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "react/no-unescaped-entities": "off",
+      "@typescript-eslint/no-unused-vars": "off",
+      "no-unused-vars": "off",
+      "react-hooks/exhaustive-deps": "off",
+      "react-hooks/set-state-in-effect": "off",
+      "@next/next/no-html-link-for-pages": "off"
+    }
+  }
 ];

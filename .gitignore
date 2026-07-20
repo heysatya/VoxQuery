@@ -20,11 +20,14 @@ env/
 .env.bak
 *.env.bak
 *.env-bak
+*.env.voxquery
+.env.voxquery
 
 # Test / build caches
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.uv-cache*/
 .next/
 .codex-smoke-logs/
 tmp-smoke-logs/

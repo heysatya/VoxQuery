@@ -21,10 +21,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.core.stt import build_stt_provider
-from app.middleware.auth import authenticate_websocket
-from app.models.contracts import AuthClaims
+from app.middleware.auth import authenticate_websocket_message
 
 router = APIRouter()
 logger = logging.getLogger("voxquery.ws_audio")
@@ -59,7 +58,7 @@ async def _frame_generator(websocket: WebSocket) -> AsyncGenerator[bytes, None]:
 async def audio_socket(
     websocket: WebSocket,
     session_id: UUID,
-    claims: AuthClaims | None = Depends(authenticate_websocket),
+    settings: Settings = Depends(get_settings),
 ) -> None:
     """
     Authenticated audio relay WebSocket.
@@ -77,20 +76,24 @@ async def audio_socket(
       4001 — auth failed (handled by authenticate_websocket before accept)
       4002 — session not found
     """
+    await websocket.accept()
+    claims = await authenticate_websocket_message(websocket, settings)
     if claims is None:
         return
 
-    from app.main import app  # local import avoids circular reference at module load
-
-    session = app.state.sessions.get_for_claims(claims, session_id)
+    session = await websocket.app.state.sessions.get_for_claims(claims, session_id)
     if session is None:
         await websocket.close(code=4002)
         return
 
-    await websocket.accept()
+    limit = await websocket.app.state.rate_limiter.check_rate_limit(str(claims.user_id))
+    if not limit.ok:
+        # 4429: custom close code for rate limit exceeded
+        await websocket.close(code=4429, reason=f"Rate limit exceeded. Retry after {limit.retry_after_seconds}s")
+        return
 
     settings = get_settings()
-    telemetry = app.state.telemetry.bind(
+    telemetry = websocket.app.state.telemetry.bind(
         session_id=str(session_id),
         tenant_id=str(claims.tenant_id),
         user_id=str(claims.user_id),
@@ -106,10 +109,20 @@ async def audio_socket(
     provider_name = "deepgram" if settings.stt_provider == "deepgram" else "fake"
 
     close_code = 1000
+    stop_time = None
+    
+    async def intercept_stop(gen):
+        nonlocal stop_time
+        async for frame in gen:
+            yield frame
+        stop_time = time.monotonic()
+
     try:
-        async for event in provider.stream(_frame_generator(websocket)):
+        async for event in provider.stream(intercept_stop(_frame_generator(websocket))):
             if isinstance(event, FinalTranscriptEvent):
-                latency_ms = int((time.monotonic() - start_time) * 1000)
+                if stop_time is None:
+                    stop_time = time.monotonic()
+                latency_ms = int((time.monotonic() - stop_time) * 1000)
                 telemetry.emit(
                     "stt.transcript.final", 
                     tier=2, 
@@ -124,16 +137,9 @@ async def audio_socket(
         # Browser disconnected mid-stream
         close_code = 1006
         return
-    except NotImplementedError:
-        # Deepgram provider skeleton activated without implementation (Slice 4 gap).
-        telemetry.emit("stt.error", tier=2, error_type="relay")
-        close_code = 1011
-        await websocket.send_json(
-            {"type": "error", "code": "relay_error", "message": "STT provider not available."}
-        )
-        await websocket.close(code=close_code)
-    except DeepgramUnavailableError:
-        telemetry.emit("stt.error", tier=2, error_type="deepgram_connection")
+
+    except DeepgramUnavailableError as exc:
+        telemetry.emit("stt.error", tier=2, error_type="deepgram_connection", detail=str(exc))
         close_code = 1011
         try:
             await websocket.send_json(

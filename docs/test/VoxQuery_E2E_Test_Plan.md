@@ -1,7 +1,7 @@
-# VoxQuery: Live End-to-End (E2E) Test Plan
+# VoxQuery: Live End-to-End (E2E) Certification Plan
 
 ## 1. Objective and Scope
-The goal of this test plan is to validate the VoxQuery platform using **100% live credentials and real data**. No mocks, stubs, or test doubles will be used. This plan is designed to be executed by an automated AI browser agent to certify that the entire data pipeline—from natural language input to Snowflake query execution and React visualization—is stable, accurate, and fully observable.
+The goal of this test plan is to validate the VoxQuery platform using **100% live credentials and real data**. No mocks, stubs, test doubles, or synthetic data will be used. Pass or fail are sacrosanct. This plan certifies that the entire pipeline—from natural language input to Snowflake query execution and React visualization—is stable, accurate, fully observable, and performs at production latency.
 
 ---
 
@@ -54,82 +54,141 @@ This section maps every cog in the VoxQuery wheel. The backend is orchestrated b
 ---
 
 ## 3. Test Environment Prerequisites
-To execute this plan, the environment must be configured with live keys:
+To execute this plan, the environment must be configured with live keys. **Do not execute if testing against mock data.**
 - `ANTHROPIC_API_KEY` (Live)
 - `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD` (Live - ReadOnly Role)
 - `DEEPGRAM_API_KEY` (Live)
 - `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST` (Live)
-- `POSTGRES_DSN` (Live)
-- Target Data: Kaggle E-commerce dataset loaded into Snowflake.
-- App URL: `http://localhost:3000` (or staging URL).
+- `POSTGRES_DSN` (Live - Supabase)
+- `CLERK_SECRET_KEY`, `CLERK_WEBHOOK_SECRET` (Live)
+- **Target Data:** Kaggle E-commerce dataset loaded into Snowflake.
+- **App URL:** `http://localhost:3000` (or staging URL).
+- **Webhook Configuration:** The Clerk Dashboard must be configured with a Webhook endpoint pointing to the backend's `/api/webhooks/clerk` URL to subscribe to `user.created` and `organization.created` events.
 
 ---
 
-## 4. Test Cases & Agent Execution Instructions
+## 4. Strict Agent Execution Protocols (NON-NEGOTIABLE)
 
-> **AGENT INSTRUCTION:** For each test case, interact with the UI at the provided URL. Do not halt testing if a single case fails. Log the failure (screenshot + text) and proceed to the next case.
+> **AGENT INSTRUCTION: YOU MUST FOLLOW THESE PROTOCOLS.**
+> 1. **No Hallucinations or Shortcuts:** You must actually perform the actions, wait for the UI to change, and read the DOM. Do not assume an action succeeded because you clicked a button.
+> 2. **Pass/Fail is Sacrosanct:** If the Expected UI State does not match the actual state, the test **FAILS**. Do not mark it as passed with a caveat. Document the bug clearly.
+> 3. **Non-Blocking Execution (Timeouts):** If a network request hangs or the UI shows a loading spinner for more than 15 seconds, the test **FAILS**. Do not wait indefinitely. Log a timeout error, capture the state, and move to the next test case.
+> 4. **Live Data Only:** Verify the data returned looks like real Kaggle E-commerce data (e.g., sensible revenue numbers, actual states), not "lorem ipsum" or dummy fallback data.
+> 5. **Evidence Collection:** If a test fails, you must capture the error message from the UI, the console logs (if accessible), and explicitly state what broke.
+> 6. **Graceful Exit:** If the backend or frontend servers completely crash and become unresponsive (connection refused), abort the test suite immediately and report a critical system failure. Do not attempt to run remaining tests against a dead server.
+
+---
+
+## 5. Test Cases
 
 ### Category A: Core Happy Path & Execution
 **Test Case A1: Simple Aggregation**
-* **Agent UI Action:** Locate the main chat input. Type: *"What is the total revenue for the last 30 days?"* and press Enter. Wait for the loading indicators to disappear.
+* **Agent UI Action:** Locate the main chat input. Type: *"What is the total revenue for the last 30 days?"* and press Enter. Wait for the loading indicators to disappear (max 15s timeout).
 * **Expected UI State:** 
   1. A `Stat` card (large number) appears in the main feed.
   2. The "Trust Panel" (expandable drawer/accordion) displays "Confidence: High".
 * **Flow Walkthrough:** `input_resolver_node` -> `rag_retrieval_node` -> `sql_generation_node` -> `ambiguity_check_node` -> `execution_node`.
 
 **Test Case A2: Time-Series Data Visualization**
-* **Agent UI Action:** Type: *"Show me daily order volume for the past week."* and press Enter. Wait for resolution.
+* **Agent UI Action:** Type: *"Show me daily order volume for the past week."* and press Enter.
 * **Expected UI State:** The UI dynamically renders a **Line Chart** (look for SVG paths or Recharts canvas elements).
+
+**Test Case A3: Snowflake Connection Pool (Latency Validation)**
+* **Agent UI Action:** Immediately following A2, type a related follow-up: *"What about the week before that?"* and press Enter. Measure the time to resolution.
+* **Expected UI State:** The result should render noticeably faster than the first cold-start query (typically returning within 2-4 seconds instead of 5-7), proving the `SnowflakeConnectionPool` successfully avoided a new TLS handshake.
 
 ### Category B: The Clarification Loop (Pre-SQL Ambiguity)
 **Test Case B1: Entity Ambiguity Block (`pre_sql_ambiguity`)**
 * **Agent UI Action:** Type: *"How many customers do we have in the US?"* and press Enter.
 * **Expected UI State:** Within 3 seconds, a Clarification Modal or inline prompt appears asking *"By 'US', do you mean Shipping Country or Billing Country?"* (or similar options).
-* **Agent UI Action 2:** Click the button for "Shipping Country". Wait for resolution.
+* **Agent UI Action 2:** Click the button for "Shipping Country".
 * **Expected UI State:** The modal disappears, the query resumes, and a final numerical result is displayed.
 
 ### Category C: Schema-Aware RAG & Hybrid Retrieval
 **Test Case C1: Metric Registry Resolution**
 * **Agent UI Action:** Type: *"What is our Net Revenue by region?"* and press Enter.
-* **Expected UI State:** A result is rendered without the LLM hallucinating the definition of "Net Revenue".
-* **Verification:** The Trust Panel text or generated SQL must explicitly show the correct formula for Net Revenue (as defined in the Metric Registry) applied accurately, verifying the `rewrite_query_node` successfully mapped the term to specific warehouse tables.
+* **Expected UI State:** The Trust Panel text or generated SQL must explicitly show the correct formula for Net Revenue (as defined in the Metric Registry), verifying `rewrite_query_node` successfully mapped the term.
 
 **Test Case C2: RRF Multi-Hop Schema Injection**
 * **Agent UI Action:** Type: *"Show me the conversion rate for active customers vs churned customers."* and press Enter.
-* **Expected UI State:** A Bar or Line chart is rendered comparing the two segments.
-* **Verification:** Check the generated SQL in the Trust Panel. It should accurately join `customers`, `orders`, and whatever tables govern `churn` logic, proving that the RRF (Reciprocal Rank Fusion) retrieved all disparate DDL chunks necessary for this complex query.
+* **Expected UI State:** A Bar or Line chart is rendered.
+* **Verification:** Check the generated SQL in the Trust Panel. It should accurately join `customers` and `orders`, proving RRF retrieved all necessary DDL chunks.
 
 ### Category D: Memory & Multi-Turn Context
 **Test Case D1: Pronoun Resolution via History**
 * **Agent UI Action:** Type: *"Show me the top 5 product categories by sales."* Wait for the Bar Chart.
 * **Agent UI Action 2:** Type: *"Now filter those for just the state of California."* Wait for resolution.
-* **Expected UI State:** The Bar Chart updates. The visual categories remain the same, but the numerical values change. The Trust Panel's SQL snippet should show a `WHERE` clause for California applied to the previous context.
+* **Expected UI State:** The Bar Chart updates. The Trust Panel's SQL snippet shows a `WHERE` clause for California applied to the previous context.
 
 ### Category E: Deliberate Errors (Safety Tests)
 **Test Case E1: Destructive Intent (SQL Injection Guard)**
 * **Agent UI Action:** Type: *"Delete all records from the orders table."* and press Enter.
-* **Expected UI State:** A Graceful Error component (red/orange banner or card) appears stating the agent is read-only and cannot modify data. Ensure NO chart or table is rendered.
+* **Expected UI State:** A Graceful Error component appears stating the agent is read-only. Ensure NO chart or table is rendered.
 
 ### Category F: Telemetry Verification
 **Test Case F1: Langfuse Thumbs Down Scoring**
 * **Agent UI Action:** On any successful chart response, locate the "Thumbs Down" (or Feedback) icon and click it.
-* **Expected UI State:** The icon highlights or shows a "Feedback submitted" toast. (Note: Backend verification in Langfuse/Postgres is required for full validation, but the UI must not crash).
+* **Expected UI State:** The icon highlights or shows a "Feedback submitted" toast. The UI must not crash.
 
----
-
-## 5. Category G: Break Cases & Rough Edges (Where things can go wrong)
-
-These test cases specifically target the "cogs breaking" to ensure the system degrades gracefully.
-
+### Category G: Break Cases & Rough Edges (Graceful Degradation)
 **Test Case G1: LLM SQL Hallucination (Invalid Column)**
 * **Agent UI Action:** Type: *"Select the florp_bloop metric grouped by zazzle_id from the orders table."* and press Enter.
 * **Expected UI State:** The query will fail in Snowflake. The UI must catch this and show a graceful error banner (e.g., "I misunderstood the data structure"), **NOT** a raw JSON trace or Snowflake stack trace.
 
 **Test Case G2: Clarification Modal Abandonment**
-* **Agent UI Action:** Type a known ambiguous query (e.g., *"How many customers in the US?"*). Wait for the clarification options to appear.
+* **Agent UI Action:** Type an ambiguous query (*"How many customers in the US?"*). Wait for the clarification options to appear.
 * **Agent UI Action 2:** DO NOT click an option. Instead, type a brand new query in the main input: *"What is the total revenue?"* and submit.
-* **Expected UI State:** The clarification modal dismisses/expires, and the system processes the *new* query normally, resulting in a Stat card for revenue.
+* **Expected UI State:** The clarification modal dismisses/expires, and the system processes the *new* query normally.
 
 **Test Case G3: Voice Input Graceful Degradation**
-* **Note to Agent:** Since automated browsers usually lack microphone access, click the "Microphone" icon in the UI.
-* **Expected UI State:** The browser should request microphone permissions (if the agent auto-denies, the UI must show a graceful "Microphone access denied" message and revert to text input seamlessly).
+* **Agent UI Action:** Click the "Microphone" icon in the UI. (Assume automated browser denies permissions).
+* **Expected UI State:** The UI must show a graceful "Microphone access denied" message and revert to text input seamlessly.
+
+**Test Case G4: Clarification Timeout Expiry**
+* **Agent UI Action:** Trigger the Clarification Modal. Wait 30 seconds to simulate a stale session, then attempt to select an option.
+* **Expected UI State:** If the backend deletes the stale turn, the UI must catch the 404 and gracefully reset or display a "Session Expired" toast, rather than showing an infinite loading spinner.
+
+### Category H: Admin Console & Role-Based Access Control (RBAC)
+**Test Case H1: Unauthorized Access Prevention**
+* **Agent UI Action:** As a standard user, attempt to navigate directly to `/admin`.
+* **Expected UI State:** The system blocks access (redirect to main chat or 403 Forbidden).
+
+**Test Case H2: Tenant Glossary Visualization & Pre-Seeded Data**
+* **Agent UI Action:** Log in as an Admin (or inject `x-fake-role: admin` locally) and navigate to `/admin`. Click on the "Glossary" tab.
+* **Expected UI State:** The UI successfully fetches and displays the `tenant_glossary` records. **CRITICAL:** The table MUST NOT be empty. It must display the live default Kaggle E-Commerce synonyms (e.g., "revenue", "orders", "active_customers") proving migration `005` ran successfully.
+
+**Test Case H3: Feedback Loop Review**
+* **Agent UI Action:** On the `/admin` page, navigate to the "Feedback" tab.
+* **Expected UI State:** Displays the aggregated low-quality feedback submitted in Test Case F1.
+
+### Category I: Production-Readiness Constraints (Rate Limiting)
+**Test Case I1: Rate Limiter Throttling**
+* **Agent UI Action:** Submit queries rapidly in succession (e.g., 20+ queries within a minute) to trigger the rate limiter.
+* **Expected UI State:** The backend responds with HTTP 429. The UI catches this and displays a graceful "Too many requests" warning.
+
+### Category J: World-Class Interactive UI Features
+**Test Case J1: Interactive Chart Drill-down**
+* **Agent UI Action:** Run a query that generates a chart. Click directly on one of the bars/data points in the visualization.
+* **Expected UI State:** The UI automatically dispatches a contextual follow-up query into the chat feed, generating a drill-down analysis.
+
+**Test Case J2: Anomaly Narration Validation**
+* **Agent UI Action:** Query a time-series dataset that contains a known massive spike or drop.
+* **Expected UI State:** The generated narrative text must explicitly call out the spike (the "anomaly") and suggest a business rationale.
+
+**Test Case J3: Sharing & Export (Permalinks)**
+* **Agent UI Action:** Click the "Copy Permalink" (Link icon) on a successful turn. Open a new browser tab and navigate to that copied URL.
+* **Expected UI State:** The exact same analytical result, chart, and narrative load immediately from the Postgres history without a re-run of the LLM pipeline.
+
+### Category K: Authentication & Tenant Provisioning (Webhooks)
+**Test Case K1: Automated Tenant and User Provisioning via Webhook**
+* **Agent UI Action:** In an incognito window, navigate to the VoxQuery signup page. Complete the Clerk signup flow using a new test email address.
+* **Expected System State:** The backend receives a `user.created` webhook, provisions the Supabase user/tenant, and patches the Clerk user metadata.
+* **Verification:** Log into the frontend with the new account. Submit a basic query. It must pass the `authenticate_websocket` check without a 401 error.
+
+**Test Pass K2: Secure DSN Isolation Enforcement**
+* **Agent UI Action:** Log in with the newly provisioned test account from K1. Type: *"Show me total revenue."*
+* **Expected UI State:** The request will fail gracefully with a specific error regarding missing warehouse connectivity or schema definition (since a new tenant has no DB credentials). This proves strict architectural enforcement prevents falling back to another tenant's DSN.
+
+**Test Case K3: Automated Glossary Provisioning (Tenant Initialization)**
+* **Agent UI Action:** Log in as the newly created user from K1. Navigate to the `/admin` Glossary tab.
+* **Expected UI State:** The new user's tenant already has the default glossary seeded. The UI must show the Kaggle E-Commerce synonyms. This proves the `/api/webhooks/clerk` logic successfully executed the `INSERT` upon user creation.

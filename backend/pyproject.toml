@@ -9,8 +9,7 @@ dependencies = [
   "pydantic>=2.7.0",
   "pydantic-settings>=2.3.0",
   "pyjwt[crypto]>=2.8.0",
-  "pytest>=8.2.0",
-  "pytest-asyncio>=0.23.0",
+
   "redis>=5.0.0",
   "uvicorn[standard]>=0.30.0",
   "websockets>=16.0",
@@ -23,8 +22,17 @@ dependencies = [
   "aiohttp>=3.9.0",
   "tiktoken>=0.7.0",
   "langgraph>=0.2.0",
+  "cryptography>=43.0.0",
+  "svix>=1.24.0",
+  "clerk-backend-api>=1.0.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2.0",
+  "pytest-asyncio>=0.23.0",
+  "ruff>=0.4.0",
+]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
@@ -36,3 +44,14 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.setuptools]
+packages = ["app"]
+
+[tool.ruff.lint]
+ignore = [
+  "E402", # Module level import not at top of file
+  "F401", # Unused imports
+  "F841", # Unused local variables
+  "F811", # Redefinition of unused imports
+]

@@ -1,16 +1,16 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from app.models.contracts import AuthClaims, StatusResponse, TelemetryRequest
 from app.middleware.auth import get_current_user
 
 router = APIRouter()
 
-def get_telemetry_logger():
-    from app.main import app
-    return app.state.telemetry
+def get_telemetry_logger(http_request: Request):
+    return http_request.app.state.telemetry
 
 @router.post("/api/telemetry", response_model=StatusResponse)
 async def post_telemetry(
     request: TelemetryRequest,
+    http_request: Request,
     claims: AuthClaims = Depends(get_current_user),
     telemetry = Depends(get_telemetry_logger)
 ) -> StatusResponse:
@@ -21,8 +21,7 @@ async def post_telemetry(
     }
     
     if request.session_id:
-        from app.main import app
-        session = app.state.sessions.get_for_claims(claims, request.session_id)
+        session = await http_request.app.state.sessions.get_for_claims(claims, request.session_id)
         if session is None:
             # Re-use existing session error pattern
             from app.models.contracts import ApiError, ErrorCode

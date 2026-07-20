@@ -8,6 +8,7 @@ def test_production_guardrails_reject_fake_providers():
         "CLERK_ISSUER": "https://clerk.voxquery.test",
         "CLERK_JWKS_URL": "https://clerk.voxquery.test/.well-known/jwks.json",
         "DEEPGRAM_API_KEY": "dummy",
+        "OPENAI_API_KEY": "dummy",
     }
     
     # Test AUTH_MODE
@@ -23,6 +24,8 @@ def test_production_guardrails_reject_fake_providers():
         "LLM_PROVIDER": "anthropic",
         "RAG_PROVIDER": "pgvector",
         "WAREHOUSE_PROVIDER": "snowflake",
+        "SNOWFLAKE_DSN": "dummy-dsn",
+        "FERNET_KEY": "dummy-key",
     }
 
     # Verify base valid config passes
@@ -59,3 +62,38 @@ def test_development_allows_fake_providers():
         RAG_PROVIDER="fake",
         WAREHOUSE_PROVIDER="fake",
     ).validate_startup()
+
+def test_production_guardrails_require_keys():
+    """
+    BEHAVIOR SPEC:
+    Given APP_ENV is set to "staging" or "production",
+    when the application configuration is validated on startup,
+    then it must raise a RuntimeError if FERNET_KEY or SNOWFLAKE_DSN are missing,
+    ensuring that tenant credentials and encryption keys are strictly enforced in live environments.
+    """
+    base_prod_kwargs = {
+        "APP_ENV": "production",
+        "AUTH_MODE": "clerk",
+        "SESSION_STORE": "memory",
+        "CLERK_ISSUER": "https://clerk.voxquery.test",
+        "CLERK_JWKS_URL": "https://clerk.voxquery.test/.well-known/jwks.json",
+        "STT_PROVIDER": "deepgram",
+        "TTS_PROVIDER": "deepgram",
+        "DEEPGRAM_API_KEY": "dummy",
+        "OPENAI_API_KEY": "dummy",
+        "LLM_PROVIDER": "anthropic",
+        "RAG_PROVIDER": "pgvector",
+        "WAREHOUSE_PROVIDER": "snowflake",
+    }
+    
+    # Missing FERNET_KEY
+    with pytest.raises(RuntimeError, match="FERNET_KEY is required in staging/production"):
+        Settings(**base_prod_kwargs, SNOWFLAKE_DSN="dummy-dsn", FERNET_KEY=None).validate_startup()
+
+    # Missing SNOWFLAKE_DSN
+    with pytest.raises(RuntimeError, match="SNOWFLAKE_DSN is required in staging/production"):
+        Settings(**base_prod_kwargs, SNOWFLAKE_DSN=None, FERNET_KEY="dummy-key").validate_startup()
+
+    # Valid config passes
+    Settings(**base_prod_kwargs, SNOWFLAKE_DSN="dummy-dsn", FERNET_KEY="dummy-key").validate_startup()
+

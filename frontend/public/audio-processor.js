@@ -6,10 +6,17 @@ class PcmAudioProcessor extends AudioWorkletProcessor {
     this.sampleRate = sampleRate; 
     
     this.targetSampleRate = 16000;
-    this.targetChunkSize = 1600; // 100ms at 16kHz
+    this.targetChunkSize = 320; // 20ms at 16kHz
     
     this.buffer = new Float32Array(this.targetChunkSize * 4);
     this.bufferLength = 0;
+
+    this.port.onmessage = (event) => {
+      if (event.data && event.data.type === 'flush') {
+        this.flush();
+        this.port.postMessage({ type: 'flushed' });
+      }
+    };
   }
 
   downsample(input, inputRate, outputRate) {
@@ -50,6 +57,39 @@ class PcmAudioProcessor extends AudioWorkletProcessor {
     return result;
   }
 
+  appendSamples(samples) {
+    const requiredLength = this.bufferLength + samples.length;
+    if (requiredLength > this.buffer.length) {
+      const nextCapacity = Math.max(requiredLength, this.buffer.length * 2);
+      const nextBuffer = new Float32Array(nextCapacity);
+      nextBuffer.set(this.buffer.subarray(0, this.bufferLength), 0);
+      this.buffer = nextBuffer;
+    }
+
+    this.buffer.set(samples, this.bufferLength);
+    this.bufferLength = requiredLength;
+  }
+
+  postPcmChunk(samples) {
+    const chunkBuffer = new ArrayBuffer(samples.length * 2);
+    const view = new DataView(chunkBuffer);
+
+    for (let i = 0; i < samples.length; i++) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      const int16 = Math.round(s < 0 ? s * 0x8000 : s * 0x7fff);
+      view.setInt16(i * 2, int16, true);
+    }
+
+    this.port.postMessage(chunkBuffer, [chunkBuffer]);
+  }
+
+  flush() {
+    if (this.bufferLength === 0) return;
+
+    this.postPcmChunk(this.buffer.subarray(0, this.bufferLength));
+    this.bufferLength = 0;
+  }
+
   process(inputs, outputs, parameters) {
     const inputChannels = inputs[0]; // The first input (we only expect one mic stream)
     if (!inputChannels || inputChannels.length === 0 || inputChannels[0].length === 0) {
@@ -58,35 +98,16 @@ class PcmAudioProcessor extends AudioWorkletProcessor {
     
     const mono = this.mixToMono(inputChannels);
     const downsampled = this.downsample(mono, this.sampleRate, this.targetSampleRate);
-    
-    // Add to buffer
-    const newBuffer = new Float32Array(this.bufferLength + downsampled.length);
-    newBuffer.set(this.buffer.subarray(0, this.bufferLength), 0);
-    newBuffer.set(downsampled, this.bufferLength);
-    this.buffer = newBuffer;
-    this.bufferLength = newBuffer.length;
+
+    this.appendSamples(downsampled);
     
     // Extract chunks
     while (this.bufferLength >= this.targetChunkSize) {
       const chunkSamples = this.buffer.subarray(0, this.targetChunkSize);
-      const chunkBuffer = new ArrayBuffer(this.targetChunkSize * 2);
-      const view = new DataView(chunkBuffer);
-      
-      for (let i = 0; i < chunkSamples.length; i++) {
-        const s = Math.max(-1, Math.min(1, chunkSamples[i]));
-        const int16 = Math.round(s < 0 ? s * 0x8000 : s * 0x7fff);
-        view.setInt16(i * 2, int16, true);
-      }
-      
-      // Post the buffer back to the main thread. Transfer ownership to avoid copying.
-      this.port.postMessage(chunkBuffer, [chunkBuffer]);
-      
-      // Shift remainder
-      const remainder = this.buffer.subarray(this.targetChunkSize);
-      const nextBuffer = new Float32Array(remainder.length + this.targetChunkSize * 4);
-      nextBuffer.set(remainder, 0);
-      this.buffer = nextBuffer;
-      this.bufferLength = remainder.length;
+      this.postPcmChunk(chunkSamples);
+
+      this.buffer.copyWithin(0, this.targetChunkSize, this.bufferLength);
+      this.bufferLength -= this.targetChunkSize;
     }
     
     return true; // Keep processor alive

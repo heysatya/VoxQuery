@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
-from queue import Queue
 from uuid import UUID
 
 from pydantic import BaseModel
 
-EventQueue = Queue[dict]
+EventQueue = asyncio.Queue[dict]
 
 
 class PipelineEventBus:
@@ -14,7 +14,7 @@ class PipelineEventBus:
         self._subscribers: dict[UUID, set[EventQueue]] = defaultdict(set)
 
     def connect(self, session_id: UUID) -> EventQueue:
-        queue: EventQueue = Queue()
+        queue: EventQueue = asyncio.Queue()
         self._subscribers[session_id].add(queue)
         return queue
 
@@ -24,4 +24,4 @@ class PipelineEventBus:
     async def publish(self, session_id: UUID, event: BaseModel) -> None:
         payload = event.model_dump(mode="json")
         for queue in list(self._subscribers.get(session_id, set())):
-            queue.put(payload)
+            await queue.put(payload)

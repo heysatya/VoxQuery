@@ -21,3 +21,6 @@ class NoopAuditStore(AuditStore):
         
     async def check_health(self) -> str:
         return "not_configured"
+
+    async def get_low_quality_feedback(self, limit: int = 50, offset: int = 0) -> list[dict]:
+        return []

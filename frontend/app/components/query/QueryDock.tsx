@@ -12,7 +12,6 @@ type QueryDockProps = {
   isReady: boolean;
   recordingState: RecordingState;
   notice: UserNotice;
-  modeLabel: string;
   onChange: (value: string) => void;
   onSubmit: () => void | Promise<void>;
   onFakeVoice: () => void | Promise<void>;
@@ -25,7 +24,6 @@ export function QueryDock({
   isReady,
   recordingState,
   notice,
-  modeLabel,
   onChange,
   onSubmit,
   onFakeVoice,

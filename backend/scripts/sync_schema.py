@@ -32,22 +32,103 @@ async def sync_schema():
     
     print(f"   -> Found {len(schema_tables)} tables in Snowflake.")
     
+    # ---------------------------------------------------------
+    # Schema Drift Logging
+    # ---------------------------------------------------------
+    import json
+    current_schema = {}
+    for table in schema_tables:
+        current_schema[table.table_name] = [col.name for col in table.columns]
+        
+    last_schema_path = os.path.join(os.path.dirname(__file__), 'schema_snapshot_last.json')
+    if os.path.exists(last_schema_path):
+        with open(last_schema_path, "r", encoding="utf-8") as f:
+            last_schema = json.load(f)
+            
+        added_tables = set(current_schema.keys()) - set(last_schema.keys())
+        removed_tables = set(last_schema.keys()) - set(current_schema.keys())
+        
+        drift_detected = False
+        if added_tables:
+            print(f"   -> DRIFT ALER: Added tables: {', '.join(added_tables)}")
+            drift_detected = True
+        if removed_tables:
+            print(f"   -> DRIFT ALERT: Removed tables: {', '.join(removed_tables)}")
+            drift_detected = True
+            
+        for t_name in current_schema.keys():
+            if t_name in last_schema:
+                added_cols = set(current_schema[t_name]) - set(last_schema[t_name])
+                removed_cols = set(last_schema[t_name]) - set(current_schema[t_name])
+                if added_cols:
+                    print(f"   -> DRIFT ALERT: Table {t_name} added columns: {', '.join(added_cols)}")
+                    drift_detected = True
+                if removed_cols:
+                    print(f"   -> DRIFT ALERT: Table {t_name} removed columns: {', '.join(removed_cols)}")
+                    drift_detected = True
+                    
+        if not drift_detected:
+            print("   -> No schema drift detected since last run.")
+            
+    with open(last_schema_path, "w", encoding="utf-8") as f:
+        json.dump(current_schema, f, indent=2)
+    # ---------------------------------------------------------
+    
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--tenant-id", type=str, default="00000000-0000-0000-0000-000000000101", help="Tenant ID to provision the schema and DSN for.")
+    args, unknown = parser.parse_known_args()
+    
+    tenant_id_str = args.tenant_id
+    try:
+        tenant_id = uuid.UUID(tenant_id_str)
+    except ValueError:
+        print(f"Error: Invalid UUID format for tenant_id: {tenant_id_str}")
+        return
+
     print("2. Connecting to Supabase...")
     # Fix pgbouncer connection issue if needed by stripping it for asyncpg or using prepared statements safely
     conn = await asyncpg.connect(supabase_url, statement_cache_size=0)
     
     try:
-        # Get a valid tenant_id
-        tenant_row = await conn.fetchrow("SELECT id FROM tenants LIMIT 1;")
-        if not tenant_row:
-            # Create a dummy tenant if none exists
-            tenant_id = uuid.uuid4()
-            await conn.execute("INSERT INTO tenants (id, name) VALUES ($1, 'Default Sandbox Tenant') ON CONFLICT (id) DO NOTHING;", tenant_id)
-        else:
-            tenant_id = tenant_row['id']
+        # Ensure the tenant exists
+        await conn.execute("INSERT INTO tenants (id, name) VALUES ($1, 'Pilot Sandbox Tenant') ON CONFLICT (id) DO NOTHING;", tenant_id)
             
         print(f"   -> Using Tenant ID: {tenant_id}")
         
+        # Store encrypted DSN in tenant_connections
+        fernet_key = os.getenv("FERNET_KEY")
+        if fernet_key:
+            try:
+                from cryptography.fernet import Fernet
+                f = Fernet(fernet_key.encode())
+                encrypted_dsn = f.encrypt(dsn.encode()).decode()
+                await conn.execute("""
+                    INSERT INTO tenant_connections (tenant_id, snowflake_dsn)
+                    VALUES ($1, $2)
+                    ON CONFLICT (tenant_id) DO UPDATE SET snowflake_dsn = $2;
+                """, tenant_id, encrypted_dsn)
+                print("   -> Stored encrypted DSN in tenant_connections.")
+            except Exception as e:
+                print(f"   -> Warning: Failed to encrypt and store DSN: {e}")
+        else:
+            print("   -> Warning: FERNET_KEY not set. Cannot populate tenant_connections table.")
+            
+        import json
+        from app.rag.query_rewriter import METRIC_SYNONYMS, TABLE_SYNONYMS
+        try:
+            await conn.execute("""
+                INSERT INTO tenant_glossary (tenant_id, metric_synonyms, table_synonyms)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (tenant_id) DO UPDATE SET 
+                    metric_synonyms = $2,
+                    table_synonyms = $3,
+                    updated_at = now();
+            """, tenant_id, json.dumps(METRIC_SYNONYMS), json.dumps(TABLE_SYNONYMS))
+            print("   -> Stored default business glossary in tenant_glossary.")
+        except Exception as e:
+            print(f"   -> Warning: Failed to populate tenant_glossary: {e}")
+            
         # Clear existing chunks for this tenant
         await conn.execute("DELETE FROM schema_chunks WHERE tenant_id = $1;", tenant_id)
         
@@ -104,22 +185,7 @@ async def sync_schema():
                 """, uuid.uuid4(), tenant_id, table.table_name, col.name, col_content, f"snowflake://{table.table_name}.{col.name}", "column", str(c_embedding))
                 inserted_count += 1
                 
-        print("4. Syncing metrics from YAML...")
-        from app.rag.metric_registry import MetricRegistry
-        metrics_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'metrics.yaml')
-        registry = MetricRegistry(metrics_path)
-        metrics = registry.list_metrics()
-        
-        for metric in metrics:
-            metric_content = metric.to_metric_text()
-            response = await openai.embeddings.create(input=metric_content, model="text-embedding-3-small")
-            m_embedding = response.data[0].embedding
-            
-            await conn.execute("""
-                INSERT INTO schema_chunks (id, tenant_id, table_name, column_name, content, source_ref, entity_type, embedding)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector)
-            """, uuid.uuid4(), tenant_id, metric.source_table or "global", None, metric_content, f"metric://{metric.name}", "metric", str(m_embedding))
-            inserted_count += 1
+        print("4. Skipping YAML metrics (metrics moved to tenant glossary)...")
 
         print("5. Adding basic business rules...")
         business_rules = [

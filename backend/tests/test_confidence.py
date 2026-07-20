@@ -19,3 +19,9 @@ def test_validation_failure_hurts_score():
     passing = compute_confidence(0.8, True, 0.8, [])
     failing = compute_confidence(0.8, False, 0.8, [])
     assert failing.composite_score < passing.composite_score
+
+
+def test_zero_threshold_does_not_use_default():
+    result = compute_confidence(0.1, False, 0.1, [], threshold=0.0)
+    # Even with a very low score, clarification is not triggered if threshold is 0.0
+    assert result.clarification_triggered is False

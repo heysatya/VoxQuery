@@ -67,6 +67,14 @@ def validate_against_allowlist(parsed: exp.Expression, allowlist: SchemaAllowlis
                 raise SqlPolicyError(f'Query references a column ("{col_name}") that doesn\'t exist in the connected schema.')
 
 
+def _is_readonly_query(node: exp.Expression) -> bool:
+    if isinstance(node, exp.Select):
+        return True
+    if isinstance(node, (exp.Union, exp.Intersect, exp.Except)):
+        return _is_readonly_query(node.this) and _is_readonly_query(node.expression)
+    return False
+
+
 def canonicalize_readonly_sql(
     sql: str, 
     *, 
@@ -84,8 +92,8 @@ def canonicalize_readonly_sql(
         raise SqlPolicyError("Exactly one SQL statement is required.")
 
     parsed = statements[0]
-    if not isinstance(parsed, exp.Select):
-        raise SqlPolicyError("Only SELECT statements are allowed.")
+    if not _is_readonly_query(parsed):
+        raise SqlPolicyError("Only SELECT, UNION, INTERSECT, and EXCEPT statements are allowed.")
 
     validate_no_cartesian_joins(parsed)
 

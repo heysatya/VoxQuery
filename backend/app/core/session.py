@@ -22,13 +22,13 @@ from app.models.contracts import (
 
 
 class RedisClientProtocol(Protocol):
-    def get(self, name: str) -> str | bytes | None: ...
+    async def get(self, name: str) -> str | bytes | None: ...
 
-    def setex(self, name: str, time: int, value: str) -> object: ...
+    async def setex(self, name: str, time: int, value: str) -> object: ...
     
-    def delete(self, *names: str) -> int: ...
+    async def delete(self, *names: str) -> int: ...
 
-    def ping(self) -> object: ...
+    async def ping(self) -> object: ...
 
 
 class InMemorySessionStore:
@@ -37,8 +37,39 @@ class InMemorySessionStore:
         self.counter = counter or TokenCounter()
         self._sessions: dict[tuple[UUID, UUID], VoiceSession] = {}
         self._expires_at: dict[tuple[UUID, UUID], datetime] = {}
+        self._sweep_task = None
 
-    def create(self, claims: AuthClaims) -> tuple[VoiceSession, datetime]:
+    async def start(self) -> None:
+        import asyncio
+        if self._sweep_task is None:
+            self._sweep_task = asyncio.create_task(self._sweep_loop())
+
+    async def _sweep_loop(self) -> None:
+        import asyncio
+        try:
+            while True:
+                await asyncio.sleep(300)
+                now = datetime.now(UTC)
+                expired_keys = [
+                    key for key, expires_at in self._expires_at.items()
+                    if expires_at <= now
+                ]
+                for key in expired_keys:
+                    self._sessions.pop(key, None)
+                    self._expires_at.pop(key, None)
+        except asyncio.CancelledError:
+            pass
+
+    async def close(self) -> None:
+        if hasattr(self, "_sweep_task") and self._sweep_task:
+            self._sweep_task.cancel()
+            import asyncio
+            try:
+                await self._sweep_task
+            except asyncio.CancelledError:
+                pass
+
+    async def create(self, claims: AuthClaims) -> tuple[VoiceSession, datetime]:
         session = VoiceSession(
             session_id=uuid4(),
             user_id=claims.user_id,
@@ -52,7 +83,7 @@ class InMemorySessionStore:
         self._expires_at[key] = expires_at
         return session, expires_at
 
-    def get(self, tenant_id: UUID, session_id: UUID) -> VoiceSession | None:
+    async def get(self, tenant_id: UUID, session_id: UUID) -> VoiceSession | None:
         key = self._key(tenant_id, session_id)
         expires_at = self._expires_at.get(key)
         if not expires_at or expires_at <= datetime.now(UTC):
@@ -61,18 +92,18 @@ class InMemorySessionStore:
             return None
         return self._sessions.get(key)
 
-    def get_for_claims(self, claims: AuthClaims, session_id: UUID) -> VoiceSession | None:
-        session = self.get(claims.tenant_id, session_id)
+    async def get_for_claims(self, claims: AuthClaims, session_id: UUID) -> VoiceSession | None:
+        session = await self.get(claims.tenant_id, session_id)
         if session is None or session.user_id != claims.user_id:
             return None
         return session
 
-    def delete(self, tenant_id: UUID, session_id: UUID) -> None:
+    async def delete(self, tenant_id: UUID, session_id: UUID) -> None:
         key = self._key(tenant_id, session_id)
         self._sessions.pop(key, None)
         self._expires_at.pop(key, None)
 
-    def save(self, session: VoiceSession) -> datetime:
+    async def save(self, session: VoiceSession) -> datetime:
         session.last_interaction_ts = datetime.now(UTC)
         key = self._key(session.tenant_id, session.session_id)
         expires_at = datetime.now(UTC) + timedelta(seconds=self.settings.session_ttl_seconds)
@@ -80,7 +111,7 @@ class InMemorySessionStore:
         self._expires_at[key] = expires_at
         return expires_at
 
-    def context_block(self, session: VoiceSession) -> SessionContextBlock:
+    async def context_block(self, session: VoiceSession) -> SessionContextBlock:
         resolved_token_count = self.counter.count_json(
             {term: entity.model_dump(mode="json") for term, entity in session.resolved_entities.items()}
         )
@@ -113,7 +144,7 @@ class InMemorySessionStore:
             token_count=resolved_token_count + used,
         )
 
-    def append_turn(
+    async def append_turn(
         self,
         session: VoiceSession,
         *,
@@ -138,18 +169,18 @@ class InMemorySessionStore:
         )
         session.history.append(entry)
         session.turn_count += 1
-        self.save(session)
+        await self.save(session)
         return entry
 
-    def set_pending_clarification(self, session: VoiceSession, state: ClarificationState) -> None:
+    async def set_pending_clarification(self, session: VoiceSession, state: ClarificationState) -> None:
         session.clarification_state = state
-        self.save(session)
+        await self.save(session)
 
-    def clear_pending_clarification(self, session: VoiceSession) -> None:
+    async def clear_pending_clarification(self, session: VoiceSession) -> None:
         session.clarification_state = None
-        self.save(session)
+        await self.save(session)
 
-    def add_resolved_entity(
+    async def add_resolved_entity(
         self, session: VoiceSession, term: str, resolution: str, option_selected: str
     ) -> None:
         if len(session.resolved_entities) >= 20 and term not in session.resolved_entities:
@@ -163,17 +194,17 @@ class InMemorySessionStore:
             resolved_at_turn=session.turn_count,
             option_selected=option_selected,
         )
-        self.save(session)
+        await self.save(session)
 
-    def mark_low_quality(self, session: VoiceSession, turn_id: UUID) -> bool:
+    async def mark_low_quality(self, session: VoiceSession, turn_id: UUID) -> bool:
         for turn in session.history:
             if turn.turn_id == turn_id:
                 turn.quality_flag = QualityFlag.low
-                self.save(session)
+                await self.save(session)
                 return True
         return False
 
-    def health_status(self) -> str:
+    async def health_status(self) -> str:
         return "local_stub"
 
     @staticmethod
@@ -192,7 +223,13 @@ class RedisSessionStore(InMemorySessionStore):
         self.counter = counter or TokenCounter()
         self.client = client or self._client_from_settings(self.settings)
 
-    def create(self, claims: AuthClaims) -> tuple[VoiceSession, datetime]:
+    async def start(self) -> None:
+        pass
+
+    async def close(self) -> None:
+        pass
+
+    async def create(self, claims: AuthClaims) -> tuple[VoiceSession, datetime]:
         session = VoiceSession(
             session_id=uuid4(),
             user_id=claims.user_id,
@@ -200,12 +237,12 @@ class RedisSessionStore(InMemorySessionStore):
             conversation_id=uuid4(),
             snowflake_role=claims.snowflake_role,
         )
-        expires_at = self.save(session)
+        expires_at = await self.save(session)
         return session, expires_at
 
-    def get(self, tenant_id: UUID, session_id: UUID) -> VoiceSession | None:
+    async def get(self, tenant_id: UUID, session_id: UUID) -> VoiceSession | None:
         try:
-            raw = self.client.get(self.redis_key(tenant_id, session_id))
+            raw = await self.client.get(self.redis_key(tenant_id, session_id))
         except Exception as exc:
             raise self._session_unavailable(exc) from exc
         if raw is None:
@@ -220,17 +257,17 @@ class RedisSessionStore(InMemorySessionStore):
             return None
         return session
 
-    def delete(self, tenant_id: UUID, session_id: UUID) -> None:
+    async def delete(self, tenant_id: UUID, session_id: UUID) -> None:
         try:
-            self.client.delete(self.redis_key(tenant_id, session_id))
+            await self.client.delete(self.redis_key(tenant_id, session_id))
         except Exception as exc:
             raise self._session_unavailable(exc) from exc
 
-    def save(self, session: VoiceSession) -> datetime:
+    async def save(self, session: VoiceSession) -> datetime:
         session.last_interaction_ts = datetime.now(UTC)
         expires_at = datetime.now(UTC) + timedelta(seconds=self.settings.session_ttl_seconds)
         try:
-            self.client.setex(
+            await self.client.setex(
                 self.redis_key(session.tenant_id, session.session_id),
                 self.settings.session_ttl_seconds,
                 session.model_dump_json(),
@@ -239,9 +276,9 @@ class RedisSessionStore(InMemorySessionStore):
             raise self._session_unavailable(exc) from exc
         return expires_at
 
-    def health_status(self) -> str:
+    async def health_status(self) -> str:
         try:
-            self.client.ping()
+            await self.client.ping()
         except Exception:
             return "degraded"
         return "ok"
@@ -253,8 +290,8 @@ class RedisSessionStore(InMemorySessionStore):
     @staticmethod
     def _session_unavailable(exc: Exception) -> ApiError:
         return ApiError(
-            ErrorCode.session_not_found,
-            status_code=404,
+            ErrorCode.internal_error,
+            status_code=503,
             detail=f"Redis session store unavailable: {type(exc).__name__}",
         )
 
@@ -262,14 +299,14 @@ class RedisSessionStore(InMemorySessionStore):
     def _client_from_settings(settings: Settings) -> RedisClientProtocol:
         if not settings.upstash_redis_url:
             raise RuntimeError("UPSTASH_REDIS_URL is required when SESSION_STORE=redis.")
-        import redis
+        import redis.asyncio as redis
 
         try:
             return redis.Redis.from_url(
                 settings.upstash_redis_url,
                 decode_responses=True,
-                socket_connect_timeout=2,
-                socket_timeout=2,
+                socket_connect_timeout=10,
+                socket_timeout=10,
             )
         except Exception as exc:
             raise RuntimeError(f"Failed to initialize Redis client: {type(exc).__name__}") from None

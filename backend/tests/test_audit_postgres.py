@@ -133,7 +133,7 @@ async def test_postgres_store_transactional_insert():
         "turn_id": str(turn.turn_id),
         "prompt_sent": "ambiguous",
         "user_choice": None,
-        "resolution_type": "timeout",
+        "resolution_type": "escaped",
         "created_at": "2026-07-05T00:00:00Z"
     }
     

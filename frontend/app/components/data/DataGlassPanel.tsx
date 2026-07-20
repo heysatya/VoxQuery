@@ -2,7 +2,8 @@
 
 import React, { useState } from "react";
 import { motion } from "framer-motion";
-import { ThumbsDown, ThumbsUp, Code, Download, ChevronDown } from "lucide-react";
+import { ThumbsDown, ThumbsUp, Code, Download, ChevronDown, Link, Printer } from "lucide-react";
+import { format as formatSql } from "sql-formatter";
 import { cn } from "../../../lib/utils";
 import type { LastResult } from "../../../lib/types";
 import {
@@ -25,7 +26,7 @@ import { TrustPanel } from "./TrustPanel";
 
 /* ── Chart Renderer ────────────────────────────────────────────── */
 
-function ChartRenderer({ type, result }: { type: ChartType; result: LastResult["resultData"] }) {
+function ChartRenderer({ type, result, onDrillDown }: { type: ChartType; result: LastResult["resultData"]; onDrillDown?: (query: string) => void }) {
   const data = result.result;
   const columnSemantics = semanticColumns(result);
   if (!data.columns || !data.rows || data.rows.length === 0) {
@@ -92,11 +93,16 @@ function ChartRenderer({ type, result }: { type: ChartType; result: LastResult["
     fontSize: "13px",
   };
 
+  const handleChartClick = (data: any) => {
+    if (!onDrillDown || !data || !data.activeLabel) return;
+    onDrillDown(`Tell me more about ${data.activeLabel}`);
+  };
+
   if (type === "line") {
     return (
       <div className="h-72 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ top: 20, right: 20, left: 0, bottom: 5 }}>
+          <LineChart data={chartData} margin={{ top: 20, right: 20, left: 0, bottom: 5 }} onClick={handleChartClick} style={{ cursor: onDrillDown ? "pointer" : "default" }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.04)" />
             <XAxis dataKey={xKey} axisLine={false} tickLine={false} tick={{ fill: "#8B8FA3", fontSize: 12 }} />
             <YAxis axisLine={false} tickLine={false} tick={{ fill: "#8B8FA3", fontSize: 12 }} />
@@ -113,7 +119,7 @@ function ChartRenderer({ type, result }: { type: ChartType; result: LastResult["
   return (
     <div className="h-72 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chartData} margin={{ top: 20, right: 20, left: 0, bottom: 5 }}>
+        <BarChart data={chartData} margin={{ top: 20, right: 20, left: 0, bottom: 5 }} onClick={handleChartClick} style={{ cursor: onDrillDown ? "pointer" : "default" }}>
           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.04)" />
           <XAxis dataKey={xKey} axisLine={false} tickLine={false} tick={{ fill: "#8B8FA3", fontSize: 12 }} />
           <YAxis axisLine={false} tickLine={false} tick={{ fill: "#8B8FA3", fontSize: 12 }} />
@@ -136,12 +142,14 @@ type DataGlassPanelProps = {
   onFeedback: (rating: -1 | 1) => void | Promise<void>;
   onMute: () => void;
   onUnmute: () => void;
+  onDrillDown?: (query: string) => void;
 };
 
 export function DataGlassPanel({
   result,
   feedbackRating,
   onFeedback,
+  onDrillDown,
 }: DataGlassPanelProps) {
   const [showSql, setShowSql] = useState(false);
   const [userChartOverride, setUserChartOverride] = useState<string | null>(null);
@@ -188,6 +196,22 @@ export function DataGlassPanel({
     URL.revokeObjectURL(url);
   }
 
+  const [copiedLink, setCopiedLink] = useState(false);
+  function copyPermalink() {
+    // Generate a permalink using the turnId
+    const url = new URL(window.location.href);
+    url.searchParams.set("share", result.turnId);
+    navigator.clipboard.writeText(url.toString()).then(() => {
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    });
+  }
+
+  function exportToPDF() {
+    // A simple client-side print that relies on print CSS media queries
+    window.print();
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
@@ -218,6 +242,7 @@ export function DataGlassPanel({
       <ChartRenderer
         type={chartType}
         result={result.resultData}
+        onDrillDown={onDrillDown}
       />
 
       {/* Actions bar */}
@@ -245,6 +270,16 @@ export function DataGlassPanel({
           {/* Download CSV */}
           <button type="button" onClick={downloadCSV} className="p-2 text-[var(--text-muted)] hover:text-[var(--accent-blue)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] rounded-lg transition-colors" title="Download CSV">
             <Download className="h-4 w-4" />
+          </button>
+
+          {/* Export PDF */}
+          <button type="button" onClick={exportToPDF} className="p-2 text-[var(--text-muted)] hover:text-[var(--accent-blue)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] rounded-lg transition-colors" title="Export to PDF">
+            <Printer className="h-4 w-4" />
+          </button>
+
+          {/* Share Permalink */}
+          <button type="button" onClick={copyPermalink} className="p-2 text-[var(--text-muted)] hover:text-[var(--accent-blue)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] rounded-lg transition-colors" title={copiedLink ? "Link copied!" : "Copy permalink"}>
+            <Link className={cn("h-4 w-4", copiedLink && "text-[var(--accent-green)]")} />
           </button>
 
           {/* Feedback */}
@@ -294,10 +329,10 @@ export function DataGlassPanel({
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
-            className="mt-3 p-4 bg-[var(--bg-base)] rounded-xl overflow-x-auto border border-[var(--border)]"
+            className="mt-3 p-4 bg-[var(--bg-base)] rounded-xl overflow-x-auto border border-[var(--border)] shadow-inner"
           >
-            <pre className="text-sm text-[var(--chart-2)] font-mono leading-relaxed">
-              {result.resultData.generated_sql}
+            <pre className="text-sm text-[var(--chart-2)] font-mono leading-relaxed whitespace-pre-wrap">
+              {formatSql(result.resultData.generated_sql, { language: "postgresql" })}
             </pre>
           </motion.div>
         )}

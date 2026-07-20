@@ -137,18 +137,21 @@ function inferValidVisualizations(result: ResultResponse): ChartType[] {
 export function deriveCaveatText(result: ResultResponse): string | null {
   const tier = result.confidence_tier;
   if (tier === "High") return null;
+  
+  const prefix = tier === "Low" ? "Assumptions made" : "Partial match";
+  
   // Prefer backend-provided reasons
   const reasons = result.confidence_reasons ?? result.trust?.confidence_reasons ?? [];
   if (reasons.length > 0) {
-    return `${tier} confidence — ${reasons[0].toLowerCase()}`;
+    return `${prefix} — ${reasons[0].toLowerCase()}`;
   }
   // Derive from warnings
   if (result.warnings.some((w) => w.code === "possible_duplication")) {
-    return `${tier} confidence — joined tables may contain duplicate source records.`;
+    return `${prefix} — joined tables may contain duplicate source records.`;
   }
   // Tier-based fallback (generic but still evidence-referenced, not hardcoded)
   if (tier === "Low") {
-    return "We made a few assumptions to answer this.";
+    return "We made a few assumptions to answer this. Review the SQL below.";
   }
   return "We made some assumptions to calculate this. Review the SQL below.";
 }

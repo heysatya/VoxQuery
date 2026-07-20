@@ -1,0 +1,35 @@
+name: Periodic Schema Sync
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Run daily at 2:00 AM UTC
+  workflow_dispatch:      # Allow manual triggering
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: Run Schema Sync
+        working-directory: backend
+        env:
+          SNOWFLAKE_DSN: ${{ secrets.SNOWFLAKE_DSN }}
+          SUPABASE_DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          FERNET_KEY: ${{ secrets.FERNET_KEY }}
+        run: |
+          python scripts/sync_schema.py

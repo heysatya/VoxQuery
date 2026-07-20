@@ -11,7 +11,7 @@
     "start": "next start"
   },
   "engines": {
-    "node": ">=20.9.0 <21"
+    "node": "24.x"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.5.12",
@@ -24,6 +24,7 @@
     "react-dom": "^18.3.0",
     "react-markdown": "^10.1.0",
     "recharts": "^3.9.2",
+    "sql-formatter": "^15.8.2",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {

@@ -101,10 +101,12 @@ def _metric_matches(tokens: set[str], schema_chunks: list[SchemaChunk]) -> dict[
     return matches
 
 
+STOP_WORDS = {"a", "an", "the", "in", "on", "at", "to", "for", "of", "and", "or", "is", "are", "show", "me", "what", "by", "with"}
+
 def _entity_collision_terms(tokens: set[str], schema_chunks: list[SchemaChunk]) -> list[str]:
     refs_by_term: dict[str, set[str]] = {}
     for token in tokens:
-        if len(token) < 4:
+        if len(token) < 2 or token in STOP_WORDS:
             continue
         for chunk in schema_chunks:
             if token in chunk.source_ref.lower() or token in chunk.content.lower():

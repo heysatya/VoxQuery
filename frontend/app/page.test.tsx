@@ -37,6 +37,7 @@ const mediumResult = {
   ...result,
   turn_id: "turn-medium",
   confidence_tier: "Medium",
+  confidence_reasons: ["Schema match was weaker than usual"],
 };
 
 const staleResult = {
@@ -82,20 +83,28 @@ const csvResult = {
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
   url: string;
   onopen: (() => void) | null = null;
   onmessage: ((message: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
   onclose: ((event: { code: number }) => void) | null = null;
+  readyState = 0;
 
   constructor(url: string) {
     this.url = url;
     FakeWebSocket.instances.push(this);
-    queueMicrotask(() => this.onopen?.());
+    queueMicrotask(() => { this.readyState = 1; this.onopen?.(); });
   }
 
   send(data: string | ArrayBufferLike | Blob | ArrayBufferView) {
     if (!this.url.includes("/ws/audio")) {
+      return;
+    }
+    if (typeof data === "string" && data.includes('"event":"auth"')) {
       return;
     }
     if (typeof data !== "string") {
@@ -120,7 +129,19 @@ class FakeWebSocket {
 }
 
 class MockAudioWorkletNode {
-  port: { onmessage: ((event: { data: ArrayBuffer }) => void) | null } = { onmessage: null };
+  port: { 
+    onmessage: ((event: { data: any }) => void) | null;
+    postMessage: (msg: any) => void;
+  } = { 
+    onmessage: null,
+    postMessage: (msg) => {
+      if (msg && msg.type === "flush") {
+        queueMicrotask(() => {
+          this.port.onmessage?.({ data: { type: "flushed" } });
+        });
+      }
+    }
+  };
   connect = vi.fn();
   disconnect = vi.fn();
   
@@ -546,8 +567,7 @@ describe("HomePage", () => {
       type: "clarification_request",
       turn_id: "turn-1",
       question: "Which revenue metric did you mean?",
-      options: ["Gross revenue", "Net revenue", "Recognized revenue"],
-      timeout_seconds: 30
+      options: ["Gross revenue", "Net revenue", "Recognized revenue"]
     });
 
     expect(await screen.findByText("Which revenue metric did you mean?")).toBeInTheDocument();
@@ -715,7 +735,7 @@ describe("HomePage", () => {
     // Assert WS URL contains session and token
     const wsUrl = audioSocket()!.url;
     expect(wsUrl).toContain("session_id=session-1");
-    expect(wsUrl).toContain("token=fake");
+    expect(wsUrl).not.toContain("token=fake");
   });
 
   it("audio chunks are sent as binary frames over the WS", async () => {
@@ -767,7 +787,7 @@ describe("HomePage", () => {
     const stopButton = await screen.findByRole("button", { name: "Stop recording" });
     fireEvent.click(stopButton);
     
-    expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ type: "stop_recording" }));
+    await waitFor(() => expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ type: "stop_recording" })));
     
     // Simulate final transcript
     act(() => {
@@ -907,10 +927,10 @@ describe("HomePage", () => {
     await emitPipeline({ type: "result_ready", turn_id: "turn-medium" });
 
     // Trust panel header shows the tier
-    expect(await screen.findByText("Moderate confidence")).toBeInTheDocument();
+    expect(await screen.findByText("Partial match")).toBeInTheDocument();
     // Evidence-derived caveat shown (not hardcoded text)
     expect(
-      screen.getByText(/Moderate confidence.*schema match was weaker/i)
+      screen.getByText(/Partial match.*schema match was weaker/i)
     ).toBeInTheDocument();
   });
 
