@@ -430,6 +430,8 @@ async def clarification_node(state: PipelineGraphState) -> dict:
 async def execution_node(state: PipelineGraphState) -> dict:
     turn: TurnRecord = state["turn"]
     claims: AuthClaims = state["claims"]
+    tracer = state["tracer"]
+    trace = state.get("graph_trace")
 
     await _publish_stage(state, PipelineStage.snowflake_executing)
     started = perf_counter()
@@ -459,11 +461,25 @@ async def execution_node(state: PipelineGraphState) -> dict:
             )
         except Exception as e:
             err_str = str(e).lower()
+            tracer.span_snowflake_executing(
+                trace,
+                snowflake_role=claims.snowflake_role,
+                success=False,
+                error_type=type(e).__name__,
+                error_detail=str(e),
+            )
             if "time" in err_str and "out" in err_str:
                 raise ApiError(ErrorCode.warehouse_timeout, status_code=504, detail=str(e))
             if "warehouse error" in err_str or "operationalerror" in err_str:
                 raise ApiError(ErrorCode.warehouse_error, status_code=502, detail=str(e))
             raise ApiError(ErrorCode.warehouse_error, status_code=500, detail=str(e))
+
+        tracer.span_snowflake_executing(
+            trace,
+            snowflake_role=claims.snowflake_role,
+            success=True,
+            row_count=shape.row_count,
+        )
 
         if orchestrator is not None:
             await orchestrator._store_cached_result(claims.tenant_id, sql_to_execute, result, shape)

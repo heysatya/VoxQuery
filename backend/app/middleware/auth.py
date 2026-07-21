@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 
 import asyncpg
@@ -8,6 +9,8 @@ from jwt.exceptions import PyJWTError
 
 from app.config import Settings, get_settings
 from app.models.contracts import ApiError, AuthClaims, ErrorCode
+
+logger = logging.getLogger(__name__)
 
 LOCAL_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 LOCAL_TENANT_ID = UUID("00000000-0000-0000-0000-000000000101")
@@ -54,14 +57,23 @@ class ClerkJwtVerifier:
     def claims_from_payload(self, payload: dict, role: str = "viewer") -> AuthClaims:
         try:
             user_id_str = str(payload[self.settings.clerk_user_id_claim])
+            snowflake_role_claim = payload.get(self.settings.clerk_snowflake_role_claim)
+            if snowflake_role_claim is None:
+                # Not blocking here — a missing claim with a valid default is a legitimate
+                # setup for many tenants. But this is worth being visible in logs, since a
+                # silent fallback to a role that happens to lack grants on a given tenant's
+                # schema produces the same opaque "warehouse_error" this comment is next to.
+                logger.warning(
+                    "auth.snowflake_role_claim_missing user_id=%s tenant_id=%s falling_back_to=ANALYST_READONLY",
+                    user_id_str,
+                    payload.get(self.settings.clerk_tenant_id_claim),
+                )
             return AuthClaims(
                 user_id=UUID(user_id_str),
                 tenant_id=UUID(str(payload[self.settings.clerk_tenant_id_claim])),
                 email=str(payload.get(self.settings.clerk_email_claim, f"unknown_{user_id_str}@voxquery.test")),
                 role=role,
-                snowflake_role=str(
-                    payload.get(self.settings.clerk_snowflake_role_claim, "ANALYST_READONLY")
-                ),
+                snowflake_role=str(snowflake_role_claim or "ANALYST_READONLY"),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ApiError(

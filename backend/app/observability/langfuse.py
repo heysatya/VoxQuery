@@ -178,6 +178,38 @@ class LangfuseTracer:
             child.end()
         self._safe_call(_span)
 
+    def span_snowflake_executing(
+        self,
+        trace,
+        *,
+        snowflake_role: str | None,
+        success: bool,
+        row_count: int | None = None,
+        error_type: str | None = None,
+        error_detail: str | None = None,
+    ):
+        if not trace:
+            return
+        def _span():
+            child = trace.start_observation(
+                name="snowflake_executing",
+                as_type="span",
+                output={
+                    "snowflake_role": snowflake_role,
+                    "success": success,
+                    "row_count": row_count,
+                    # error_detail is redacted upstream (no DSN/credentials) before it reaches
+                    # this call, but is safe to keep in Langfuse even though it's stripped
+                    # from the client-facing API response in production.
+                    "error_type": error_type,
+                    "error_detail": error_detail,
+                },
+            )
+            if not success:
+                child.update(level="ERROR", status_message=error_type or "warehouse_error")
+            child.end()
+        self._safe_call(_span)
+
     def span_turn_completed(self, trace, latency_ms: int, success: bool = True, error_code: str | None = None):
         if not trace:
             return

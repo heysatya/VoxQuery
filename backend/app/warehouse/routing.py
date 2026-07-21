@@ -55,6 +55,20 @@ class TenantRoutingWarehouseConnector(WarehouseConnector):
         self._cache[tenant_id] = (connector, datetime.now(UTC))
         return connector
 
+    async def is_provisioned(self, tenant_id: UUID) -> bool:
+        """Cheap-ish existence/validity check used as a login-time guard, so an
+        unprovisioned or misconfigured tenant is rejected with a clear message
+        before they reach the pipeline, rather than failing five steps deep in
+        execution_node. Reuses _get_connector so it catches both a missing
+        tenant_connections row AND a DSN that fails to decrypt (e.g. FERNET_KEY
+        mismatch) — it does not open a network connection to Snowflake itself,
+        so it stays cheap even though it exercises the full resolution path."""
+        try:
+            await self._get_connector(tenant_id)
+            return True
+        except RuntimeError:
+            return False
+
     async def execute_readonly(
         self, sql: str, *, snowflake_role: str, tenant_id: UUID | None = None
     ) -> tuple[ResultPayload, ResultShape]:

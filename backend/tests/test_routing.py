@@ -145,3 +145,81 @@ async def test_sec_3_cache_ttl_expiry(mock_db_pool):
     # 4. Fetch after expiry
     await routing_connector._get_connector(tenant_id)
     assert mock_conn.fetchrow.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_is_provisioned_true_for_valid_dsn(mock_db_pool):
+    """is_provisioned() returns True when a tenant has a valid, decryptable DSN."""
+    settings = DummySettings()
+    fernet = Fernet(settings.fernet_key.encode())
+
+    tenant_id = uuid4()
+    encrypted_dsn = fernet.encrypt(b"snowflake://user:pass@account/db/schema").decode()
+
+    mock_conn = AsyncMock()
+    mock_conn.fetchrow.return_value = {"snowflake_dsn": encrypted_dsn}
+
+    class MockAcquireContext:
+        async def __aenter__(self): return mock_conn
+        async def __aexit__(self, exc_type, exc, tb): pass
+
+    mock_db_pool.acquire.return_value = MockAcquireContext()
+
+    routing_connector = TenantRoutingWarehouseConnector(settings=settings, db_pool=mock_db_pool)
+    assert await routing_connector.is_provisioned(tenant_id) is True
+
+
+@pytest.mark.asyncio
+async def test_is_provisioned_false_when_no_row(mock_db_pool):
+    """is_provisioned() returns False for a tenant with no tenant_connections row —
+    this is the exact bug class that produced 'No warehouse connection configured'."""
+    settings = DummySettings()
+
+    mock_conn = AsyncMock()
+    mock_conn.fetchrow.return_value = None
+
+    class MockAcquireContext:
+        async def __aenter__(self): return mock_conn
+        async def __aexit__(self, exc_type, exc, tb): pass
+
+    mock_db_pool.acquire.return_value = MockAcquireContext()
+
+    routing_connector = TenantRoutingWarehouseConnector(settings=settings, db_pool=mock_db_pool)
+    assert await routing_connector.is_provisioned(uuid4()) is False
+
+
+@pytest.mark.asyncio
+async def test_is_provisioned_false_on_decrypt_failure(mock_db_pool):
+    """is_provisioned() returns False when the stored DSN fails to decrypt under
+    the currently-configured FERNET_KEY (e.g. a key rotation, or a DSN encrypted
+    with a different key) — not just when the row is entirely missing."""
+    settings = DummySettings()
+    # Encrypt with a DIFFERENT key than the one the connector will use to decrypt.
+    other_key_fernet = Fernet(Fernet.generate_key())
+    encrypted_with_wrong_key = other_key_fernet.encrypt(b"snowflake://user:pass@account/db/schema").decode()
+
+    mock_conn = AsyncMock()
+    mock_conn.fetchrow.return_value = {"snowflake_dsn": encrypted_with_wrong_key}
+
+    class MockAcquireContext:
+        async def __aenter__(self): return mock_conn
+        async def __aexit__(self, exc_type, exc, tb): pass
+
+    mock_db_pool.acquire.return_value = MockAcquireContext()
+
+    routing_connector = TenantRoutingWarehouseConnector(settings=settings, db_pool=mock_db_pool)
+    assert await routing_connector.is_provisioned(uuid4()) is False
+
+
+@pytest.mark.asyncio
+async def test_is_provisioned_true_in_dev_fallback_mode(mock_db_pool):
+    """When no FERNET_KEY is configured (dev/test fallback), a shared
+    snowflake_dsn on settings counts as provisioned for any tenant."""
+    class DevSettings:
+        fernet_key = None
+        snowflake_dsn = "snowflake://dev:dev@account/db/schema"
+        postgres_dsn = "postgresql://postgres:postgres@localhost:5432/voxquery_test"
+
+    routing_connector = TenantRoutingWarehouseConnector(settings=DevSettings(), db_pool=mock_db_pool)
+    assert await routing_connector.is_provisioned(uuid4()) is True
+    mock_db_pool.acquire.assert_not_called()

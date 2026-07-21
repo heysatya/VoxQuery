@@ -177,14 +177,16 @@ app.state.telemetry = StructuredLogger()
 
 @app.exception_handler(ApiError)
 async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
+    # Always log the real detail server-side, regardless of environment —
+    # only the *client-facing* response strips it in production.
+    logger.warning(
+        "api_error path=%s code=%s status=%s detail=%s",
+        request.url.path,
+        exc.code.value,
+        exc.status_code,
+        exc.detail,
+    )
     detail = None if settings.app_env == "production" else exc.detail
-    if settings.app_env != "production":
-        logger.warning(
-            "api_error path=%s code=%s detail=%s",
-            request.url.path,
-            exc.code.value,
-            detail,
-        )
     return JSONResponse(
         status_code=exc.status_code,
         content=ErrorEnvelope(

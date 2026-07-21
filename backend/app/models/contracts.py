@@ -75,6 +75,7 @@ class ErrorCode(StrEnum):
     rag_unavailable = "rag_unavailable"
     warehouse_timeout = "warehouse_timeout"
     warehouse_error = "warehouse_error"
+    tenant_not_provisioned = "tenant_not_provisioned"
     sql_generation_failed = "sql_generation_failed"
     llm_unavailable = "llm_unavailable"
     rate_limit_exceeded = "rate_limit_exceeded"
@@ -104,6 +105,9 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ),
     ErrorCode.warehouse_error: (
         "The data warehouse returned an error. Check that your schema access is configured correctly."
+    ),
+    ErrorCode.tenant_not_provisioned: (
+        "Your organization's data connection isn't set up yet. Please contact support."
     ),
     ErrorCode.sql_generation_failed: (
         "I couldn't generate a valid query even after clarification. "

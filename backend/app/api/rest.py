@@ -44,11 +44,21 @@ async def create_session(
     request: SessionCreateRequest,
     claims: AuthClaims = Depends(get_current_user),
     sessions: InMemorySessionStore = Depends(get_sessions),
+    pipeline: PipelineOrchestrator = Depends(get_pipeline),
 ) -> SessionCreateResponse:
     if request.tenant_id and request.tenant_id != claims.tenant_id:
         raise ApiError(ErrorCode.auth_invalid, status_code=401, detail="Requested tenant_id does not match authorization claims")
     # ensure it always uses claims.tenant_id going forward if omitted
     request.tenant_id = claims.tenant_id
+
+    is_provisioned = getattr(pipeline.warehouse, "is_provisioned", None)
+    if is_provisioned is not None and not await is_provisioned(claims.tenant_id):
+        raise ApiError(
+            ErrorCode.tenant_not_provisioned,
+            status_code=403,
+            detail=f"No warehouse connection configured for tenant {claims.tenant_id}",
+        )
+
     session, expires_at = await sessions.create(claims)
     return SessionCreateResponse(
         session_id=session.session_id,
