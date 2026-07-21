@@ -115,7 +115,8 @@ async def sync_schema():
             print("   -> Warning: FERNET_KEY not set. Cannot populate tenant_connections table.")
             
         import json
-        from app.rag.query_rewriter import METRIC_SYNONYMS, TABLE_SYNONYMS
+        #from app.rag.query_rewriter import METRIC_SYNONYMS, TABLE_SYNONYMS
+        from app.rag.glossary_defaults import DEFAULT_METRIC_SYNONYMS, DEFAULT_TABLE_SYNONYMS
         try:
             await conn.execute("""
                 INSERT INTO tenant_glossary (tenant_id, metric_synonyms, table_synonyms)
