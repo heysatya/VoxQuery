@@ -7,7 +7,7 @@ describe('PcmProcessor', () => {
     // Values: > 1 (should clip to 1), < -1 (should clip to -1), 0, 0.5, -0.5
     const input = new Float32Array([1.5, -1.5, 0, 0.5, -0.5]);
     
-    // Process input. We need 1600 samples to trigger a chunk, so we'll just flush to get these 5 samples.
+    // Process input. We need 320 samples to trigger a chunk, so we'll just flush to get these 5 samples.
     processor.process([input]);
     const result = processor.flush();
     
@@ -98,15 +98,15 @@ describe('PcmProcessor', () => {
     expect(samples).toBe(160);
   });
 
-  it('should aggregate chunks to exact 3200 bytes (~100ms) and preserve remainder', () => {
+  it('should aggregate chunks to exact 640 bytes (~20ms) and preserve remainder', () => {
     const processor = new PcmProcessor(16000);
-    // Give it 1700 samples (100 more than needed for a chunk)
+    // Give it 1700 samples (100 more than five chunks)
     const input = new Float32Array(1700);
     
     const chunks = processor.process([input]);
     
-    expect(chunks.length).toBe(1);
-    expect(chunks[0].byteLength).toBe(3200); // 1600 samples * 2 bytes
+    expect(chunks.length).toBe(5);
+    expect(chunks[0].byteLength).toBe(640); // 320 samples * 2 bytes
     
     // Flush should return the remaining 100 samples
     const remainder = processor.flush();
@@ -116,15 +116,15 @@ describe('PcmProcessor', () => {
 
   it('should not emit WAV headers or container bytes', () => {
     const processor = new PcmProcessor(16000);
-    const input = new Float32Array(1600);
+    const input = new Float32Array(320);
     const chunks = processor.process([input]);
     
     expect(chunks.length).toBe(1);
     const buffer = chunks[0];
     
-    // Pure PCM chunk for 1600 samples is exactly 3200 bytes.
-    // If it had a WAV header it would be 3244.
-    expect(buffer.byteLength).toBe(3200);
+    // Pure PCM chunk for 320 samples is exactly 640 bytes.
+    // If it had a WAV header it would be 684.
+    expect(buffer.byteLength).toBe(640);
     
     const bytes = new Uint8Array(buffer);
     // Verify it doesn't start with 'RIFF'

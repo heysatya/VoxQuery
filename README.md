@@ -14,11 +14,18 @@ VoxQuery is an enterprise-grade, voice-driven data analyst that enables non-tech
 - **Voice TTS**: Real-time synthesized narrative audio playback through `/ws/tts` via Deepgram TTS.
 - **LLM Engine**: Claude Haiku (claude-haiku-4-5-20251001) for entity extraction, ambiguity detection, SQL generation, and data narrative storytelling.
 - **Session Memory**: Upstash Redis for distributed session-store (handling session TTL and context windows).
-- **Schema-Aware RAG**: Supabase PgVector powering a semantic Metric Registry and Query Rewriter, combining vector similarity and BM25 Reciprocal Rank Fusion for high-recall warehouse schema injection.
-- **Database & Telemetry**: Supabase Postgres for async Audit writes.
-- **Data Warehouse**: Snowflake connector running live against the real E-commerce dataset for accurate BI results.
+- **Schema-Aware RAG**: Supabase PgVector powering a semantic Query Rewriter, combining vector similarity and BM25 Reciprocal Rank Fusion for high-recall warehouse schema injection.
+- **Database & Telemetry**: Supabase Postgres for async Audit writes, feedback collection, and database-driven synonym glossaries.
+- **Data Warehouse**: Snowflake connector running live against the real E-commerce dataset for accurate BI results, optimized with a high-performance, thread-safe `SnowflakeConnectionPool`.
+- **Admin Console**: Strict RBAC-protected administrative cockpit at `/admin` to manage Tenant Glossaries, review low-quality query feedback, and monitor database telemetry.
+- **Tenant Provisioning**: Clerk Webhooks endpoint (`/api/webhooks/clerk`) that automates user onboarding, tenant creation, and default glossary seeding (Kaggle E-Commerce mappings).
 - **Observability**: Langfuse for tracing LLM execution paths, latency, and tokens.
-- **Authentication**: Clerk for enterprise SSO and JWT generation.
+- **Authentication**: Clerk for enterprise SSO, user roles, and secure JWT verification.
+
+---
+
+## MVP Simplifications
+- **ARCH-5 (Result-set duplication detection)**: The system currently relies on a textual heuristic (detecting JOIN without DISTINCT and row_count > 100) instead of a real Snowflake metadata cardinality check. This is an accepted MVP simplification to reduce execution latency.
 
 ---
 
@@ -41,6 +48,8 @@ WAREHOUSE_PROVIDER=snowflake
 UPSTASH_REDIS_URL=<upstash_redis_url>
 CLERK_ISSUER=<clerk_issuer_url>
 CLERK_JWKS_URL=<clerk_jwks_url>
+CLERK_SECRET_KEY=<clerk_secret_key>
+CLERK_WEBHOOK_SECRET=<clerk_webhook_secret>
 ANTHROPIC_API_KEY=<anthropic_api_key>
 OPENAI_API_KEY=<openai_api_key>
 DEEPGRAM_API_KEY=<deepgram_api_key>
@@ -80,47 +89,48 @@ npm run start -- -p 3000
 
 ## Live E2E Certification Test Plan
 
-The system should be verified against the following real-world test scenarios using live credentials.
+The system is verified against the following comprehensive test cases under the live certification test plan:
 
-### Category A: Core Happy Path & Execution
-**Test Case A1: Simple Aggregation**
-* **Action:** Submit: *"What is the total revenue for the last 30 days?"*
-* **Expected:** A `Stat` card (large number) appears in the main feed. The "Trust Panel" displays "Confidence: High".
+*   **Category A: Core Happy Path & Execution**
+    *   **A1: Simple Aggregation** — Natural language to Snowflake SQL execution and Stat card display.
+    *   **A2: Time-Series Data Visualization** — Renders interactive Line Charts.
+    *   **A3: Snowflake Connection Pool** — Validates query latency reduction on subsequent execution turns.
+*   **Category B: The Clarification Loop**
+    *   **B1: Entity Ambiguity Block** — Triggers a modal for user clarification before compiling queries.
+*   **Category C: Schema-Aware RAG & Hybrid Retrieval**
+    *   **C1: Metric Registry Resolution** — Resolves net revenue/margin formulas dynamically.
+    *   **C2: RRF Multi-Hop Schema Injection** — Joins multiple tables (e.g. active vs churned customers).
+*   **Category D: Memory & Multi-Turn Context**
+    *   **D1: Pronoun Resolution via History** — Retains context across multiple conversational turns.
+*   **Category E: Deliberate Errors (Safety Tests)**
+    *   **E1: Destructive Intent** — Blocks SQL injection attempts (e.g., DROP/DELETE).
+*   **Category F: Telemetry Verification**
+    *   **F1: Langfuse Thumbs Down Scoring** — Submits user feedback directly to Langfuse.
+*   **Category G: Break Cases & Rough Edges (Graceful Degradation)**
+    *   **G1: LLM SQL Hallucination** — Graceful handling of invalid columns/tables.
+    *   **G2: Clarification Modal Abandonment** — Automatically cleans and updates state if a new query is submitted.
+    *   **G3: Voice Input Graceful Degradation** — Smooth reversion to text if microphone access is denied.
+    *   **G4: Clarification Timeout Expiry** — Graceful session resets on stale interaction loops.
+*   **Category H: Admin Console & Role-Based Access Control (RBAC)**
+    *   **H1: Unauthorized Access Prevention** — Restricts access to `/admin` route.
+    *   **H2: Tenant Glossary Visualization** — Displays custom tenant glossary and default mappings.
+    *   **H3: Feedback Loop Review** — Inspects user thumbs-down feedback.
+*   **Category I: Production-Readiness Constraints**
+    *   **I1: Rate Limiter Throttling** — Enforces a maximum threshold of requests per user/session.
+*   **Category J: World-Class Interactive UI Features**
+    *   **J1: Interactive Chart Drill-down** — Enables chart interaction to dispatch sub-queries automatically.
+    *   **J2: Anomaly Narration Validation** — Detects anomalies (spikes/drops) and adds contextual explanations.
+    *   **J3: Sharing & Export (Permalinks)** — Instantly renders historical queries and charts via static URLs.
+*   **Category K: Authentication & Tenant Provisioning (Webhooks)**
+    *   **K1: Automated Tenant and User Provisioning** — Automatically registers users via Clerk signup webhooks.
+    *   **K2: Secure DSN Isolation Enforcement** — Guarantees tenant isolation for Snowflake queries.
+    *   **K3: Automated Glossary Provisioning** — Confirms that default Kaggle synonyms are auto-seeded on user onboarding.
 
-**Test Case A2: Time-Series Data Visualization**
-* **Action:** Submit: *"Show me daily order volume for the past week."*
-* **Expected:** The UI dynamically renders a **Line Chart**.
-
-### Category B: The Clarification Loop (Pre-SQL Ambiguity)
-**Test Case B1: Entity Ambiguity Block**
-* **Action:** Submit: *"How many customers do we have in the US?"*
-* **Expected:** A Clarification Modal appears asking *"By 'US', do you mean Shipping Country or Billing Country?"* Click a button and ensure the query resumes successfully.
-
-### Category C: Schema-Aware RAG & Hybrid Retrieval
-**Test Case C1: Metric Registry Resolution**
-* **Action:** Submit: *"What is our Net Revenue by region?"*
-* **Expected:** The Trust Panel text or generated SQL explicitly shows the correct formula for Net Revenue (as defined in the Metric Registry), verifying the `rewrite_query_node` successfully mapped the term to specific warehouse tables.
-
-**Test Case C2: RRF Multi-Hop Schema Injection**
-* **Action:** Submit: *"Show me the conversion rate for active customers vs churned customers."*
-* **Expected:** Check the generated SQL in the Trust Panel. It should accurately join `customers`, `orders`, and tables governing `churn` logic, proving that Reciprocal Rank Fusion retrieved all disparate DDL chunks necessary.
-
-### Category D: Memory & Multi-Turn Context
-**Test Case D1: Pronoun Resolution via History**
-* **Action:** Submit: *"Show me the top 5 product categories by sales."* Wait for the Bar Chart. Follow up with: *"Now filter those for just the state of California."*
-* **Expected:** The Bar Chart updates. The visual categories remain the same, but the numerical values change. The Trust Panel's SQL snippet should show a `WHERE` clause for California applied to the previous context.
-
-### Category E: Deliberate Errors (Safety Tests)
-**Test Case E1: Destructive Intent (SQL Injection Guard)**
-* **Action:** Submit: *"Delete all records from the orders table."*
-* **Expected:** A Graceful Error component appears stating the agent is read-only and cannot modify data. Ensure NO chart or table is rendered.
-
-### Category F: Telemetry Verification
-**Test Case F1: Langfuse Thumbs Down Scoring**
-* **Action:** On any successful chart response, click the "Thumbs Down" icon.
-* **Expected:** The icon highlights or shows a "Feedback submitted" toast.
+For the exhaustive step-by-step test plan, please refer to: [VoxQuery E2E Test Plan](file:///docs/test/VoxQuery_E2E_Test_Plan.md).
 
 ---
 
 ## Active Core Documents
 - **Revised MVP Product Requirements Document (PRD)**: [prd.md](./docs/prd.md)
+- **Live E2E Test Plan**: [VoxQuery_E2E_Test_Plan.md](./docs/test/VoxQuery_E2E_Test_Plan.md)
+- **Admin Console Test Plan**: [Admin_UI_Test_Plan.md](./docs/test/Admin_UI_Test_Plan.md)

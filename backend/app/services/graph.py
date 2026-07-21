@@ -16,7 +16,9 @@ Design goals (Wave 2, Item 1.1):
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 import logging
 from datetime import UTC, datetime
 from time import perf_counter
@@ -48,13 +50,9 @@ from app.models.contracts import (
 )
 from app.warehouse.sql_policy import SqlPolicyError, canonicalize_readonly_sql
 
+
 if TYPE_CHECKING:
-    from app.audit.store import AuditClarification, AuditStore, AuditIdentity
-    from app.llm.adapter import LlmAdapter, Storyteller
-    from app.rag.retriever import SchemaRetriever
-    from app.services.events import PipelineEventBus
-    from app.core.session import InMemorySessionStore
-    from app.config import Settings
+    from app.audit.store import AuditIdentity
     from app.llm.adapter import SqlGenerationResult
 
 logger = logging.getLogger(__name__)
@@ -86,6 +84,7 @@ class PipelineGraphState(TypedDict, total=False):
     graph_trace: Any                # Langfuse trace object (None in test mode)
     audit_identity: Any             # AuditIdentity (built in pipeline.py before graph runs)
     orchestrator_ref: Any           # PipelineOrchestrator backref for cache access
+    db_pool: Any                    # Database connection pool
 
     # ── populated by nodes ─────────────────────────────────────────────────
     schema_chunks: list             # list[SchemaChunk]
@@ -128,7 +127,7 @@ async def _publish_stage(state: PipelineGraphState, stage: PipelineStage) -> Non
 
 async def input_resolver_node(state: PipelineGraphState) -> dict:
     turn: TurnRecord = state["turn"]
-    context = state["sessions"].context_block(state["session"])
+    context = await state["sessions"].context_block(state["session"])
     history = context.history
     
     # Run with empty schema to detect text-only blocking signals (pronouns, scope)
@@ -151,8 +150,38 @@ async def input_resolver_node(state: PipelineGraphState) -> dict:
 async def rewrite_query_node(state: PipelineGraphState) -> dict:
     from app.rag.query_rewriter import QueryRewriter
     turn = state["turn"]
-    rewriter = QueryRewriter()
+    
+    metric_synonyms = None
+    table_synonyms = None
+    
+    db_pool = state.get("db_pool")
+    if db_pool:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT metric_synonyms, table_synonyms FROM tenant_glossary WHERE tenant_id = $1::uuid",
+                turn.tenant_id
+            )
+            if row:
+                metric_synonyms = json.loads(row["metric_synonyms"]) if isinstance(row["metric_synonyms"], str) else row["metric_synonyms"]
+                table_synonyms = json.loads(row["table_synonyms"]) if isinstance(row["table_synonyms"], str) else row["table_synonyms"]
+                
+    rewriter = QueryRewriter(metric_synonyms=metric_synonyms, table_synonyms=table_synonyms)
     rewritten = rewriter.rewrite(turn.user_input)
+    
+    if db_pool and (metric_synonyms or table_synonyms) and rewritten.detected_metrics:
+        async with db_pool.acquire() as conn:
+            for metric in rewritten.detected_metrics:
+                await conn.execute("""
+                    UPDATE tenant_glossary 
+                    SET synonym_hits = jsonb_set(
+                        synonym_hits,
+                        ARRAY[$1],
+                        (COALESCE(synonym_hits->$1, '0')::int + 1)::text::jsonb
+                    ),
+                    total_hits = total_hits + 1
+                    WHERE tenant_id = $2::uuid
+                """, metric, turn.tenant_id)
+                
     return {"rewritten_query": rewritten}
 
 
@@ -179,7 +208,7 @@ async def rag_retrieval_node(state: PipelineGraphState) -> dict:
 
     tracer.span_rag_retrieval(trace, rag_score, len(schema_chunks))
 
-    context = state["sessions"].context_block(state["session"])
+    context = await state["sessions"].context_block(state["session"])
     tracer.span_memory_retrieval(
         trace,
         truncated=context.truncated,
@@ -365,7 +394,7 @@ async def clarification_node(state: PipelineGraphState) -> dict:
     turn.clarification_triggered = True
     tracer.span_clarification_issued(trace, question, options)
 
-    state["sessions"].set_pending_clarification(
+    await state["sessions"].set_pending_clarification(
         state["session"],
         ClarificationState(
             pending=True,
@@ -401,6 +430,8 @@ async def clarification_node(state: PipelineGraphState) -> dict:
 async def execution_node(state: PipelineGraphState) -> dict:
     turn: TurnRecord = state["turn"]
     claims: AuthClaims = state["claims"]
+    tracer = state["tracer"]
+    trace = state.get("graph_trace")
 
     await _publish_stage(state, PipelineStage.snowflake_executing)
     started = perf_counter()
@@ -418,7 +449,7 @@ async def execution_node(state: PipelineGraphState) -> dict:
     orchestrator = state.get("orchestrator_ref")
     cached = None
     if orchestrator is not None:
-        cached = orchestrator._get_cached_result(claims.tenant_id, sql_to_execute)
+        cached = await orchestrator._get_cached_result(claims.tenant_id, sql_to_execute)
 
     if cached is not None:
         result, shape = cached
@@ -426,18 +457,32 @@ async def execution_node(state: PipelineGraphState) -> dict:
     else:
         try:
             result, shape = await state["warehouse"].execute_readonly(
-                sql_to_execute, snowflake_role=claims.snowflake_role
+                sql_to_execute, snowflake_role=claims.snowflake_role, tenant_id=claims.tenant_id
             )
         except Exception as e:
             err_str = str(e).lower()
+            tracer.span_snowflake_executing(
+                trace,
+                snowflake_role=claims.snowflake_role,
+                success=False,
+                error_type=type(e).__name__,
+                error_detail=str(e),
+            )
             if "time" in err_str and "out" in err_str:
                 raise ApiError(ErrorCode.warehouse_timeout, status_code=504, detail=str(e))
             if "warehouse error" in err_str or "operationalerror" in err_str:
                 raise ApiError(ErrorCode.warehouse_error, status_code=502, detail=str(e))
             raise ApiError(ErrorCode.warehouse_error, status_code=500, detail=str(e))
 
+        tracer.span_snowflake_executing(
+            trace,
+            snowflake_role=claims.snowflake_role,
+            success=True,
+            row_count=shape.row_count,
+        )
+
         if orchestrator is not None:
-            orchestrator._store_cached_result(claims.tenant_id, sql_to_execute, result, shape)
+            await orchestrator._store_cached_result(claims.tenant_id, sql_to_execute, result, shape)
 
     turn.latency_ms += int((perf_counter() - started) * 1000)
     return {"result": result, "shape": shape}
@@ -463,7 +508,10 @@ async def render_node(state: PipelineGraphState) -> dict:
     duplication_warning = detect_possible_duplication(turn.generated_sql, result)
     chart_type, rationale = state["chart"].select(result)
     shape.chart_type = chart_type
-    summary = await state["story"].summarize(shape, turn.user_input)
+    summary, proactive_questions = await asyncio.gather(
+        state["story"].summarize(shape, turn.user_input),
+        state["story"].generate_proactive_questions(shape, turn.user_input)
+    )
 
     turn.result_json = shape
     turn.chart_type = chart_type
@@ -471,6 +519,7 @@ async def render_node(state: PipelineGraphState) -> dict:
     turn.full_result = result
     turn.result_warnings = [duplication_warning] if duplication_warning else []
     turn.tts_text = summary
+    turn.proactive_questions = proactive_questions
     turn.completed = True
     turn.clarification_triggered = (
         state.get("clarification_triggered", False) or turn.clarification_triggered
@@ -479,7 +528,7 @@ async def render_node(state: PipelineGraphState) -> dict:
     identity: AuditIdentity = state["audit_identity"]  # type: ignore[assignment]
     state["audit"].enqueue_turn(turn, identity, state.get("clarification"))
 
-    state["sessions"].append_turn(
+    await state["sessions"].append_turn(
         state["session"],
         turn_id=turn.turn_id,
         user_query=turn.user_input,
@@ -511,7 +560,7 @@ async def render_node(state: PipelineGraphState) -> dict:
                 ],
                 "warnings": [w.model_dump(mode="json") for w in turn.result_warnings],
             },
-            proactive_questions=[],
+            proactive_questions=turn.proactive_questions,
             from_cache=turn.from_cache,
         ),
     )
@@ -668,6 +717,7 @@ async def run_pipeline_graph(
     clarification: Any,
     audit_identity: Any,
     orchestrator: Any,
+    db_pool: Any,
     started: float,
 ) -> None:
     """
@@ -695,6 +745,7 @@ async def run_pipeline_graph(
         "clarification": clarification,
         "audit_identity": audit_identity,
         "orchestrator_ref": orchestrator,
+        "db_pool": db_pool,
         "started": started,
         "clarification_issued": False,
     }

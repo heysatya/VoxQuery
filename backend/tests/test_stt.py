@@ -206,6 +206,44 @@ async def test_deepgram_provider_happy_path_interim_then_final(mock_logger):
     assert events[1].text == "show revenue by region"
     assert events[1].confidence == 0.94
 
+async def test_deepgram_provider_concatenates_final_segments_until_stream_close(mock_logger):
+    first_final_segment = json.dumps({
+        "type": "Results",
+        "channel": {"alternatives": [{"transcript": "show revenue", "confidence": 0.90}]},
+        "is_final": True,
+        "speech_final": False,
+    })
+    next_interim = json.dumps({
+        "type": "Results",
+        "channel": {"alternatives": [{"transcript": "by region", "confidence": 0.80}]},
+        "is_final": False,
+        "speech_final": False,
+    })
+    second_final_segment = json.dumps({
+        "type": "Results",
+        "channel": {"alternatives": [{"transcript": "by region", "confidence": 0.96}]},
+        "is_final": True,
+        "speech_final": True,
+    })
+
+    mock_ws = MockDeepgramWS([first_final_segment, next_interim, second_final_segment])
+
+    async def fake_frames():
+        yield b"chunk"
+
+    provider = DeepgramSttProvider(api_key="sk-test-placeholder", logger=mock_logger)
+
+    with patch("websockets.connect", return_value=mock_ws):
+        events = []
+        async for evt in provider.stream(fake_frames()):
+            events.append(evt)
+
+    assert events
+    assert all(isinstance(event, InterimTranscriptEvent) for event in events[:-1])
+    assert isinstance(events[-1], FinalTranscriptEvent)
+    assert events[-1].text == "show revenue by region"
+    assert events[-1].confidence == pytest.approx(((0.90 * 2) + (0.96 * 2)) / 4)
+
 async def test_deepgram_provider_client_disconnect_closes_upstream(mock_logger):
     mock_ws = MockDeepgramWS([])
 

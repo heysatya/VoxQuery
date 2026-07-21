@@ -132,21 +132,28 @@ def test_clear_non_ambiguous_query_returns_before_result_ready():
     assert query.status_code == 202
     assert body["status"] == "processing"
     assert result_event["turn_id"] == body["turn_id"]
+    assert result_event["proactive_questions"]
     result = client.get(f"/api/result/{body['turn_id']}")
     assert result.status_code == 200
     payload = result.json()
+    assert payload["proactive_questions"] == result_event["proactive_questions"]
     assert payload["result"]["columns"] == ["customer_segment", "total_net_revenue"]
     assert payload["result"]["semantic_columns"][0]["role"] == "dimension"
     assert payload["result"]["semantic_columns"][1]["role"] == "metric"
     assert payload["valid_visualizations"] == ["table", "bar"]
     assert payload["trust"]["confidence_tier"] == payload["confidence_tier"]
+    assert payload["trust"]["confidence_reasons"]
     assert payload["trust"]["row_count"] == payload["result"]["row_count"]
+    assert payload["trust"]["execution_time_ms"] >= 0
+    assert "order_items" in payload["trust"]["data_sources"]
+    assert payload["trust"]["sql_hash"]
+    assert payload["trust"]["data_freshness_note"] == "Live warehouse query"
     assert "order_items" in payload["generated_sql"]
     assert "customers.customer_segment" in payload["generated_sql"]
     assert payload["chart_rationale"].endswith("customer_segment.")
 
 
-def test_positive_feedback_records_ok_quality_flag():
+async def test_positive_feedback_records_ok_quality_flag():
     session = create_session()
     with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
         query = client.post(
@@ -170,7 +177,7 @@ def test_positive_feedback_records_ok_quality_flag():
     )
 
     assert feedback.status_code == 200
-    stored = app.state.sessions.get(UUID(TENANT_ID), UUID(session["session_id"]))
+    stored = await app.state.sessions.get(UUID(TENANT_ID), UUID(session["session_id"]))
     assert stored is not None
     assert stored.history[-1].quality_flag == "ok"
 
@@ -206,6 +213,40 @@ def test_clarification_escape_does_not_complete_turn():
     result = client.get(f"/api/result/{body['turn_id']}")
     assert result.status_code == 404
 
+def test_clarification_timeout_is_silently_ignored():
+    session = create_session()
+    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
+        query = client.post(
+            "/api/query",
+            json={
+                "session_id": session["session_id"],
+                "submitted_text": "Show revenue by state",
+                "input_modality": "text",
+            },
+        )
+        clarification_event = receive_until(ws, "clarification_request")
+    
+    body = query.json()
+    
+    # Manually expire the clarification state in the session store
+    store = app.state.sessions
+    s = store._sessions.get((UUID(TENANT_ID), UUID(session["session_id"])))
+    if s and s.clarification_state:
+        s.clarification_state.issued_at = datetime.now(UTC) - timedelta(minutes=11)
+
+    expired = client.post(
+        "/api/clarification",
+        json={
+            "session_id": session["session_id"],
+            "turn_id": body["turn_id"],
+            "selection": "Net revenue",
+            "resolution_type": "timeout",
+        },
+    )
+    assert expired.status_code == 200
+
+    result = client.get(f"/api/result/{body['turn_id']}")
+    assert result.status_code == 404
 
 
 def test_ecommerce_dimensions_generate_expected_fake_sql():

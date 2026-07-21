@@ -70,9 +70,27 @@ def test_schema_allowlist_unknown_column():
         canonicalize_readonly_sql("SELECT fake_col FROM orders", allowlist=allowlist)
 
 
+def test_canonicalize_readonly_sql_allows_set_operations():
+    # Union
+    res = canonicalize_readonly_sql("SELECT id FROM a UNION SELECT id FROM b")
+    assert "LIMIT 10000" in res.sql
+    assert "UNION" in res.sql
+    
+    # Intersect
+    res = canonicalize_readonly_sql("SELECT id FROM a INTERSECT SELECT id FROM b")
+    assert "INTERSECT" in res.sql
+
+    # Except
+    res = canonicalize_readonly_sql("SELECT id FROM a EXCEPT SELECT id FROM b")
+    assert "EXCEPT" in res.sql
+
+
 def test_canonicalize_readonly_sql_rejects_non_select():
     with pytest.raises(SqlPolicyError):
         canonicalize_readonly_sql("DELETE FROM test")
+    
+    with pytest.raises(SqlPolicyError):
+        canonicalize_readonly_sql("SELECT id FROM a UNION DELETE FROM b")
 
 
 def test_canonicalize_readonly_sql_rejects_explicit_cross_join():
@@ -108,6 +126,16 @@ def test_snowflake_connector_rejects_empty_dsn():
     """6. Connector must not accept an empty or None DSN."""
     with pytest.raises(ValueError, match="must not be empty"):
         SnowflakeWarehouseConnector(dsn="")
+
+
+def test_snowflake_connector_parses_dsn_with_complex_password():
+    connector = SnowflakeWarehouseConnector(dsn="snowflake://myuser:complex@pass@word@myaccount/mydb/myschema")
+    parsed = connector._parse_dsn()
+    assert parsed["user"] == "myuser"
+    assert parsed["password"] == "complex@pass@word"
+    assert parsed["account"] == "myaccount"
+    assert parsed["database"] == "mydb"
+    assert parsed["schema"] == "myschema"
 
 
 # ── Phase 5.1: Non-SELECT rejected before connector call ─────────────────────
@@ -278,3 +306,50 @@ def test_snowflake_connector_fetch_schema_snapshot(mock_connect):
     users_table = next(t for t in schema_tables if t.table_name == "USERS")
     assert len(users_table.columns) == 1
     assert users_table.columns[0].name == "EMAIL"
+
+
+def test_snowflake_pool_reuses_connection():
+    """Pool returns the same connection object on repeated calls from same thread."""
+    from unittest.mock import MagicMock, patch
+    from app.warehouse.snowflake import SnowflakeConnectionPool
+
+    params = {"user": "u", "password": "p", "account": "a"}
+    pool = SnowflakeConnectionPool(conn_params=params, pool_size=1)
+
+    mock_conn = MagicMock()
+    mock_conn.cursor.return_value.__enter__ = lambda s: s
+    mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+    mock_conn.cursor.return_value.execute.return_value = None
+
+    with patch("snowflake.connector.connect", return_value=mock_conn) as mock_connect:
+        conn1 = pool._get_connection()
+        conn2 = pool._get_connection()  # second call — must NOT reconnect
+        assert conn1 is conn2
+        assert mock_connect.call_count == 1  # connected once only
+
+
+def test_snowflake_pool_reconnects_on_heartbeat_failure():
+    """Pool creates a new connection when the heartbeat SELECT 1 fails."""
+    from unittest.mock import MagicMock, patch, call
+    from app.warehouse.snowflake import SnowflakeConnectionPool
+
+    params = {"user": "u", "password": "p", "account": "a"}
+    pool = SnowflakeConnectionPool(conn_params=params, pool_size=1)
+
+    bad_conn = MagicMock()
+    bad_cursor = MagicMock()
+    bad_cursor.execute.side_effect = Exception("session expired")
+    bad_conn.cursor.return_value = bad_cursor
+
+    good_conn = MagicMock()
+    good_cursor = MagicMock()
+    good_cursor.execute.return_value = None
+    good_conn.cursor.return_value = good_cursor
+
+    with patch("snowflake.connector.connect", return_value=good_conn) as mock_connect:
+        # Force bad_conn into the thread-local
+        pool._local.conn = bad_conn
+        # Next call should detect heartbeat failure and reconnect
+        result = pool._get_connection()
+        assert result is good_conn
+        assert mock_connect.call_count == 1  # reconnect triggered once

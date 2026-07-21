@@ -13,16 +13,16 @@ from app.models.contracts import (
     ApiError,
     AuthClaims,
     ClarificationResolutionType,
-    ClarificationState,
     ErrorCode,
     ERROR_MESSAGES,
     PipelineErrorEvent,
+    PipelineProgressEvent,
+    PipelineStage,
     QueryRequest,
     ResultPayload,
     ResultShape,
     ResultWarning,
     TurnRecord,
-    valid_visualizations_for_result,
 )
 from app.services.events import PipelineEventBus
 from app.rag.retriever import SchemaRetriever
@@ -49,6 +49,7 @@ class PipelineOrchestrator:
         llm: LlmAdapter | None = None,
         warehouse: WarehouseConnector | None = None,
         story: Storyteller | None = None,
+        db_pool: Any = None,
     ) -> None:
         self.sessions = sessions
         self.events = events
@@ -59,11 +60,12 @@ class PipelineOrchestrator:
         self.warehouse = warehouse or FakeWarehouseConnector()
         self.chart = FakeChartSelector()
         self.story = story or FakeStoryteller()
+        self.db_pool = db_pool
         self.turns: dict[UUID, TurnRecord] = {}
         self._in_flight: set[UUID] = set()
 
     async def submit_query(self, request: QueryRequest, claims: AuthClaims) -> TurnRecord:
-        session = self.sessions.get_for_claims(claims, request.session_id)
+        session = await self.sessions.get_for_claims(claims, request.session_id)
         if session is None:
             raise ApiError(ErrorCode.session_not_found, status_code=404)
         if request.session_id in self._in_flight:
@@ -111,7 +113,7 @@ class PipelineOrchestrator:
         resolution_type: ClarificationResolutionType,
         claims: AuthClaims,
     ) -> TurnRecord | None:
-        session = self.sessions.get_for_claims(claims, session_id)
+        session = await self.sessions.get_for_claims(claims, session_id)
         if session is None:
             raise ApiError(ErrorCode.session_not_found, status_code=404)
         state = session.clarification_state
@@ -119,7 +121,7 @@ class PipelineOrchestrator:
             raise ApiError(ErrorCode.clarification_not_found, status_code=404)
 
         if resolution_type == ClarificationResolutionType.escaped:
-            self.sessions.clear_pending_clarification(session)
+            await self.sessions.clear_pending_clarification(session)
             self.turns.pop(turn_id, None)
             return None
 
@@ -129,13 +131,13 @@ class PipelineOrchestrator:
         if selection not in state.options:
             raise ApiError(ErrorCode.clarification_not_found, status_code=404)
 
-        self.sessions.add_resolved_entity(
+        await self.sessions.add_resolved_entity(
             session,
             state.ambiguous_term or "unknown_term",
             selection.lower().replace(" ", "_"),
             selection,
         )
-        self.sessions.clear_pending_clarification(session)
+        await self.sessions.clear_pending_clarification(session)
         turn = self.turns[turn_id]
         turn.user_input = f"{state.original_query} ({selection})"
         self._in_flight.add(session.session_id)
@@ -201,52 +203,6 @@ class PipelineOrchestrator:
             finally:
                 self._in_flight.discard(session.session_id)
 
-    async def _complete_turn_background(
-        self,
-        session,
-        turn: TurnRecord,
-        claims: AuthClaims,
-        *,
-        resolved_metric: str | None = None,
-        clarification_triggered: bool,
-        clarification: AuditClarification | None = None
-    ) -> None:
-        await asyncio.sleep(0.05)
-        with tracer.start_trace(turn) as trace:  # Create a trace if it didn't exist or re-use turn_id
-            try:
-                await self._run_until_confidence_or_result(
-                    session,
-                    turn,
-                    claims,
-                    trace,
-                    clarification_triggered=clarification_triggered,
-                    clarification=clarification
-                )
-            except ApiError as exc:
-                tracer.span_turn_completed(trace, turn.latency_ms, success=False)
-                await self.events.publish(
-                    session.session_id,
-                    PipelineErrorEvent(
-                        turn_id=turn.turn_id,
-                        code=exc.code.value,
-                        message=ERROR_MESSAGES.get(exc.code, exc.code.value),
-                    ),
-                )
-                raise exc
-            except Exception as exc:
-                tracer.span_turn_completed(trace, turn.latency_ms, success=False)
-                await self.events.publish(
-                    session.session_id,
-                    PipelineErrorEvent(
-                        turn_id=turn.turn_id,
-                        code=ErrorCode.internal_error.value,
-                        message=ERROR_MESSAGES[ErrorCode.internal_error],
-                    ),
-                )
-                raise exc
-            finally:
-                self._in_flight.discard(session.session_id)
-
     async def _run_until_confidence_or_result(self, session, turn: TurnRecord, claims: AuthClaims, trace: Any = None, clarification_triggered: bool = False, clarification: AuditClarification | None = None) -> None:
         """
         Execute the full analytical pipeline for one turn via the LangGraph graph.
@@ -292,18 +248,19 @@ class PipelineOrchestrator:
             clarification=clarification,
             audit_identity=identity,
             orchestrator=self,
+            db_pool=self.db_pool,
             started=started,
         )
 
 
-    def _get_cached_result(self, tenant_id: UUID, sql: str) -> tuple[ResultPayload, ResultShape] | None:
+    async def _get_cached_result(self, tenant_id: UUID, sql: str) -> tuple[ResultPayload, ResultShape] | None:
         if self.settings.result_cache_ttl_seconds <= 0:
             return None
         client = getattr(self.sessions, "client", None)
         if client is None:
             return None
         try:
-            raw = client.get(self._cache_key(tenant_id, sql))
+            raw = await client.get(self._cache_key(tenant_id, sql))
         except Exception:
             return None
         if raw is None:
@@ -319,7 +276,7 @@ class PipelineOrchestrator:
         except Exception:
             return None
 
-    def _store_cached_result(
+    async def _store_cached_result(
         self,
         tenant_id: UUID,
         sql: str,
@@ -338,7 +295,7 @@ class PipelineOrchestrator:
             }
         )
         try:
-            client.setex(self._cache_key(tenant_id, sql), self.settings.result_cache_ttl_seconds, payload)
+            await client.setex(self._cache_key(tenant_id, sql), self.settings.result_cache_ttl_seconds, payload)
         except Exception:
             return
 

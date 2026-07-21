@@ -51,7 +51,7 @@ export async function createSession(
 ): Promise<SessionCreateResponse> {
   return request<SessionCreateResponse>("/api/session", {
     method: "POST",
-    body: JSON.stringify({ tenant_id: tenantId })
+    body: JSON.stringify({})
   }, authToken);
 }
 
@@ -102,6 +102,44 @@ export async function postFeedback(payload: {
   }, authToken);
 }
 
+export async function fetchAdminFeedback(
+  limit: number = 50,
+  offset: number = 0,
+  authToken?: string | null
+): Promise<{ data: any[] }> {
+  return request<{ data: any[] }>(`/api/admin/feedback?limit=${limit}&offset=${offset}`, undefined, authToken);
+}
+
+export async function fetchAdminGlossary(
+  authToken?: string | null
+): Promise<{ data: any[] }> {
+  return request<{ data: any[] }>("/api/admin/glossary", undefined, authToken);
+}
+
+export async function postAdminGlossary(
+  payload: { tenant_id: string; metric_synonyms: Record<string, string>; table_synonyms: Record<string, string> },
+  authToken?: string | null
+): Promise<void> {
+  await request("/api/admin/glossary", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }, authToken);
+}
+
+export async function fetchAdminWorkspaces(authToken?: string | null): Promise<{ data: any[] }> {
+  return request<{ data: any[] }>("/api/admin/workspaces", undefined, authToken);
+}
+
+export async function fetchAdminStats(authToken?: string | null): Promise<any> {
+  return request<any>("/api/admin/stats", undefined, authToken);
+}
+
+export async function fetchGlossaryPreview(
+  tenantId: string, text: string, authToken?: string | null
+): Promise<{ original: string; rewritten: string; detected_metrics: string[]; detected_tables: string[] }> {
+  return request(`/api/admin/glossary/preview?tenant_id=${encodeURIComponent(tenantId)}&text=${encodeURIComponent(text)}`, undefined, authToken);
+}
+
 export async function postTelemetry(
   payload: { event: string; outcome: string; session_id?: string },
   authToken?: string | null
@@ -112,21 +150,21 @@ export async function postTelemetry(
   }, authToken);
 }
 
-export function pipelineSocketUrl(sessionId: string, authToken: string | null = fakeToken): string {
+export function pipelineSocketUrl(sessionId: string): string {
   return socketUrl(
-    `/ws/pipeline?session_id=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(authToken ?? "")}`
+    `/ws/pipeline?session_id=${encodeURIComponent(sessionId)}`
   );
 }
 
-export function audioSocketUrl(sessionId: string, authToken: string | null = fakeToken): string {
+export function audioSocketUrl(sessionId: string): string {
   return socketUrl(
-    `/ws/audio?session_id=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(authToken ?? "")}`
+    `/ws/audio?session_id=${encodeURIComponent(sessionId)}`
   );
 }
 
-export function ttsSocketUrl(sessionId: string, turnId: string, authToken: string | null = fakeToken): string {
+export function ttsSocketUrl(sessionId: string, turnId: string): string {
   return socketUrl(
-    `/ws/tts?session_id=${encodeURIComponent(sessionId)}&turn_id=${encodeURIComponent(turnId)}&token=${encodeURIComponent(authToken ?? "")}`
+    `/ws/tts?session_id=${encodeURIComponent(sessionId)}&turn_id=${encodeURIComponent(turnId)}`
   );
 }
 

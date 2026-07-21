@@ -3,9 +3,14 @@ from pathlib import Path
 
 import asyncpg
 
-MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "db" / "migrations"
+_DEFAULT_MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "db" / "migrations"
 
-async def run_migrations(dsn: str) -> None:
+async def run_migrations(dsn: str, migrations_dir: Path | None = None) -> None:
+    target_dir = migrations_dir or _DEFAULT_MIGRATIONS_DIR
+    
+    if not target_dir.exists() or not target_dir.is_dir():
+        raise RuntimeError(f"MIGRATIONS_DIR does not exist or is not a directory: {target_dir}")
+
     conn = await asyncpg.connect(dsn, statement_cache_size=0)
     try:
         await conn.execute(
@@ -22,15 +27,12 @@ async def run_migrations(dsn: str) -> None:
             record["version"] 
             for record in await conn.fetch("SELECT version FROM schema_migrations")
         )
-        
-        if not MIGRATIONS_DIR.exists():
-            return
             
-        migrations = sorted([f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(".sql")])
+        migrations = sorted([f for f in os.listdir(target_dir) if f.endswith(".sql")])
         for migration in migrations:
             if migration not in applied:
                 print(f"Applying {migration}...")
-                with open(MIGRATIONS_DIR / migration, "r", encoding="utf-8") as f:
+                with open(target_dir / migration, "r", encoding="utf-8") as f:
                     sql = f.read()
                 
                 async with conn.transaction():

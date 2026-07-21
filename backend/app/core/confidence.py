@@ -28,7 +28,7 @@ def compute_confidence(
     settings: Settings | None = None,
 ) -> ConfidenceResult:
     settings = settings or get_settings()
-    effective_threshold = threshold or settings.confidence_threshold_primary
+    effective_threshold = threshold if threshold is not None else settings.confidence_threshold_primary
     payload = ConfidenceInput(
         rag_score=rag_score,
         validation_passed=validation_passed,

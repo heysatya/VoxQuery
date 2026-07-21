@@ -17,8 +17,13 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime
 from typing import Optional
+
+from app.rag.glossary_defaults import (
+    DEFAULT_METRIC_SYNONYMS,
+    DEFAULT_TABLE_SYNONYMS,
+    DEFAULT_METRIC_TO_TABLES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,55 +74,7 @@ class RewrittenQuery:
 
 
 # Business term → canonical metric name mappings
-METRIC_SYNONYMS: dict[str, list[str]] = {
-    "revenue": [
-        "revenue", "sales", "net sales", "topline",
-        "income", "earnings", "gross revenue", "net revenue",
-    ],
-    "order_count": [
-        "orders", "order count", "number of orders",
-        "purchases", "transactions", "order volume",
-    ],
-    "average_order_value": [
-        "aov", "average order value", "avg order",
-        "basket size", "average ticket",
-    ],
-    "active_customers": [
-        "customers", "unique customers", "buyers",
-        "active customers", "active buyers",
-    ],
-    "units_sold": [
-        "units", "quantity", "volume", "units sold",
-    ],
-    "discount_rate": [
-        "discount", "discount rate", "promotion",
-        "markdown", "promo",
-    ],
-}
 
-# Table name → related terms
-TABLE_SYNONYMS: dict[str, list[str]] = {
-    "ORDERS": ["orders", "purchases", "transactions", "sales"],
-    "ORDER_ITEMS": ["items", "line items", "order details", "products ordered"],
-    "CUSTOMERS": ["customers", "buyers", "clients", "users"],
-    "PRODUCTS": ["products", "catalog", "inventory", "items", "skus"],
-    "SELLERS": ["sellers", "vendors", "suppliers", "merchants"],
-    "ORDER_REVIEWS": ["reviews", "ratings", "feedback", "satisfaction"],
-    "ORDER_PAYMENTS": ["payments", "payment methods", "billing"],
-    "GEOLOCATION": ["location", "region", "geography", "state", "city"],
-}
-
-# Metric → Tables they require
-METRIC_TO_TABLES: dict[str, list[str]] = {
-    "revenue": ["ORDERS", "ORDER_ITEMS"],
-    "gross_revenue": ["ORDERS", "ORDER_ITEMS"],
-    "order_count": ["ORDERS"],
-    "average_order_value": ["ORDERS", "ORDER_ITEMS"],
-    "active_customers": ["ORDERS", "CUSTOMERS"],
-    "units_sold": ["ORDER_ITEMS", "PRODUCTS"],
-    "product_revenue": ["ORDER_ITEMS", "PRODUCTS"],
-    "discount_rate": ["ORDERS"],
-}
 
 # Time reference patterns → SQL-friendly descriptions
 TIME_PATTERNS: list[tuple[re.Pattern, str]] = [
@@ -192,8 +149,8 @@ class QueryRewriter:
         metric_synonyms: Optional[dict[str, list[str]]] = None,
         table_synonyms: Optional[dict[str, list[str]]] = None,
     ):
-        self.metric_synonyms = metric_synonyms or METRIC_SYNONYMS
-        self.table_synonyms = table_synonyms or TABLE_SYNONYMS
+        self.metric_synonyms = metric_synonyms or DEFAULT_METRIC_SYNONYMS
+        self.table_synonyms = table_synonyms or DEFAULT_TABLE_SYNONYMS
 
         # Build reverse lookup: synonym → canonical metric name
         self._metric_lookup: dict[str, str] = {}
@@ -333,7 +290,7 @@ class QueryRewriter:
         # Also include tables related to detected metrics
         tables_to_expand = set(detected_tables)
         for metric in detected_metrics:
-            tables_to_expand.update(METRIC_TO_TABLES.get(metric, []))
+            tables_to_expand.update(DEFAULT_METRIC_TO_TABLES.get(metric, []))
             
         for table in tables_to_expand:
             expanded.add(table)

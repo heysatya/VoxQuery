@@ -26,7 +26,7 @@ Everything else (SQL generation, schema RAG, Snowflake execution, TTS, chart ren
 | Frontend | Next.js 16 + TypeScript - Vercel; Node >=20.9 |
 | Backend | FastAPI - Python 3.12 - Railway (single instance) |
 | STT | Deepgram `nova-2` via FastAPI WebSocket relay |
-| LLM | Anthropic `claude-sonnet-4-20250514` |
+| LLM | Anthropic `claude-sonnet-4-20250514` *(Superseded by ADR-001: Haiku)* |
 | Session store | Upstash Redis (TLS + encryption at rest) |
 | Database | Supabase Postgres 16 + pgvector |
 | Auth | Clerk (SSO / JWT) |
@@ -750,7 +750,7 @@ Goal: pipeline runs end-to-end with stubs; all data contracts in place; no LLM q
 
 10. **Schema chunk ingestion (Days 11–13).** Fetch schema metadata from Snowflake. Chunk. Embed with `text-embedding-3-small`. Store in pgvector. Validate retrieval: run 10+ representative natural language queries; manually confirm top-5 retrieved chunks contain the correct tables and columns (PRD §4.4 specifies top-5 retrieval). High cosine similarity scores alone are not sufficient - manual verification is the gate. If retrieval is poor, fix it now. Fixing it in Week 7 delays the pilot.
 
-11. **Real LLM integration (Days 13–15).** Replace stub adapter with Anthropic Claude for SQL generation and clarification. Replace with OpenAI for TTS and embeddings. Run full end-to-end. SQL quality will be inconsistent at this stage - that is expected. Goal is confirming integration, not production quality.
+11. **Real LLM integration (Days 13–15).** Replace stub adapter with Anthropic Claude for SQL generation and clarification. Replace with Deepgram for TTS and pgvector/OpenAI for embeddings. Run full end-to-end. SQL quality will be inconsistent at this stage - that is expected. Goal is confirming integration, not production quality.
 
 **Phase 1 Gate - End of Week 3:** Schema embeddings validated · Real LLM end-to-end functional · Full pipeline: voice → transcript → retrieval → SQL → Snowflake → result → TTS · No stubs in integration path · Auth enforced · Session written to Redis; turn written to Postgres.
 

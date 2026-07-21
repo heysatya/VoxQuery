@@ -210,3 +210,56 @@ async def test_storyteller_handles_anthropic_error(mock_anthropic_client):
     with pytest.raises(ApiError) as exc_info:
         await storyteller.summarize(shape, "What is the revenue by region?")
     assert exc_info.value.code == ErrorCode.llm_unavailable
+
+@pytest.mark.asyncio
+async def test_system_prompt_separation(mock_anthropic_sql_client, mock_anthropic_client):
+    """SEC-3: Ensure system and user prompts are separated in LLM adapter methods."""
+    # Test generate_sql
+    adapter = ClaudeAdapter(mock_anthropic_sql_client)
+    await adapter.generate_sql(
+        submitted_text="Show net revenue",
+        schema_chunks=[],
+        conversation_history=[],
+    )
+    
+    mock_anthropic_sql_client.messages.create.assert_awaited_once()
+    sql_call_kwargs = mock_anthropic_sql_client.messages.create.call_args[1]
+    assert "system" in sql_call_kwargs
+    assert sql_call_kwargs["system"].startswith("You are an expert")
+    assert sql_call_kwargs["messages"][0]["role"] == "user"
+    
+    # Test generate_clarification
+    adapter = ClaudeAdapter(mock_anthropic_client)
+    mock_anthropic_client.messages.create.reset_mock()
+    await adapter.generate_clarification("revenue")
+    
+    mock_anthropic_client.messages.create.assert_awaited_once()
+    clarif_call_kwargs = mock_anthropic_client.messages.create.call_args[1]
+    assert "system" in clarif_call_kwargs
+    assert clarif_call_kwargs["system"].startswith("You are an expert")
+    assert clarif_call_kwargs["messages"][0]["role"] == "user"
+    
+    # Test summarize
+    storyteller = ClaudeStoryteller(mock_anthropic_client)
+    mock_anthropic_client.messages.create.reset_mock()
+    from app.models.contracts import ResultShape, ChartType
+    shape = ResultShape(columns=["region"], chart_type=ChartType.bar, row_count=1, aggregate_summary="Summary")
+    await storyteller.summarize(shape, "What is the revenue by region?")
+    
+    mock_anthropic_client.messages.create.assert_awaited_once()
+    summary_call_kwargs = mock_anthropic_client.messages.create.call_args[1]
+    assert "system" in summary_call_kwargs
+    assert summary_call_kwargs["system"].startswith("You are an expert")
+    assert summary_call_kwargs["messages"][0]["role"] == "user"
+    
+    # Test generate_proactive_questions
+    mock_anthropic_client.messages.create.reset_mock()
+    # Mocking the response for proactive questions specifically
+    mock_anthropic_client.messages.create.return_value.content[0].text = '["Q1", "Q2", "Q3"]'
+    await storyteller.generate_proactive_questions(shape, "What is the revenue by region?")
+    
+    mock_anthropic_client.messages.create.assert_awaited_once()
+    proactive_call_kwargs = mock_anthropic_client.messages.create.call_args[1]
+    assert "system" in proactive_call_kwargs
+    assert proactive_call_kwargs["system"].startswith("You are an expert")
+    assert proactive_call_kwargs["messages"][0]["role"] == "user"

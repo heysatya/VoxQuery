@@ -1,4 +1,6 @@
+import json
 import logging
+import re
 from typing import Any
 
 import anthropic
@@ -51,42 +53,64 @@ class ClaudeAdapter(LlmAdapter):
         schema_context = "\n".join([f"- {c.source_ref}: {c.content}" for c in schema_chunks])
         history_context = "\n".join([f"User: {t.user_query}\nSQL: {t.generated_sql}" for t in conversation_history])
         
-        prompt = f"""
-        You are an expert Snowflake SQL generator. Generate a read-only SQL query for the following request.
-        Do NOT wrap the SQL in markdown blocks. Return ONLY valid SQL. 
-        Always LIMIT to 10000 rows maximum.
+        system_prompt = """You are an expert Snowflake SQL generator. Generate a read-only SQL query for the following request.
+Always LIMIT to 10000 rows maximum.
+IMPORTANT: For any relative date filters (e.g. 'last 30 days', 'recent', 'past week', 'this month'), DO NOT use `CURRENT_DATE()`. Instead, query relative to the max date in the target table using a subquery (e.g., `WHERE date_column >= DATEADD(day, -30, (SELECT MAX(date_column) FROM table_name))`).
+Return your output exactly in the following XML format:
+<sql>
+your valid SQL query here
+</sql>
+<confidence>
+0.95
+</confidence>"""
+
+        user_prompt = f"""Schema Context:
+{schema_context}
+
+Conversation History:
+{history_context}
+
+Request: {submitted_text}"""
         
-        Schema Context:
-        {schema_context}
-        
-        Conversation History:
-        {history_context}
-        
-        Request: {submitted_text}
-        """
         if resolved_entities:
             entities_str = ", ".join([f"{k} = {v.resolution}" for k, v in resolved_entities.items()])
-            prompt += f"\nNote: The user clarified the following entities: {entities_str}"
+            user_prompt += f"\n\nNote: The user clarified the following entities: {entities_str}"
             
         if previous_sql:
-            prompt += f"\nPrevious SQL attempt: {previous_sql}"
+            user_prompt += f"\n\nPrevious SQL attempt: {previous_sql}"
         if feedback:
-            prompt += f"\nFeedback/Error from previous attempt (FIX THIS): {feedback}"
+            user_prompt += f"\n\nFeedback/Error from previous attempt (FIX THIS): {feedback}"
 
         try:
             response = await self.client.messages.create(
                 model=self.model_name,
                 max_tokens=1000,
+                system=system_prompt,
                 messages=[
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": user_prompt}
                 ]
             )
         except anthropic.AnthropicError as e:
             logger.error(f"LLM Generation failed: {e}")
             raise ApiError(ErrorCode.llm_unavailable, status_code=503) from e
 
-        sql = response.content[0].text.strip()
+        response_text = response.content[0].text.strip()
         
+        sql_match = re.search(r"<sql>(.*?)</sql>", response_text, re.DOTALL)
+        confidence_match = re.search(r"<confidence>(.*?)</confidence>", response_text, re.DOTALL)
+        
+        if sql_match:
+            sql = sql_match.group(1).strip()
+        else:
+            sql = response_text
+            
+        llm_self_confidence = None
+        if confidence_match:
+            try:
+                llm_self_confidence = float(confidence_match.group(1).strip())
+            except ValueError:
+                pass
+
         # Strip markdown if LLM disobeyed
         if sql.startswith("```sql"):
             sql = sql[6:]
@@ -114,7 +138,7 @@ class ClaudeAdapter(LlmAdapter):
         result = SqlGenerationResult(
             sql=sql,
             validation_passed=validation_passed,
-            llm_self_confidence=None,
+            llm_self_confidence=llm_self_confidence,
             validation_error=validation_error
         )
         _safe_update_current_generation(output={"sql": result.sql, "confidence": result.llm_self_confidence, "validation_passed": validation_passed})
@@ -140,29 +164,28 @@ class ClaudeAdapter(LlmAdapter):
         
         description = ambiguity_descriptions.get(signal_name, signal_name.replace("_", " "))
         
-        prompt = f"""
-        You are an expert Data Analyst AI. The user just asked a data question, but the request was ambiguous.
-        User's question: "{user_input}"
-        
-        Specifically, the ambiguity is: {description}
-        
-        Generate a polite, helpful clarification question to ask the user to resolve this ambiguity.
-        Provide 2 to 4 distinct, actionable options for them to choose from. Make the options human-readable and specific (e.g. "Total Gross Revenue" instead of "metric_1").
-        Always include a "Skip" option as the last option.
-        
-        Respond ONLY with a valid JSON object matching this schema:
-        {{
-            "question": "The polite clarification question to ask the user",
-            "options": ["Option 1", "Option 2", ..., "Skip"]
-        }}
-        """
+        system_prompt = """You are an expert Data Analyst AI. The user just asked a data question, but the request was ambiguous.
+Generate a polite, helpful clarification question to ask the user to resolve this ambiguity.
+Provide 2 to 4 distinct, actionable options for them to choose from. Make the options human-readable and specific (e.g. "Total Gross Revenue" instead of "metric_1").
+Always include a "Skip" option as the last option.
+
+Respond ONLY with a valid JSON object matching this schema:
+{
+    "question": "The polite clarification question to ask the user",
+    "options": ["Option 1", "Option 2", ..., "Skip"]
+}"""
+
+        user_prompt = f"""User's question: "{user_input}"
+
+Specifically, the ambiguity is: {description}"""
 
         try:
             response = await self.client.messages.create(
                 model=self.model_name,
                 max_tokens=300,
+                system=system_prompt,
                 messages=[
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": user_prompt}
                 ]
             )
         except anthropic.AnthropicError as e:
@@ -171,7 +194,6 @@ class ClaudeAdapter(LlmAdapter):
         
         content = response.content[0].text.strip()
         
-        import json
         try:
             if content.startswith("```json"):
                 content = content[7:]
@@ -206,24 +228,24 @@ class ClaudeStoryteller(Storyteller):
             input={"user_query": user_query, "result_shape": result_shape.model_dump(mode="json")},
             model=self.model_name
         )
-        prompt = f"""
-        You are an expert Data Storyteller. Based on the user's query and the resulting data shape below, generate a STRICT 1-3 sentence narrative.
-        The narrative MUST follow this structure: Headline, Driver, Implication. 
-        DO NOT EXCEED 3 SENTENCES.
-        CRITICAL: Output PLAIN TEXT ONLY. Do not use ANY markdown formatting (no asterisks, no bolding, no bullet points). This text will be passed directly to a Text-to-Speech engine.
-        
-        User Query: {user_query}
-        Data Shape Summary: {result_shape.aggregate_summary}
-        Row Count: {result_shape.row_count}
-        Chart Type: {result_shape.chart_type}
-        """
+        system_prompt = """You are an expert Data Storyteller. Based on the user's query and the resulting data shape below, generate a STRICT 1-3 sentence narrative.
+If the data reveals a significant trend, spike, or drop, you MUST explicitly highlight this anomaly and concisely state what drove the change (anomaly narration).
+The narrative MUST follow this structure: Headline, Driver, Implication. 
+DO NOT EXCEED 3 SENTENCES.
+CRITICAL: Output PLAIN TEXT ONLY. Do not use ANY markdown formatting (no asterisks, no bolding, no bullet points). This text will be passed directly to a Text-to-Speech engine."""
+
+        user_prompt = f"""User Query: {user_query}
+Data Shape Summary: {result_shape.aggregate_summary}
+Row Count: {result_shape.row_count}
+Chart Type: {result_shape.chart_type}"""
 
         try:
             response = await self.client.messages.create(
                 model=self.model_name,
                 max_tokens=300,
+                system=system_prompt,
                 messages=[
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": user_prompt}
                 ]
             )
         except anthropic.AnthropicError as e:
@@ -237,3 +259,49 @@ class ClaudeStoryteller(Storyteller):
         # But we trust the LLM mostly with this strong prompt.
         _safe_update_current_generation(output={"summary": summary})
         return summary
+
+    @observe(as_type="generation", capture_input=False, capture_output=False)
+    async def generate_proactive_questions(self, result_shape: ResultShape, user_query: str) -> list[str]:
+        _safe_update_current_generation(
+            name="claude-proactive-questions",
+            input={"user_query": user_query, "result_shape": result_shape.model_dump(mode="json")},
+            model=self.model_name
+        )
+        system_prompt = """You are an expert Data Analyst. Based on the user's original query and the resulting data shape below, suggest exactly 3 proactive follow-up questions that the user might want to ask next.
+These questions should dive deeper into the data, explore anomalies, or break down the results by available dimensions.
+Return ONLY a valid JSON array of 3 strings. Example: ["What is the breakdown by region?", "Are there any seasonal trends?"]"""
+        
+        user_prompt = f"""User Query: {user_query}
+Data Shape Summary: {result_shape.aggregate_summary}
+Row Count: {result_shape.row_count}
+Chart Type: {result_shape.chart_type}"""
+
+        try:
+            response = await self.client.messages.create(
+                model=self.model_name,
+                max_tokens=200,
+                system=system_prompt,
+                messages=[
+                    {"role": "user", "content": user_prompt}
+                ]
+            )
+        except anthropic.AnthropicError as e:
+            logger.error(f"LLM Proactive questions failed: {e}")
+            return []
+            
+        content = response.content[0].text.strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+        
+        try:
+            questions = json.loads(content)
+            if not isinstance(questions, list):
+                return []
+            _safe_update_current_generation(output={"proactive_questions": questions[:3]})
+            return [str(q) for q in questions[:3]]
+        except Exception as e:
+            logger.error(f"Failed to parse proactive questions JSON: {e}")
+            return []

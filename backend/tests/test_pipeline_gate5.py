@@ -24,7 +24,7 @@ async def test_pipeline_enqueues_turn_with_identity():
     
     pipeline = PipelineOrchestrator(sessions, events, audit)
     claims = AuthClaims(user_id=uuid.uuid4(), tenant_id=uuid.uuid4())
-    session, _ = sessions.create(claims)
+    session, _ = await sessions.create(claims)
     req = QueryRequest(session_id=session.session_id, submitted_text="hello", input_modality="text")
     
     chunk = SchemaChunk(content="chunk", source_ref="ref", similarity=0.9)
@@ -72,7 +72,7 @@ async def test_pipeline_resolves_ambiguity_with_actual_term():
     
     pipeline = PipelineOrchestrator(sessions, events, audit)
     claims = AuthClaims(user_id=uuid.uuid4(), tenant_id=uuid.uuid4())
-    session, _ = sessions.create(claims)
+    session, _ = await sessions.create(claims)
     req = QueryRequest(session_id=session.session_id, submitted_text="hello", input_modality="text")
     
     chunk = SchemaChunk(content="chunk", source_ref="ref", similarity=0.5)

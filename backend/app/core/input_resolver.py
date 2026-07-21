@@ -7,7 +7,6 @@ from app.models.contracts import (
     SessionHistoryTurn,
 )
 from app.core.ambiguity import detect_ambiguity
-from app.core.confidence import compute_confidence
 
 
 class InputResolution(BaseModel):

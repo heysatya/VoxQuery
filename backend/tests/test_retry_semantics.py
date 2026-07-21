@@ -38,7 +38,7 @@ async def test_valid_first_attempt(claims, req):
     audit = MagicMock(spec=AuditStore)
     
     pipeline = PipelineOrchestrator(sessions, events, audit)
-    session, _ = sessions.create(claims)
+    session, _ = await sessions.create(claims)
     req.session_id = session.session_id
     
     pipeline.schema = MagicMock()
@@ -84,7 +84,7 @@ async def test_valid_first_attempt(claims, req):
     assert attempt.confidence_evidence.retry_count == 0
     assert "llm_self_confidence" in attempt.confidence_evidence.inputs_absent
     assert attempt.confidence_evidence.sql_hash == attempt.executed_sql_hash
-    pipeline.warehouse.execute_readonly.assert_called_once_with("SELECT * FROM table LIMIT 10000", snowflake_role=claims.snowflake_role)
+    pipeline.warehouse.execute_readonly.assert_called_once_with("SELECT * FROM table LIMIT 10000", snowflake_role=claims.snowflake_role, tenant_id=claims.tenant_id)
     assert turn.generated_sql == "SELECT * FROM table LIMIT 10000"
 
 
@@ -95,7 +95,7 @@ async def test_successful_correction_retry(claims, req):
     audit = MagicMock(spec=AuditStore)
     
     pipeline = PipelineOrchestrator(sessions, events, audit)
-    session, _ = sessions.create(claims)
+    session, _ = await sessions.create(claims)
     req.session_id = session.session_id
     
     pipeline.schema = MagicMock()
@@ -140,7 +140,7 @@ async def test_successful_correction_retry(claims, req):
     assert second_call_kwargs.get("previous_sql") == "SELECT bad"
     
     # Verify execution was called with attempt 2 SQL
-    pipeline.warehouse.execute_readonly.assert_called_once_with("SELECT good LIMIT 10000", snowflake_role=claims.snowflake_role)
+    pipeline.warehouse.execute_readonly.assert_called_once_with("SELECT good LIMIT 10000", snowflake_role=claims.snowflake_role, tenant_id=claims.tenant_id)
     
     # Check attempt structures
     attempt1 = turn.attempts[0]
@@ -166,7 +166,7 @@ async def test_cartesian_join_validation_feeds_correction_retry(claims, req):
     audit = MagicMock(spec=AuditStore)
 
     pipeline = PipelineOrchestrator(sessions, events, audit)
-    session, _ = sessions.create(claims)
+    session, _ = await sessions.create(claims)
     req.session_id = session.session_id
 
     pipeline.schema = MagicMock()
@@ -205,6 +205,7 @@ async def test_cartesian_join_validation_feeds_correction_retry(claims, req):
     pipeline.warehouse.execute_readonly.assert_called_once_with(
         "SELECT * FROM orders JOIN customers ON orders.customer_id = customers.customer_id LIMIT 10000",
         snowflake_role=claims.snowflake_role,
+        tenant_id=claims.tenant_id,
     )
 
 
@@ -215,7 +216,7 @@ async def test_exhaustion_both_attempts_fail(claims, req):
     audit = MagicMock(spec=AuditStore)
     
     pipeline = PipelineOrchestrator(sessions, events, audit)
-    session, _ = sessions.create(claims)
+    session, _ = await sessions.create(claims)
     req.session_id = session.session_id
     
     pipeline.schema = MagicMock()
@@ -274,7 +275,7 @@ async def test_redis_query_cache_bypasses_second_warehouse_execution(claims, req
     audit = MagicMock(spec=AuditStore)
 
     pipeline = PipelineOrchestrator(sessions, events, audit, settings=sessions.settings)
-    session, _ = sessions.create(claims)
+    session, _ = await sessions.create(claims)
     req.session_id = session.session_id
 
     pipeline.schema = MagicMock()
@@ -324,7 +325,7 @@ async def test_duplication_risk_warns_without_rerunning_distinct(claims, req):
     audit = MagicMock(spec=AuditStore)
 
     pipeline = PipelineOrchestrator(sessions, events, audit)
-    session, _ = sessions.create(claims)
+    session, _ = await sessions.create(claims)
     req.session_id = session.session_id
 
     original_sql = "SELECT customers.customer_segment FROM order_items JOIN customers ON order_items.customer_id = customers.customer_id"
@@ -350,7 +351,7 @@ async def test_duplication_risk_warns_without_rerunning_distinct(claims, req):
     await pipeline._run_until_confidence_or_result(session, turn, claims)
 
     expected_sql = f"{original_sql} LIMIT 10000"
-    pipeline.warehouse.execute_readonly.assert_called_once_with(expected_sql, snowflake_role=claims.snowflake_role)
+    pipeline.warehouse.execute_readonly.assert_called_once_with(expected_sql, snowflake_role=claims.snowflake_role, tenant_id=claims.tenant_id)
     assert turn.generated_sql == expected_sql
     assert turn.attempts[-1].executed_sql_hash == turn.attempts[-1].sql_hash
     assert len(turn.result_warnings) == 1
@@ -369,7 +370,7 @@ async def test_duplication_risk_does_not_warn_for_small_result(claims, req):
     audit = MagicMock(spec=AuditStore)
 
     pipeline = PipelineOrchestrator(sessions, events, audit)
-    session, _ = sessions.create(claims)
+    session, _ = await sessions.create(claims)
     req.session_id = session.session_id
 
     sql = "SELECT customers.customer_segment FROM order_items JOIN customers ON order_items.customer_id = customers.customer_id"
@@ -394,7 +395,7 @@ async def test_duplication_risk_does_not_warn_for_small_result(claims, req):
 
     await pipeline._run_until_confidence_or_result(session, turn, claims)
 
-    pipeline.warehouse.execute_readonly.assert_called_once_with(f"{sql} LIMIT 10000", snowflake_role=claims.snowflake_role)
+    pipeline.warehouse.execute_readonly.assert_called_once_with(f"{sql} LIMIT 10000", snowflake_role=claims.snowflake_role, tenant_id=claims.tenant_id)
     assert turn.result_warnings == []
 
 
@@ -405,7 +406,7 @@ async def test_valid_sql_limit_policy_is_applied_before_confidence_and_execution
     audit = MagicMock(spec=AuditStore)
 
     pipeline = PipelineOrchestrator(sessions, events, audit)
-    session, _ = sessions.create(claims)
+    session, _ = await sessions.create(claims)
     req.session_id = session.session_id
 
     pipeline.schema = MagicMock()

@@ -20,7 +20,8 @@ class PgVectorSchemaRetriever(SchemaRetriever):
             input=retrieval_query,
             model="text-embedding-3-small"
         )
-        embedding_str = str(response.data[0].embedding)
+        import json
+        embedding_str = json.dumps(response.data[0].embedding)
         
         vector_sql = """
             SELECT 
@@ -83,7 +84,9 @@ class PgVectorSchemaRetriever(SchemaRetriever):
         final_chunks = [chunks_by_ref[ref] for ref in sorted_refs[:10]]
             
         rag_score = 0.0
-        if final_chunks:
-            rag_score = final_chunks[0].similarity
+        if sorted_refs:
+            top_ref = sorted_refs[0]
+            max_possible_rrf = 2.0 / (k + 1)
+            rag_score = min(1.0, scores[top_ref] / max_possible_rrf)
             
         return final_chunks, rag_score

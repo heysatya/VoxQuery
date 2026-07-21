@@ -89,6 +89,16 @@ def test_emit_does_not_raise_on_non_serializable_payload(capsys):
     json.loads(out)  # must still be valid JSON
 
 
+def test_emit_scrubs_secrets_from_payload(capsys):
+    emit("test.secrets", tier=2, token="sk-123456", key="sk_test_abcdef", jwt="Bearer eyJhb", basic="Basic YWRta")
+    out = capsys.readouterr().out.strip()
+    line = json.loads(out)
+    assert line["token"] == "***SCRUBBED***"
+    assert line["key"] == "***SCRUBBED***"
+    assert line["jwt"] == "***SCRUBBED***"
+    assert line["basic"] == "***SCRUBBED***"
+
+
 def test_emit_does_not_raise_when_print_itself_fails(monkeypatch):
     def broken_print(*args, **kwargs):
         raise OSError("stdout broken")

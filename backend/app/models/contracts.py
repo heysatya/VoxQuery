@@ -75,8 +75,10 @@ class ErrorCode(StrEnum):
     rag_unavailable = "rag_unavailable"
     warehouse_timeout = "warehouse_timeout"
     warehouse_error = "warehouse_error"
+    tenant_not_provisioned = "tenant_not_provisioned"
     sql_generation_failed = "sql_generation_failed"
     llm_unavailable = "llm_unavailable"
+    rate_limit_exceeded = "rate_limit_exceeded"
     internal_error = "internal_error"
 
 
@@ -104,11 +106,15 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.warehouse_error: (
         "The data warehouse returned an error. Check that your schema access is configured correctly."
     ),
+    ErrorCode.tenant_not_provisioned: (
+        "Your organization's data connection isn't set up yet. Please contact support."
+    ),
     ErrorCode.sql_generation_failed: (
         "I couldn't generate a valid query even after clarification. "
         "Try rephrasing or use the text input."
     ),
     ErrorCode.llm_unavailable: "The AI service is temporarily unavailable. Please try again in a moment.",
+    ErrorCode.rate_limit_exceeded: "Too many requests. Please try again later.",
     ErrorCode.internal_error: "Something went wrong. Please try again.",
 }
 
@@ -140,7 +146,7 @@ class AuthClaims(BaseModel):
 
 
 class SessionCreateRequest(BaseModel):
-    tenant_id: UUID
+    tenant_id: UUID | None = None
 
 
 class SessionCreateResponse(BaseModel):
@@ -199,6 +205,7 @@ class QueryAcceptedResponse(BaseModel):
 class ClarificationResolutionType(StrEnum):
     option_selected = "option_selected"
     escaped = "escaped"
+    timeout = "timeout"
 
 
 class ClarificationRequest(BaseModel):
@@ -275,10 +282,15 @@ class ResultPayload(BaseModel):
 
 class ResultTrust(BaseModel):
     confidence_tier: ConfidenceTier
+    confidence_reasons: list[str] = Field(default_factory=list)
     row_count: int = Field(ge=0)
     warning_count: int = Field(ge=0)
     generated_sql_present: bool
     semantic_columns_present: bool
+    execution_time_ms: int | None = None
+    data_sources: list[str] | None = None
+    sql_hash: str | None = None
+    data_freshness_note: str | None = None
 
 
 def infer_result_column_semantic(
@@ -352,6 +364,7 @@ class ResultResponse(BaseModel):
     chart_type: ChartType
     chart_rationale: str
     confidence_tier: ConfidenceTier
+    confidence_reasons: list[str] = Field(default_factory=list)
     generated_sql: str
     result: ResultPayload
     tts_text: str
@@ -551,7 +564,8 @@ class ResultReadyEvent(BaseModel):
     chart_type: ChartType
     chart_rationale: str
     result_json: dict[str, Any]
-    proactive_questions: list[str]
+    confidence_reasons: list[str] = Field(default_factory=list)
+    proactive_questions: list[str] = Field(default_factory=list)
     from_cache: bool = False
 
 
@@ -609,6 +623,7 @@ class TurnRecord(BaseModel):
     full_result: ResultPayload | None = None
     result_warnings: list[ResultWarning] = Field(default_factory=list)
     tts_text: str = ""
+    proactive_questions: list[str] = Field(default_factory=list)
     from_cache: bool = False
     attempts: list[AnalyticalAttempt] = Field(default_factory=list)
 

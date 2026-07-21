@@ -40,6 +40,15 @@ def _utcnow_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+import re
+
+_SECRET_PATTERN = re.compile(r'(sk-[a-zA-Z0-9]+|sk_test_[a-zA-Z0-9]+|Bearer\s+[a-zA-Z0-9\-\._~+/]+=*|Basic\s+[a-zA-Z0-9\+/]+=*)')
+
+def _scrub_value(val: Any) -> Any:
+    if isinstance(val, str) and _SECRET_PATTERN.search(val):
+        return "***SCRUBBED***"
+    return val
+
 def _safe_dumps(payload: dict[str, Any]) -> str:
     """
     Serialise payload to a JSON string.
@@ -47,12 +56,13 @@ def _safe_dumps(payload: dict[str, Any]) -> str:
     For any value that json.dumps cannot handle, fall back to repr() so the
     event is always emitted as valid JSON rather than silently dropped.
     """
+    scrubbed = {k: _scrub_value(v) for k, v in payload.items()}
     try:
-        return json.dumps(payload, default=str)
+        return json.dumps(scrubbed, default=str)
     except Exception:
         # Second-level fallback: repr every value individually.
         safe: dict[str, Any] = {}
-        for k, v in payload.items():
+        for k, v in scrubbed.items():
             try:
                 json.dumps(v, default=str)
                 safe[k] = v

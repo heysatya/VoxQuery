@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 from app.rag.pgvector import PgVectorSchemaRetriever
-from app.models.contracts import SchemaChunk
+from app.rag.query_rewriter import RewrittenQuery
 
 @pytest.fixture
 def mock_openai():
@@ -52,12 +52,16 @@ def mock_db_pool():
 async def test_pgvector_retriever_success(mock_openai, mock_db_pool):
     """
     BEHAVIOR: The retriever should embed the user input and fetch the top matching schema chunks from the database.
-    SPEC: PgVectorSchemaRetriever.retrieve(submitted_text, tenant_id) -> tuple[list[SchemaChunk], float]
+    SPEC: PgVectorSchemaRetriever.retrieve(rewritten_query, tenant_id) -> tuple[list[SchemaChunk], float]
     """
     retriever = PgVectorSchemaRetriever(openai_client=mock_openai, db_pool=mock_db_pool)
     tenant_id = uuid4()
+    rewritten = RewrittenQuery(
+        original="Show me total revenue",
+        rewritten="Show me total revenue",
+    )
     
-    chunks, score = await retriever.retrieve("Show me total revenue", tenant_id)
+    chunks, score = await retriever.retrieve(rewritten, tenant_id)
     
     # Assert OpenAI was called to generate the embedding
     mock_openai.embeddings.create.assert_called_once_with(
@@ -71,8 +75,8 @@ async def test_pgvector_retriever_success(mock_openai, mock_db_pool):
     assert chunks[0].column == "AMOUNT"
     assert chunks[0].similarity == 0.95
     
-    # Assert the RAG score is derived from the top chunk
-    assert score == 0.95
+    # Assert the RAG score is derived from the RRF calculation
+    assert score == 1.0
 
 @pytest.mark.asyncio
 async def test_pgvector_retriever_empty(mock_openai, mock_db_pool):
@@ -84,8 +88,9 @@ async def test_pgvector_retriever_empty(mock_openai, mock_db_pool):
     mock_conn.fetch.return_value = []
     
     retriever = PgVectorSchemaRetriever(openai_client=mock_openai, db_pool=mock_db_pool)
+    rewritten = RewrittenQuery(original="random words", rewritten="random words")
     
-    chunks, score = await retriever.retrieve("random words", uuid4())
+    chunks, score = await retriever.retrieve(rewritten, uuid4())
     
     assert len(chunks) == 0
     assert score == 0.0

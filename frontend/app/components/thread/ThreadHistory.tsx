@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, Code } from "lucide-react";
+import { format as formatSql } from "sql-formatter";
 import { cn } from "../../../lib/utils";
 import type { LastResult } from "../../../lib/types";
 import { selectedChartType } from "../../../lib/resultSemantics";
@@ -92,8 +93,8 @@ function ExpandableThreadEntry({ turn, index }: ExpandableThreadEntryProps) {
                     <Code className="h-3 w-3" />
                     View SQL
                   </summary>
-                  <pre className="mt-2 p-3 rounded-lg bg-[var(--bg-base)] text-[10px] text-[var(--chart-2)] font-mono leading-relaxed overflow-x-auto border border-[var(--border)]">
-                    {turn.resultData.generated_sql}
+                  <pre className="mt-2 p-3 rounded-lg bg-[var(--bg-base)] text-[10px] text-[var(--chart-2)] font-mono leading-relaxed overflow-x-auto border border-[var(--border)] shadow-inner whitespace-pre-wrap">
+                    {formatSql(turn.resultData.generated_sql, { language: "postgresql" })}
                   </pre>
                 </details>
               )}

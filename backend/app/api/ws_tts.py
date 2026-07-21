@@ -6,14 +6,14 @@ invoke the TTS provider, and stream raw PCM audio bytes to the browser.
 """
 
 import logging
+import time
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.core.tts import build_tts_provider, TTSUnavailableError
-from app.middleware.auth import authenticate_websocket
-from app.models.contracts import AuthClaims
+from app.middleware.auth import authenticate_websocket_message
 
 router = APIRouter()
 logger = logging.getLogger("voxquery.ws_tts")
@@ -24,20 +24,20 @@ async def tts_socket(
     websocket: WebSocket,
     session_id: UUID,
     turn_id: UUID,
-    claims: AuthClaims | None = Depends(authenticate_websocket),
+    settings: Settings = Depends(get_settings),
 ) -> None:
+    await websocket.accept()
+    claims = await authenticate_websocket_message(websocket, settings)
     if claims is None:
         return
 
-    from app.main import app
-
-    session = app.state.sessions.get_for_claims(claims, session_id)
+    session = await websocket.app.state.sessions.get_for_claims(claims, session_id)
     if session is None:
         await websocket.close(code=4002)
         return
 
     try:
-        turn = app.state.pipeline.get_turn_for_user(turn_id, claims)
+        turn = websocket.app.state.pipeline.get_turn_for_user(turn_id, claims)
     except Exception:
         await websocket.close(code=4004) # Not found
         return
@@ -47,10 +47,10 @@ async def tts_socket(
         await websocket.close(code=1000)
         return
 
-    await websocket.accept()
+    # Removed duplicate accept
 
-    settings = get_settings()
-    telemetry = app.state.telemetry.bind(
+    # Removed duplicate get_settings
+    telemetry = websocket.app.state.telemetry.bind(
         session_id=str(session_id),
         tenant_id=str(claims.tenant_id),
         user_id=str(claims.user_id),
@@ -58,12 +58,26 @@ async def tts_socket(
     )
     
     telemetry.emit("tts.ws.lifecycle", tier=2, action="opened")
+    provider_name = "deepgram" if settings.tts_provider == "deepgram" else "fake"
     provider = build_tts_provider(settings, logger=logger)
 
     close_code = 1000
+    chunk_count = 0
+    byte_count = 0
+    started_at = time.monotonic()
     try:
         async for chunk in provider.stream_audio(text_to_speak):
+            chunk_count += 1
+            byte_count += len(chunk)
             await websocket.send_bytes(chunk)
+        telemetry.emit(
+            "tts.audio.complete",
+            tier=2,
+            provider=provider_name,
+            chunk_count=chunk_count,
+            byte_count=byte_count,
+            latency_ms=int((time.monotonic() - started_at) * 1000),
+        )
         await websocket.close(code=close_code)
     except WebSocketDisconnect:
         close_code = 1006
@@ -72,6 +86,13 @@ async def tts_socket(
         telemetry.emit("tts.error", tier=2, error_type="deepgram_connection")
         close_code = 1011
         try:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "tts_unavailable",
+                    "message": "Voice playback is temporarily unavailable.",
+                }
+            )
             await websocket.close(code=close_code)
         except Exception:
             pass
@@ -80,6 +101,13 @@ async def tts_socket(
         telemetry.emit("tts.error", tier=2, error_type="relay")
         close_code = 1011
         try:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "tts_relay_error",
+                    "message": "Voice playback failed.",
+                }
+            )
             await websocket.close(code=close_code)
         except Exception:
             pass

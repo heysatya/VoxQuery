@@ -76,7 +76,7 @@ def test_clerk_verifier_accepts_signed_token_and_maps_claims(key_pair, clerk_set
     private_key, public_key = key_pair
     verifier = ClerkJwtVerifier(clerk_settings, jwks_client=FakeJwksClient(public_key))
 
-    claims = verifier.verify(signed_token(private_key))
+    claims = verifier.claims_from_payload(verifier.verify(signed_token(private_key)))
 
     assert claims.user_id == USER_ID
     assert claims.tenant_id == TENANT_ID
@@ -97,14 +97,14 @@ def test_blank_clerk_audience_is_treated_as_unset(key_pair):
     verifier = ClerkJwtVerifier(settings, jwks_client=FakeJwksClient(public_key))
 
     assert settings.clerk_audience is None
-    assert verifier.verify(signed_token(private_key)).tenant_id == TENANT_ID
+    assert verifier.claims_from_payload(verifier.verify(signed_token(private_key))).tenant_id == TENANT_ID
 
 
 def test_clerk_verifier_allows_small_clock_skew(key_pair, clerk_settings):
     private_key, public_key = key_pair
     verifier = ClerkJwtVerifier(clerk_settings, jwks_client=FakeJwksClient(public_key))
 
-    claims = verifier.verify(signed_token(private_key, iat=datetime.now(UTC) + timedelta(seconds=30)))
+    claims = verifier.claims_from_payload(verifier.verify(signed_token(private_key, iat=datetime.now(UTC) + timedelta(seconds=30))))
 
     assert claims.user_id == USER_ID
 
@@ -162,7 +162,7 @@ def test_clerk_verifier_rejects_missing_voxquery_claims(key_pair, clerk_settings
     verifier = ClerkJwtVerifier(clerk_settings, jwks_client=FakeJwksClient(public_key))
 
     with pytest.raises(ApiError) as exc:
-        verifier.verify(signed_token(private_key, vox_tenant_id=None))
+        verifier.claims_from_payload(verifier.verify(signed_token(private_key, vox_tenant_id=None)))
 
     assert exc.value.code == "auth_invalid"
     assert "VoxQuery authorization claims" in exc.value.detail
@@ -173,7 +173,7 @@ def test_clerk_verifier_rejects_malformed_uuid_claims(key_pair, clerk_settings):
     verifier = ClerkJwtVerifier(clerk_settings, jwks_client=FakeJwksClient(public_key))
 
     with pytest.raises(ApiError) as exc:
-        verifier.verify(signed_token(private_key, vox_user_id="not-a-uuid"))
+        verifier.claims_from_payload(verifier.verify(signed_token(private_key, vox_user_id="not-a-uuid")))
 
     assert exc.value.code == "auth_invalid"
     assert "VoxQuery authorization claims" in exc.value.detail
@@ -212,17 +212,20 @@ def test_clerk_startup_requires_metadata_and_https_in_hosted_envs():
         ANTHROPIC_API_KEY="dummy",
         OPENAI_API_KEY="dummy",
         SUPABASE_DATABASE_URL="dummy",
+        FERNET_KEY="dummy",
+        SNOWFLAKE_DSN="dummy",
     )
     configured.validate_startup()
 
 
-def test_rest_auth_requires_bearer_header_in_clerk_mode(clerk_settings):
+@pytest.mark.asyncio
+async def test_rest_auth_requires_bearer_header_in_clerk_mode(clerk_settings):
     with pytest.raises(ApiError) as missing:
-        get_current_user(authorization=None, settings=clerk_settings)
+        await get_current_user(authorization=None, settings=clerk_settings)
     assert missing.value.code == "auth_missing"
 
     with pytest.raises(ApiError) as invalid:
-        get_current_user(authorization="Token nope", settings=clerk_settings)
+        await get_current_user(authorization="Token nope", settings=clerk_settings)
     assert invalid.value.code == "auth_invalid"
 
 
@@ -324,12 +327,14 @@ def test_websocket_auth_accepts_valid_token_and_rejects_missing_token(monkeypatc
         json={"tenant_id": str(TENANT_ID)},
     ).json()
 
-    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token={token}") as ws:
+    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}") as ws:
+        ws.send_json({"event": "auth", "token": token})
         assert ws is not None
 
     with pytest.raises(WebSocketDisconnect) as exc:
-        with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}"):
-            pass
+        with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}") as ws:
+            ws.send_json({"event": "auth"})
+            ws.receive_json()
     assert exc.value.code == 4001
 
 
@@ -357,10 +362,9 @@ def test_websockets_reject_same_tenant_different_user_session(monkeypatch, key_p
 
     for path in ("pipeline", "audio"):
         with pytest.raises(WebSocketDisconnect) as exc:
-            with client.websocket_connect(
-                f"/ws/{path}?session_id={session['session_id']}&token={other_user_token}"
-            ):
-                pass
+            with client.websocket_connect(f"/ws/{path}?session_id={session['session_id']}") as ws:
+                ws.send_json({"event": "auth", "token": other_user_token})
+                ws.receive_json()
         assert exc.value.code == 4002
 
 
@@ -389,10 +393,9 @@ def test_websockets_reject_tampered_signature_with_4001(monkeypatch, key_pair):
 
     for path in ("pipeline", "audio"):
         with pytest.raises(WebSocketDisconnect) as exc:
-            with client.websocket_connect(
-                f"/ws/{path}?session_id={session['session_id']}&token={tampered_token}"
-            ):
-                pass
+            with client.websocket_connect(f"/ws/{path}?session_id={session['session_id']}") as ws:
+                ws.send_json({"event": "auth", "token": tampered_token})
+                ws.receive_json()
         assert exc.value.code == 4001
 
 
@@ -403,7 +406,7 @@ def test_clerk_verification_stays_within_local_budget(key_pair, clerk_settings):
 
     started = perf_counter()
     for _ in range(25):
-        assert verifier.verify(token).tenant_id == TENANT_ID
+        assert verifier.claims_from_payload(verifier.verify(token)).tenant_id == TENANT_ID
     elapsed_ms = (perf_counter() - started) * 1000
 
     assert elapsed_ms < 500

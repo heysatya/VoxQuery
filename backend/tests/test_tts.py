@@ -14,6 +14,7 @@ def test_deepgram_aura_is_the_only_production_tts_model():
     assert f"model={DEEPGRAM_AURA_MODEL}" in DEEPGRAM_AURA_URL
     assert "encoding=linear16" in DEEPGRAM_AURA_URL
     assert "sample_rate=16000" in DEEPGRAM_AURA_URL
+    assert "container=none" in DEEPGRAM_AURA_URL
 
 
 def test_build_tts_provider_uses_deepgram_aura_when_configured():

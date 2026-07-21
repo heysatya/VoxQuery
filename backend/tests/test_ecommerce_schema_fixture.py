@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 def test_demo_warehouse_schema_contains_expected_tables_and_relationships():
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[1]
     sql = (root / "db" / "demo_warehouse" / "001_ecommerce_schema.sql").read_text()
 
     for table in [

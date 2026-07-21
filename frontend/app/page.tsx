@@ -297,6 +297,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 onFeedback={engine.submitFeedback}
                 onMute={engine.muteTTS}
                 onUnmute={engine.unmuteTTS}
+                onDrillDown={engine.submitQuery}
               />
 
               {/* Follow-up suggestions */}
@@ -350,7 +351,6 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
             isReady={engine.isReady}
             recordingState={engine.recordingState}
             notice={engine.notice}
-            modeLabel={engine.authMode === "clerk" ? "clerk auth mode" : "local fake mode"}
             onChange={engine.setSubmittedText}
             onSubmit={engine.submitCurrentQuery}
             onFakeVoice={engine.startFakeVoice}

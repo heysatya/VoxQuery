@@ -92,7 +92,7 @@ export type VoxQueryEngine = {
 const tenantId =
   process.env.NEXT_PUBLIC_VOXQUERY_TENANT_ID ??
   process.env.NEXT_PUBLIC_FAKE_TENANT_ID ??
-  "00000000-0000-0000-0000-000000000101";
+  "";
 
 function errorMessage(error: unknown, fallback: string) {
   if (error instanceof Error) return error.message;
@@ -154,6 +154,8 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioWorkletRef = useRef<AudioWorkletNode | null>(null);
+  const audioStopAfterFlushRef = useRef(false);
+  const pendingAudioFramesRef = useRef<ArrayBuffer[]>([]);
   const currentTurnIdRef = useRef<string | null>(null);
   const currentTurnRequestRef = useRef<{ submittedText: string; parentTurnId: string | null } | null>(null);
   const [audioAnalyserNode, setAudioAnalyserNode] = useState<AnalyserNode | null>(null);
@@ -282,7 +284,10 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
         if (cancelled || !session.sessionId) {
           return;
         }
-        socket = new WebSocket(pipelineSocketUrl(session.sessionId, token));
+        socket = new WebSocket(pipelineSocketUrl(session.sessionId));
+        socket.onopen = () => {
+          socket?.send(JSON.stringify({ event: "auth", token: token ?? "fake" }));
+        };
         socket.onmessage = (message) => {
           const event = parsePipelineEvent(message.data);
           if (!event) {
@@ -360,8 +365,10 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
 
 
   function recorderCleanup() {
+    audioStopAfterFlushRef.current = false;
+    pendingAudioFramesRef.current = [];
     if (audioWorkletRef.current) {
-      audioWorkletRef.current.disconnect();
+      if (audioWorkletRef.current && audioWorkletRef.current.disconnect) { try { audioWorkletRef.current.disconnect(); } catch (e) {} }
       audioWorkletRef.current = null;
     }
     setAudioAnalyserNode(null);
@@ -408,58 +415,49 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
 
     try {
       setVoiceDraft(null);
+      setPartialTranscript("");
       stopTTS("idle");
-      ensureTTSContext();
       setVoiceState((state) => transitionVoiceState(state, "request_permission"));
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const tokenPromise = auth.getToken();
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          autoGainControl: true,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true
+        }
+      });
+      mediaStreamRef.current = stream;
       setMicPermission("granted");
 
-      const token = await auth.getToken();
-      await postTelemetry({ event: "stt.mic.permission", outcome: "granted", session_id: session.sessionId }, token).catch(console.error);
+      const token = await tokenPromise;
+      postTelemetry({ event: "stt.mic.permission", outcome: "granted", session_id: session.sessionId }, token).catch(console.error);
 
       setVoiceState((state) => transitionVoiceState(state, "permission_granted"));
       setNotice("Microphone access granted. Connecting...");
 
-      const socket = new WebSocket(audioSocketUrl(session.sessionId, token));
+      const socket = new WebSocket(audioSocketUrl(session.sessionId));
       audioSocketRef.current = socket;
-      mediaStreamRef.current = stream;
+      pendingAudioFramesRef.current = [];
 
-      socket.onopen = async () => {
-        try {
-          const audioContext = createBrowserAudioContext();
-          audioContextRef.current = audioContext;
+      const flushQueuedAudio = () => {
+        if (socket.readyState !== WebSocket.OPEN) return;
+        for (const frame of pendingAudioFramesRef.current) {
+          socket.send(frame);
+        }
+        pendingAudioFramesRef.current = [];
+      };
 
-          await audioContext.audioWorklet.addModule("/audio-processor.js");
+      const markRecording = () => {
+        setVoiceState((state) => transitionVoiceState(state, "connected"));
+        setNotice("Recording...");
+      };
 
-          const source = audioContext.createMediaStreamSource(stream);
-          const analyser = audioContext.createAnalyser();
-          analyser.fftSize = 256;
-          setAudioAnalyserNode(analyser);
-
-          const worklet = new AudioWorkletNode(audioContext, "pcm-audio-processor");
-          audioWorkletRef.current = worklet;
-
-          worklet.port.onmessage = (e) => {
-            if (socket.readyState === WebSocket.OPEN) {
-              socket.send(e.data);
-            }
-          };
-
-          source.connect(analyser);
-          analyser.connect(worklet);
-
-          const zeroGain = audioContext.createGain();
-          zeroGain.gain.value = 0;
-          worklet.connect(zeroGain);
-          zeroGain.connect(audioContext.destination);
-
-          setVoiceState((state) => transitionVoiceState(state, "connected"));
-          setNotice("Recording...");
-        } catch (error) {
-          console.error("Audio processor initialization error:", error);
-          setVoiceState("capture_error");
-          setNotice("Failed to initialize audio processing.", "error");
-          recorderCleanup();
+      socket.onopen = () => {
+        socket.send(JSON.stringify({ event: "auth", token: token ?? "fake" }));
+        flushQueuedAudio();
+        if (audioWorkletRef.current) {
+          markRecording();
         }
       };
 
@@ -498,6 +496,61 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
         }
         recorderCleanup();
       };
+
+      try {
+        const audioContext = createBrowserAudioContext();
+        audioContextRef.current = audioContext;
+
+        await audioContext.audioWorklet.addModule("/audio-processor.js");
+
+        const source = audioContext.createMediaStreamSource(stream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        setAudioAnalyserNode(analyser);
+
+        const worklet = new AudioWorkletNode(audioContext, "pcm-audio-processor");
+        audioWorkletRef.current = worklet;
+
+        worklet.port.onmessage = (e) => {
+          if (e.data && typeof e.data === "object" && "type" in e.data && e.data.type === "flushed") {
+            if (audioStopAfterFlushRef.current && socket.readyState === WebSocket.OPEN) {
+              audioStopAfterFlushRef.current = false;
+              flushQueuedAudio();
+              socket.send(JSON.stringify({ type: "stop_recording" }));
+            }
+            return;
+          }
+
+          if (!(e.data instanceof ArrayBuffer)) {
+            return;
+          }
+
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(e.data);
+            return;
+          }
+
+          if (socket.readyState === WebSocket.CONNECTING && pendingAudioFramesRef.current.length < 250) {
+            pendingAudioFramesRef.current.push(e.data);
+          }
+        };
+
+        source.connect(analyser);
+        analyser.connect(worklet);
+
+        const zeroGain = audioContext.createGain();
+        zeroGain.gain.value = 0;
+        worklet.connect(zeroGain);
+        zeroGain.connect(audioContext.destination);
+
+        flushQueuedAudio();
+        markRecording();
+      } catch (error) {
+        console.error("Audio processor initialization error:", error);
+        setVoiceState("capture_error");
+        setNotice("Failed to initialize audio processing.", "error");
+        recorderCleanup();
+      }
     } catch (err) {
       const domErr = err as { name?: string };
       if (domErr?.name === "NotAllowedError" || domErr?.name === "PermissionDeniedError") {
@@ -509,6 +562,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
         setVoiceState("capture_error");
         setNotice("Microphone access denied. Allow access in browser settings or use text input.", "error");
       } else {
+        recorderCleanup();
         setVoiceState("capture_error");
         setNotice("Could not access microphone. Try again or use text input.", "error");
       }
@@ -519,11 +573,19 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((track) => track.stop());
     }
-    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-      audioContextRef.current.suspend().catch(console.error);
-    }
     if (audioSocketRef.current && audioSocketRef.current.readyState === WebSocket.OPEN) {
-      audioSocketRef.current.send(JSON.stringify({ type: "stop_recording" }));
+      if (audioWorkletRef.current) {
+        audioStopAfterFlushRef.current = true;
+        audioWorkletRef.current.port.postMessage({ type: "flush" });
+        window.setTimeout(() => {
+          if (audioStopAfterFlushRef.current && audioSocketRef.current?.readyState === WebSocket.OPEN) {
+            audioStopAfterFlushRef.current = false;
+            audioSocketRef.current.send(JSON.stringify({ type: "stop_recording" }));
+          }
+        }, 80);
+      } else {
+        audioSocketRef.current.send(JSON.stringify({ type: "stop_recording" }));
+      }
     }
     setVoiceState((state) => transitionVoiceState(state, "stop_requested"));
     setNotice("Recording stopped. Processing transcript...");
@@ -551,8 +613,10 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     setVoiceDraft(null);
     setVoiceState("connecting");
     setNotice("Connecting to local fake STT WebSocket.");
-    const socket = new WebSocket(audioSocketUrl(session.sessionId, await auth.getToken()));
+    const token = await auth.getToken();
+    const socket = new WebSocket(audioSocketUrl(session.sessionId));
     socket.onopen = () => {
+      socket.send(JSON.stringify({ event: "auth", token: token ?? "fake" }));
       setVoiceState("listening");
       socket.send(new Uint8Array([1, 2, 3]));
       setVoiceState("finalizing");
@@ -753,11 +817,15 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       const audioCtx = ensureTTSContext();
       nextPlayTimeRef.current = audioCtx.currentTime + 0.1;
 
-      const socket = new WebSocket(ttsSocketUrl(session.sessionId, turnId, token));
+      const socket = new WebSocket(ttsSocketUrl(session.sessionId, turnId));
       socket.binaryType = "arraybuffer";
       ttsSocketRef.current = socket;
+      socket.onopen = () => {
+        socket.send(JSON.stringify({ event: "auth", token: token ?? "fake" }));
+      };
 
       socket.onmessage = (event) => {
+        if (event.data && typeof event.data === "string") return;
         if (ttsAudioContextRef.current?.state === "closed") return;
         
         if (!(event.data instanceof ArrayBuffer)) {

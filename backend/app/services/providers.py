@@ -97,12 +97,12 @@ class FakeSqlGenerator(LlmAdapter):
             validation_passed=True,
         )
 
-    async def generate_clarification(self, dominant_signal: str, *, user_input: str | None = None) -> tuple[str, list[str]]:
+    async def generate_clarification(self, dominant_signal: Any, user_input: str = "") -> tuple[str, list[str]]:
         return clarification_options_for_signal()
 
 
 class FakeWarehouseConnector(WarehouseConnector):
-    async def execute_readonly(self, sql: str, *, snowflake_role: str) -> tuple[ResultPayload, ResultShape]:
+    async def execute_readonly(self, sql: str, *, snowflake_role: str, tenant_id: UUID | None = None) -> tuple[ResultPayload, ResultShape]:
         if "customer_segment" in sql:
             columns = ["customer_segment", "total_net_revenue"]
             rows = [["Enterprise", 1240000], ["Consumer", 830000], ["Small Business", 410000]]
@@ -124,7 +124,7 @@ class FakeWarehouseConnector(WarehouseConnector):
         )
         return result, shape
 
-    def fetch_schema_snapshot(self) -> list[SchemaTable]:
+    def fetch_schema_snapshot(self, tenant_id: UUID | None = None) -> list[SchemaTable]:
         return [
             SchemaTable(table_name="orders", columns=[ColumnInfo(name="order_id", data_type="varchar")]),
             SchemaTable(table_name="order_items", columns=[ColumnInfo(name="order_id", data_type="varchar"), ColumnInfo(name="price", data_type="float")]),
@@ -140,6 +140,9 @@ class FakeChartSelector:
 class FakeStoryteller:
     async def summarize(self, result_shape: ResultShape, user_query: str) -> str:
         return result_shape.aggregate_summary
+
+    async def generate_proactive_questions(self, result_shape: ResultShape, user_query: str) -> list[str]:
+        return ["Fake proactive question 1", "Fake proactive question 2"]
 
 
 def clarification_options_for_signal() -> tuple[str, list[str]]:
