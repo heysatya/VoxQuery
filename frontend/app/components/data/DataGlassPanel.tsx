@@ -143,6 +143,7 @@ type DataGlassPanelProps = {
   onMute: () => void;
   onUnmute: () => void;
   onDrillDown?: (query: string) => void;
+  onDrilldownOpen?: (turnId: string) => void;
 };
 
 export function DataGlassPanel({
@@ -150,6 +151,7 @@ export function DataGlassPanel({
   feedbackRating,
   onFeedback,
   onDrillDown,
+  onDrilldownOpen,
 }: DataGlassPanelProps) {
   const [showSql, setShowSql] = useState(false);
   const [userChartOverride, setUserChartOverride] = useState<string | null>(null);
@@ -266,6 +268,18 @@ export function DataGlassPanel({
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
+
+          {/* Drilldown */}
+          {onDrilldownOpen && (
+            <button
+              type="button"
+              onClick={() => onDrilldownOpen(result.turnId)}
+              className="p-2 text-[var(--text-muted)] hover:text-[var(--accent-blue)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] rounded-lg transition-colors"
+              title="Drilldown Raw Data"
+            >
+              <Code className="h-4 w-4" />
+            </button>
+          )}
 
           {/* Download CSV */}
           <button type="button" onClick={downloadCSV} className="p-2 text-[var(--text-muted)] hover:text-[var(--accent-blue)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] rounded-lg transition-colors" title="Download CSV">

@@ -9,6 +9,7 @@ import { VoiceVisualizer } from "./components/hero/VoiceVisualizer";
 import { MorningBriefingCard } from "./components/briefing/MorningBriefingCard";
 import { ExecutiveMemoryGraph } from "./components/memory/ExecutiveMemoryGraph";
 import { DataGlassPanel } from "./components/data/DataGlassPanel";
+import { RowDrilldownModal } from "./components/data/RowDrilldownModal";
 import { InsightNarrative } from "./components/insight/InsightNarrative";
 import { FollowUpSuggestions } from "./components/insight/FollowUpSuggestions";
 import { ClarificationOverlay } from "./components/clarification/ClarificationOverlay";
@@ -92,6 +93,7 @@ const STARTER_QUESTIONS = [
 
 function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
   const engine = useVoxQuerySession(auth);
+  const [drilldownTurnId, setDrilldownTurnId] = React.useState<string | null>(null);
 
   // Phase 3.2: derive visible state from explicit lifecycle dimensions
   const isReviewing = engine.voiceState === "reviewing";
@@ -309,6 +311,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 onMute={engine.muteTTS}
                 onUnmute={engine.unmuteTTS}
                 onDrillDown={engine.submitQuery}
+                onDrilldownOpen={setDrilldownTurnId}
               />
 
               {/* Follow-up suggestions */}
@@ -386,6 +389,14 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
           />
         )}
       </AnimatePresence>
+
+      {/* ── Drilldown modal ─────────────────────────────────────── */}
+      <RowDrilldownModal
+        isOpen={!!drilldownTurnId}
+        onClose={() => setDrilldownTurnId(null)}
+        turnId={drilldownTurnId}
+        auth={auth}
+      />
     </main>
   );
 }

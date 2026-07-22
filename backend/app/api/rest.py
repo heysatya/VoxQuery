@@ -412,3 +412,17 @@ async def patch_preferences(
         delivery_time=data.get("delivery_time", "08:00"),
     )
 
+
+@router.get("/api/drilldown/{turn_id}")
+async def get_drilldown(
+    turn_id: UUID,
+    claims: AuthClaims = Depends(get_current_user),
+    settings = Depends(get_settings),
+) -> list[dict]:
+    """
+    Fetch top 10 raw transaction rows for a given turn.
+    """
+    from app.services.drilldown import get_row_drilldown
+    return await get_row_drilldown(turn_id, settings)
+
+
