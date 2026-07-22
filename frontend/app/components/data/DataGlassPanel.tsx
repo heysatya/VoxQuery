@@ -23,6 +23,7 @@ import {
   LineChart, Line
 } from "recharts";
 import { TrustPanel } from "./TrustPanel";
+import { triggerPdfExport } from "../../../lib/pdfExporter";
 
 /* -- Chart Renderer ---------------------------------------------- */
 
@@ -271,8 +272,11 @@ export function DataGlassPanel({
   }
 
   function exportToPDF() {
-    // A simple client-side print that relies on print CSS media queries
-    window.print();
+    triggerPdfExport(
+      "VoxQuery Executive Briefing Report",
+      result.resultData.tts_text,
+      []
+    );
   }
 
   return (
