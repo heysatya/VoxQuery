@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sun, TrendingUp, TrendingDown, AlertTriangle, Sparkles, ChevronRight, X } from "lucide-react";
+import { ExecutiveAudioPlayer } from "../insight/ExecutiveAudioPlayer";
 
 export type BriefingKpi = {
   label: string;
@@ -105,6 +106,11 @@ export function MorningBriefingCard({ apiUrl = "http://127.0.0.1:8000", token, o
         {/* Executive Summary Narrative */}
         <div className="p-4 rounded-xl bg-[var(--bg-elevated)]/40 border border-[var(--border)] mb-6 text-sm md:text-base text-[var(--text-secondary)] leading-relaxed">
           <p>{briefing.summary_narrative}</p>
+        </div>
+
+        {/* Executive Audio Briefing Player */}
+        <div className="mb-6">
+          <ExecutiveAudioPlayer textToSpeak={briefing.summary_narrative} />
         </div>
 
         {/* KPI Grid */}
