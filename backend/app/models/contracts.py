@@ -654,3 +654,23 @@ class ExecutiveBriefingResponse(BaseModel):
     anomalies: list[BriefingAnomaly]
     proactive_insights: list[str]
 
+
+class GraphNode(BaseModel):
+    id: str
+    label: str
+    type: Literal["query", "entity", "metric", "filter", "insight"]
+    turn_index: int
+
+
+class GraphEdge(BaseModel):
+    source: str
+    target: str
+    relation: str
+
+
+class MemoryGraphResponse(BaseModel):
+    session_id: UUID
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+
+

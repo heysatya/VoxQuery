@@ -7,6 +7,7 @@ import { RotateCcw } from "lucide-react";
 import { useVoxQuerySession, type VoxQueryAuthRelay } from "./hooks/useVoxQuerySession";
 import { VoiceVisualizer } from "./components/hero/VoiceVisualizer";
 import { MorningBriefingCard } from "./components/briefing/MorningBriefingCard";
+import { ExecutiveMemoryGraph } from "./components/memory/ExecutiveMemoryGraph";
 import { DataGlassPanel } from "./components/data/DataGlassPanel";
 import { InsightNarrative } from "./components/insight/InsightNarrative";
 import { FollowUpSuggestions } from "./components/insight/FollowUpSuggestions";
@@ -316,6 +317,13 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 onSelect={engine.submitQuery}
                 disabled={engine.pipelineInFlight}
               />
+
+              <div className="mt-8 w-full">
+                <ExecutiveMemoryGraph
+                  sessionId={engine.session.sessionId}
+                  auth={auth}
+                />
+              </div>
 
               {/* New conversation button */}
               <div className="mt-10 mb-4 flex justify-center">
