@@ -674,3 +674,11 @@ class MemoryGraphResponse(BaseModel):
     edges: list[GraphEdge]
 
 
+class UserPreferences(BaseModel):
+    user_id: UUID
+    email_briefing_enabled: bool
+    email: str | None
+    delivery_time: str
+
+
+
