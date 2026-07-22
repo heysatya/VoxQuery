@@ -270,7 +270,6 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     return () => {
       closeRecordingAudioContext();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
