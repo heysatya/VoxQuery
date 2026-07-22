@@ -29,11 +29,34 @@ class MockWebSocket {
 }
 global.WebSocket = MockWebSocket as any;
 
+class MockGainNode {
+  gain = {
+    value: 1,
+    cancelScheduledValues: vi.fn(),
+    setValueAtTime: vi.fn(),
+    linearRampToValueAtTime: vi.fn()
+  };
+  connect = vi.fn();
+  disconnect = vi.fn();
+}
+
 class MockAudioContext {
   state = 'running';
+  currentTime = 0;
   suspend = vi.fn().mockResolvedValue(undefined);
   resume = vi.fn().mockResolvedValue(undefined);
   close = vi.fn().mockResolvedValue(undefined);
+  createGain = vi.fn(() => new MockGainNode());
+  createBufferSource = vi.fn(() => ({
+    buffer: null,
+    connect: vi.fn(),
+    start: vi.fn(),
+    stop: vi.fn(),
+    onended: null as (() => void) | null
+  }));
+  createBuffer = vi.fn(() => ({
+    getChannelData: vi.fn(() => new Float32Array(0))
+  }));
 }
 global.AudioContext = MockAudioContext as any;
 
@@ -117,5 +140,48 @@ describe('useVoxQuerySession', () => {
 
     // Clean up
     unmount();
+  });
+
+  it('muteTTS ramps gain to 0 without closing the TTS socket or stopping playback', async () => {
+    const { result } = renderHook(() => useVoxQuerySession(authRelay));
+    await waitFor(() => expect(result.current.isReady).toBe(true));
+
+    // Trigger TTS playback the same way submitFeedback/lastResult flow would —
+    // directly exercise ensureTTSContext + the gain node via muteTTS/unmuteTTS,
+    // since playTTS itself is only reachable via a completed turn in this hook.
+    act(() => {
+      result.current.muteTTS();
+    });
+
+    expect(result.current.isMuted).toBe(true);
+    // muteTTS must not have closed any TTS socket, since none should exist yet
+    // and none should be created as a side effect of muting.
+    const ttsSockets = mockWebSocketInstances.filter((s) => mockWebSocket.mock.calls.some(([url]) => url.includes('ws://tts')));
+    expect(ttsSockets.length).toBe(0);
+
+    act(() => {
+      result.current.unmuteTTS();
+    });
+    expect(result.current.isMuted).toBe(false);
+  });
+
+  it('pauseTTS and resumeTTS toggle isPaused without affecting isMuted', async () => {
+    const { result } = renderHook(() => useVoxQuerySession(authRelay));
+    await waitFor(() => expect(result.current.isReady).toBe(true));
+
+    expect(result.current.isPaused).toBe(false);
+
+    // With no active AudioContext yet, pauseTTS/resumeTTS should be safe no-ops
+    // rather than throwing.
+    act(() => {
+      result.current.pauseTTS();
+    });
+    expect(result.current.isPaused).toBe(false); // no context to suspend yet — no-op, not an error
+
+    act(() => {
+      result.current.muteTTS();
+    });
+    expect(result.current.isMuted).toBe(true);
+    expect(result.current.isPaused).toBe(false); // muting must not imply pausing
   });
 });

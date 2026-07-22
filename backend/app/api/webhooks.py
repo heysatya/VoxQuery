@@ -107,6 +107,19 @@ async def clerk_webhook(
                     json.dumps(DEFAULT_METRIC_SYNONYMS),
                     json.dumps(DEFAULT_TABLE_SYNONYMS),
                 )
+                
+                if settings.snowflake_dsn and settings.fernet_key:
+                    try:
+                        from cryptography.fernet import Fernet
+                        f = Fernet(settings.fernet_key.encode())
+                        encrypted_dsn = f.encrypt(settings.snowflake_dsn.encode()).decode()
+                        await conn.execute("""
+                            INSERT INTO tenant_connections (tenant_id, snowflake_dsn)
+                            VALUES ($1, $2)
+                            ON CONFLICT (tenant_id) DO NOTHING
+                        """, new_tenant_id, encrypted_dsn)
+                    except Exception as e:
+                        logger.error(f"Failed to seed tenant connection for {new_tenant_id}: {e}")
                 logger.info(f"Provisioned new tenant: {new_tenant_id} for Clerk Org: {org_id}")
 
             elif event_type == "user.created":
@@ -148,6 +161,19 @@ async def clerk_webhook(
                         json.dumps(DEFAULT_METRIC_SYNONYMS),
                         json.dumps(DEFAULT_TABLE_SYNONYMS),
                     )
+                    
+                    if settings.snowflake_dsn and settings.fernet_key:
+                        try:
+                            from cryptography.fernet import Fernet
+                            f = Fernet(settings.fernet_key.encode())
+                            encrypted_dsn = f.encrypt(settings.snowflake_dsn.encode()).decode()
+                            await conn.execute("""
+                                INSERT INTO tenant_connections (tenant_id, snowflake_dsn)
+                                VALUES ($1, $2)
+                                ON CONFLICT (tenant_id) DO NOTHING
+                            """, new_tenant_id, encrypted_dsn)
+                        except Exception as e:
+                            logger.error(f"Failed to seed tenant connection for {new_tenant_id}: {e}")
                     
                     # Insert the user
                     await conn.execute(

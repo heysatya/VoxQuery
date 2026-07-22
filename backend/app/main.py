@@ -215,6 +215,24 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
     )
 
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    # Log the full traceback for any unhandled exception (500) so we can trace it immediately.
+    logger.exception("unhandled_exception path=%s method=%s error=%s", request.url.path, request.method, str(exc))
+    
+    code = ErrorCode.internal_error
+    return JSONResponse(
+        status_code=500,
+        content=ErrorEnvelope(
+            error={
+                "code": code.value,
+                "message": ERROR_MESSAGES[code],
+                "detail": None if settings.app_env == "production" else str(exc),
+            }
+        ).model_dump(mode="json"),
+    )
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     audit_health = await app.state.audit.check_health()

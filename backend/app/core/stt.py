@@ -71,17 +71,57 @@ class DeepgramSttProvider(SttProvider):
     The API key is accepted at construction but never logged.
     """
 
-    def __init__(self, api_key: str, logger: StructuredLogger | None = None) -> None:
+    # Plain-phrase Keyterm Prompting for nova-3 (verified against Deepgram's docs:
+    # the older `keywords` param with intensifier syntax like "ARR:2.5" is
+    # explicitly documented as NOT supported on nova-3 — "For Nova-3, use Keyterm
+    # Prompting instead." Keyterms are plain phrases with no boost syntax.
+    # https://developers.deepgram.com/docs/keyterm
+    DEFAULT_KEYTERMS: list[str] = [
+        "Snowflake",
+        "PostgreSQL",
+        "ARR",
+        "MRR",
+        "churn",
+        "cohort",
+        "tenant",
+        "schema",
+        "warehouse",
+        "pipeline",
+    ]
+
+    def __init__(
+        self,
+        api_key: str,
+        logger: StructuredLogger | None = None,
+        keyterms: list[str] | None = None,
+        mip_opt_out: bool = False,
+    ) -> None:
         self._api_key = api_key
         self._logger = logger or StructuredLogger()
+        # Falls back to a generic analytics/BI vocabulary; callers can pass
+        # tenant-specific terms (e.g. sourced from the existing tenant_glossary
+        # table already populated by sync_schema.py) for better per-tenant
+        # recall of domain-specific metric/table names.
+        self._keyterms = keyterms if keyterms is not None else self.DEFAULT_KEYTERMS
+        self._mip_opt_out = mip_opt_out
 
     async def stream(self, audio_frames: AsyncIterator[bytes]) -> AsyncIterator[object]:
         import asyncio
         import contextlib
         import json
+        from urllib.parse import quote
 
         import websockets
 
+        keyterm_params = "".join(f"&keyterm={quote(term)}" for term in self._keyterms)
+        # NOTE on data retention: Deepgram has no "no_log=true" parameter — that
+        # does not exist in their API. The real, documented control is
+        # mip_opt_out (Model Improvement Program opt-out), which excludes this
+        # request from Deepgram's model-training data retention in exchange for
+        # forgoing a program discount. It is NOT full "zero data retention" —
+        # per Deepgram's own docs, true ZDR requires an Enterprise Agreement.
+        # Left as an explicit opt-in setting since it has a real cost tradeoff.
+        mip_opt_out_param = "&mip_opt_out=true" if self._mip_opt_out else ""
         url = (
             "wss://api.deepgram.com/v1/listen"
             "?model=nova-3"
@@ -95,6 +135,8 @@ class DeepgramSttProvider(SttProvider):
             "&endpointing=500"
             "&utterance_end_ms=1000"
             "&vad_events=true"
+            f"{keyterm_params}"
+            f"{mip_opt_out_param}"
         )
         headers = {"Authorization": f"Token {self._api_key}"}
 
@@ -305,5 +347,9 @@ def build_stt_provider(settings: Settings, logger: StructuredLogger | None = Non
     if settings.stt_provider == "deepgram":
         if not settings.deepgram_api_key:
             raise RuntimeError("DEEPGRAM_API_KEY is required when STT_PROVIDER=deepgram.")
-        return DeepgramSttProvider(api_key=settings.deepgram_api_key, logger=logger)
+        return DeepgramSttProvider(
+            api_key=settings.deepgram_api_key,
+            logger=logger,
+            mip_opt_out=settings.deepgram_mip_opt_out,
+        )
     return FakeSttProvider()

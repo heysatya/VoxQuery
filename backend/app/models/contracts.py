@@ -97,14 +97,14 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.turn_processing: "Still processing - please wait.",
     ErrorCode.feedback_duplicate: "Feedback already recorded for this query.",
     ErrorCode.rag_unavailable: (
-        "Schema retrieval is temporarily unavailable. Check the RAG provider configuration and try again."
+        "The knowledge base (schema retrieval) is temporarily unreachable. Please try again in a few moments."
     ),
     ErrorCode.warehouse_timeout: (
-        "Query timed out - the data warehouse may need a moment to wake up. "
+        "Query timed out. Your data warehouse may need a moment to wake up. "
         "Try again in 30 seconds."
     ),
     ErrorCode.warehouse_error: (
-        "The data warehouse returned an error. Check that your schema access is configured correctly."
+        "The query failed to execute on your data warehouse. Please check your schema or database permissions."
     ),
     ErrorCode.tenant_not_provisioned: (
         "Your organization's data connection isn't set up yet. Please contact support."
@@ -113,9 +113,9 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
         "I couldn't generate a valid query even after clarification. "
         "Try rephrasing or use the text input."
     ),
-    ErrorCode.llm_unavailable: "The AI service is temporarily unavailable. Please try again in a moment.",
+    ErrorCode.llm_unavailable: "The AI reasoning service is temporarily unavailable due to high demand. Please try again shortly.",
     ErrorCode.rate_limit_exceeded: "Too many requests. Please try again later.",
-    ErrorCode.internal_error: "Something went wrong. Please try again.",
+    ErrorCode.internal_error: "An unexpected internal server error occurred. Our engineers have been notified. Please try again later.",
 }
 
 

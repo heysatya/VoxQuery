@@ -42,9 +42,11 @@ class DeepgramTTSProvider:
         self,
         api_key: str,
         logger: logging.LoggerAdapter | logging.Logger | None = None,
+        mip_opt_out: bool = False,
     ) -> None:
         self.api_key = api_key
         self.logger = logger or logging.getLogger("voxquery.tts")
+        self._mip_opt_out = mip_opt_out
 
     async def stream_audio(self, text: str) -> AsyncGenerator[bytes, None]:
         text = text.strip()
@@ -56,11 +58,12 @@ class DeepgramTTSProvider:
             "Content-Type": "application/json",
         }
         payload = {"text": text}
+        url = DEEPGRAM_AURA_URL + ("&mip_opt_out=true" if self._mip_opt_out else "")
 
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    DEEPGRAM_AURA_URL,
+                    url,
                     headers=headers,
                     json=payload,
                     timeout=DEEPGRAM_TTS_TIMEOUT,
@@ -96,5 +99,9 @@ def build_tts_provider(
     if settings.tts_provider == "deepgram":
         if not settings.deepgram_api_key:
             raise RuntimeError("DEEPGRAM_API_KEY must be set when TTS_PROVIDER=deepgram")
-        return DeepgramTTSProvider(settings.deepgram_api_key, logger=logger)
+        return DeepgramTTSProvider(
+            settings.deepgram_api_key,
+            logger=logger,
+            mip_opt_out=settings.deepgram_mip_opt_out,
+        )
     return FakeTTSProvider(logger=logger)

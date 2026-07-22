@@ -30,6 +30,7 @@ import {
   type UserNotice,
   type VoiceCaptureState
 } from "../state/interactionState";
+import { PcmChunkReassembler } from "../../lib/audio/pcmReassembler";
 
 export type VoxQueryAuthMode = "fake" | "clerk";
 
@@ -70,6 +71,7 @@ export type VoxQueryEngine = {
   recordingState: ReturnType<typeof mapVoiceToRecordingState>;
   audioAnalyserNode: AnalyserNode | null;
   isMuted: boolean;
+  isPaused: boolean;
   voiceDraft: VoiceDraft | null;
 
   feedbackSubmitted: boolean;
@@ -87,6 +89,8 @@ export type VoxQueryEngine = {
   resetConversation: () => Promise<void>;
   muteTTS: () => void;
   unmuteTTS: () => void;
+  pauseTTS: () => void;
+  resumeTTS: () => void;
 };
 
 const tenantId =
@@ -164,8 +168,15 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
   const ttsSocketRef = useRef<WebSocket | null>(null);
   const activeTtsSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextPlayTimeRef = useRef<number>(0);
+  const ttsGainNodeRef = useRef<GainNode | null>(null);
+  const ttsReassemblerRef = useRef<PcmChunkReassembler>(new PcmChunkReassembler());
   const [isMuted, setIsMuted] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [ttsState, setTtsState] = useState<TtsLifecycleState>("idle");
+
+  /** Ramp duration for mute/unmute/stop fades, matched to avoid audible clicks
+   * from an instantaneous gain or amplitude discontinuity. */
+  const GAIN_RAMP_SECONDS = 0.03;
 
   const isReady = useMemo(
     () => auth.ready && auth.signedIn && Boolean(session.sessionId),
@@ -240,9 +251,9 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     async function startSession() {
       try {
         await ensureSession();
-      } catch {
+      } catch (error) {
         if (!cancelled) {
-          setNotice("Could not create a local session. Is the backend running?");
+          setNotice(errorMessage(error, "Could not create a local session. Is the backend running?"), "error");
         }
       }
     }
@@ -251,6 +262,16 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       cancelled = true;
     };
   }, [ensureSession, setNotice]);
+
+  // The recording AudioContext is deliberately kept alive (suspended, not
+  // closed) across individual recordings for reuse — see recorderCleanup.
+  // Only fully release it when the hook itself unmounts.
+  useEffect(() => {
+    return () => {
+      closeRecordingAudioContext();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (typeof navigator === "undefined" || !navigator.permissions) {
@@ -339,7 +360,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
             setNotice(event.message, "error");
           }
         };
-        socket.onerror = () => setNotice("Pipeline event stream unavailable. Check that the backend is running.", "error");
+        socket.onerror = () => setNotice("Could not connect to the real-time event stream. Please check your network connection.", "error");
         socket.onclose = (event) => {
           if (event.code !== 4002) {
             return;
@@ -368,7 +389,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     audioStopAfterFlushRef.current = false;
     pendingAudioFramesRef.current = [];
     if (audioWorkletRef.current) {
-      if (audioWorkletRef.current && audioWorkletRef.current.disconnect) { try { audioWorkletRef.current.disconnect(); } catch (e) {} }
+      if (audioWorkletRef.current && audioWorkletRef.current.disconnect) { try { audioWorkletRef.current.disconnect(); } catch (e) { } }
       audioWorkletRef.current = null;
     }
     setAudioAnalyserNode(null);
@@ -376,11 +397,12 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
     }
-    if (audioContextRef.current) {
-      if (audioContextRef.current.state !== "closed") {
-        audioContextRef.current.close().catch(console.error);
-      }
-      audioContextRef.current = null;
+    // Suspend rather than close: the context (and its already-loaded worklet
+    // module) is reused on the next recording instead of being torn down and
+    // reconstructed from scratch, which previously added avoidable latency
+    // and overhead to every single mic click.
+    if (audioContextRef.current && audioContextRef.current.state === "running") {
+      audioContextRef.current.suspend().catch(console.error);
     }
     if (audioSocketRef.current) {
       const socket = audioSocketRef.current;
@@ -390,6 +412,16 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
         socket.close();
       }
     }
+  }
+
+  /** Fully tears down the recording AudioContext — only used on unmount, not
+   * between individual recordings (see recorderCleanup, which suspends and
+   * reuses it instead). */
+  function closeRecordingAudioContext() {
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      audioContextRef.current.close().catch(console.error);
+    }
+    audioContextRef.current = null;
   }
 
   async function startRecording() {
@@ -418,24 +450,16 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       setPartialTranscript("");
       stopTTS("idle");
       setVoiceState((state) => transitionVoiceState(state, "request_permission"));
+
+      // Open the backend audio WebSocket immediately, in parallel with the mic
+      // permission prompt and token fetch, rather than waiting for both to
+      // resolve first. The backend begins connecting to Deepgram as soon as it
+      // accepts+authenticates this socket, so this removes a full WS-handshake
+      // round-trip (browser<->backend) from the critical path before the user
+      // can start being transcribed, without pre-opening anything before the
+      // click (which would risk the backend's idle-timeout on a connection
+      // opened too far ahead of actual speech).
       const tokenPromise = auth.getToken();
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          autoGainControl: true,
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true
-        }
-      });
-      mediaStreamRef.current = stream;
-      setMicPermission("granted");
-
-      const token = await tokenPromise;
-      postTelemetry({ event: "stt.mic.permission", outcome: "granted", session_id: session.sessionId }, token).catch(console.error);
-
-      setVoiceState((state) => transitionVoiceState(state, "permission_granted"));
-      setNotice("Microphone access granted. Connecting...");
-
       const socket = new WebSocket(audioSocketUrl(session.sessionId));
       audioSocketRef.current = socket;
       pendingAudioFramesRef.current = [];
@@ -454,11 +478,15 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       };
 
       socket.onopen = () => {
-        socket.send(JSON.stringify({ event: "auth", token: token ?? "fake" }));
-        flushQueuedAudio();
-        if (audioWorkletRef.current) {
-          markRecording();
-        }
+        tokenPromise
+          .then((token) => {
+            socket.send(JSON.stringify({ event: "auth", token: token ?? "fake" }));
+            flushQueuedAudio();
+            if (audioWorkletRef.current) {
+              markRecording();
+            }
+          })
+          .catch(console.error);
       };
 
       socket.onmessage = (message) => {
@@ -497,11 +525,44 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
         recorderCleanup();
       };
 
-      try {
-        const audioContext = createBrowserAudioContext();
-        audioContextRef.current = audioContext;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          autoGainControl: true,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true
+        }
+      });
+      mediaStreamRef.current = stream;
+      setMicPermission("granted");
 
-        await audioContext.audioWorklet.addModule("/audio-processor.js");
+      const token = await tokenPromise;
+      postTelemetry({ event: "stt.mic.permission", outcome: "granted", session_id: session.sessionId }, token).catch(console.error);
+
+      setVoiceState((state) => transitionVoiceState(state, "permission_granted"));
+      setNotice("Microphone access granted. Connecting...");
+
+      try {
+        // Reuse a single AudioContext across recordings instead of creating and
+        // tearing one down on every click — avoids the setup/teardown latency
+        // and overhead of repeated AudioContext construction.
+        let audioContext = audioContextRef.current;
+        if (!audioContext || audioContext.state === "closed") {
+          // Request 16kHz directly: on browsers that honor it, the browser's
+          // native (anti-aliased) resampler does this work instead of the
+          // worklet's manual linear-interpolation downsample loop — the
+          // worklet already guards this correctly (downsample() short-circuits
+          // when inputRate === outputRate, and reads the real negotiated rate
+          // live via AudioWorkletGlobalScope.sampleRate), so browsers that
+          // don't honor the request (some older Safari/WebKit builds) safely
+          // fall back to the existing manual downsample instead of silently
+          // sending audio at the wrong implied rate.
+          audioContext = createBrowserAudioContext({ sampleRate: 16000 });
+          audioContextRef.current = audioContext;
+          await audioContext.audioWorklet.addModule("/audio-processor.js");
+        } else if (audioContext.state === "suspended") {
+          await audioContext.resume();
+        }
 
         const source = audioContext.createMediaStreamSource(stream);
         const analyser = audioContext.createAnalyser();
@@ -647,7 +708,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     };
     socket.onerror = () => {
       setVoiceState("capture_error");
-      setNotice("Fake voice WebSocket unavailable. Check that the backend is running.", "error");
+      setNotice("Could not connect to the fake voice service. Please check your network connection.", "error");
     };
     socket.onclose = () => setVoiceState((state) => (state === "finalizing" ? "idle" : state));
   }
@@ -703,7 +764,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     } catch (error) {
       setPipelineInFlight(false);
       setTurnState("recoverable_error");
-      setNotice(errorMessage(error, "Query failed. Check that the backend is running."), "error");
+      setNotice(errorMessage(error, "Failed to submit query. Please check your network connection and try again."), "error");
     }
   }
   async function submitCurrentQuery() {
@@ -795,9 +856,14 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
 
   function ensureTTSContext() {
     if (!ttsAudioContextRef.current || ttsAudioContextRef.current.state === "closed") {
-      ttsAudioContextRef.current = createBrowserAudioContext({ sampleRate: 16000 });
+      const ctx = createBrowserAudioContext({ sampleRate: 16000 });
+      ttsAudioContextRef.current = ctx;
+      const gain = ctx.createGain();
+      gain.gain.value = isMuted ? 0 : 1;
+      gain.connect(ctx.destination);
+      ttsGainNodeRef.current = gain;
     }
-    if (ttsAudioContextRef.current.state === "suspended") {
+    if (ttsAudioContextRef.current.state === "suspended" && !isPaused) {
       ttsAudioContextRef.current.resume().catch(console.error);
     }
     return ttsAudioContextRef.current;
@@ -810,11 +876,13 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       ttsSocketRef.current.close();
       ttsSocketRef.current = null;
     }
-    setIsMuted(false);
+    ttsReassemblerRef.current.reset();
+    setIsPaused(false);
     setTtsState("loading");
 
     try {
       const audioCtx = ensureTTSContext();
+      const gainNode = ttsGainNodeRef.current;
       nextPlayTimeRef.current = audioCtx.currentTime + 0.1;
 
       const socket = new WebSocket(ttsSocketUrl(session.sessionId, turnId));
@@ -827,15 +895,15 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       socket.onmessage = (event) => {
         if (event.data && typeof event.data === "string") return;
         if (ttsAudioContextRef.current?.state === "closed") return;
-        
+
         if (!(event.data instanceof ArrayBuffer)) {
           return;
         }
 
-        const buffer = event.data as ArrayBuffer;
-        const safeBuffer = buffer.byteLength % 2 !== 0 ? buffer.slice(0, buffer.byteLength - 1) : buffer;
-        const int16Array = new Int16Array(safeBuffer);
-        
+        // Reassemble across chunk boundaries instead of truncating a trailing
+        // odd byte, which previously corrupted samples split across two
+        // WebSocket messages and produced audible clicks/static.
+        const int16Array = ttsReassemblerRef.current.push(event.data as ArrayBuffer);
         if (int16Array.length === 0) return;
 
         setTtsState("playing");
@@ -850,8 +918,8 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
 
           const source = audioCtx.createBufferSource();
           source.buffer = audioBuffer;
-          source.connect(audioCtx.destination);
-        
+          source.connect(gainNode ?? audioCtx.destination);
+
           activeTtsSourcesRef.current.add(source);
           source.onended = () => {
             activeTtsSourcesRef.current.delete(source);
@@ -881,32 +949,107 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     }
   }
 
-  function stopTTS(nextState: TtsLifecycleState = "ended", shouldMute = true) {
+  function stopTTS(nextState: TtsLifecycleState = "ended", shouldMute = false) {
+    const audioCtx = ttsAudioContextRef.current;
+    const gainNode = ttsGainNodeRef.current;
+
     if (shouldMute) {
       setIsMuted(true);
     }
+    setIsPaused(false);
+
     if (ttsSocketRef.current) {
       ttsSocketRef.current.close();
       ttsSocketRef.current = null;
     }
-    activeTtsSourcesRef.current.forEach((source) => {
-      try {
-        source.stop();
-      } catch (e) {
-        // ignore if already stopped
-      }
-    });
-    activeTtsSourcesRef.current.clear();
+
+    if (audioCtx && gainNode && activeTtsSourcesRef.current.size > 0) {
+      // Fade out over GAIN_RAMP_SECONDS before cutting playback, instead of an
+      // instantaneous stop, which truncates the waveform at an arbitrary,
+      // non-zero amplitude and produces an audible click.
+      const now = audioCtx.currentTime;
+      gainNode.gain.cancelScheduledValues(now);
+      gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+      gainNode.gain.linearRampToValueAtTime(0, now + GAIN_RAMP_SECONDS);
+
+      const sourcesToStop = Array.from(activeTtsSourcesRef.current);
+      window.setTimeout(() => {
+        sourcesToStop.forEach((source) => {
+          try {
+            source.stop();
+          } catch (e) {
+            // ignore if already stopped
+          }
+        });
+        activeTtsSourcesRef.current.clear();
+        // Restore gain for the next playback, honoring current mute state.
+        if (ttsGainNodeRef.current && ttsAudioContextRef.current) {
+          const restoreCtx = ttsAudioContextRef.current;
+          ttsGainNodeRef.current.gain.setValueAtTime(isMuted ? 0 : 1, restoreCtx.currentTime);
+        }
+      }, GAIN_RAMP_SECONDS * 1000 + 10);
+    } else {
+      activeTtsSourcesRef.current.forEach((source) => {
+        try {
+          source.stop();
+        } catch (e) {
+          // ignore if already stopped
+        }
+      });
+      activeTtsSourcesRef.current.clear();
+    }
+
+    ttsReassemblerRef.current.reset();
     nextPlayTimeRef.current = 0;
     setTtsState(nextState);
   }
 
+  /** True mute: ramps playback volume to 0 without stopping generation or
+   * losing playback position. Audio keeps arriving and queuing in the
+   * background — unmuteTTS() ramps volume back up seamlessly. */
   function muteTTS() {
-    stopTTS();
+    setIsMuted(true);
+    const audioCtx = ttsAudioContextRef.current;
+    const gainNode = ttsGainNodeRef.current;
+    if (audioCtx && gainNode) {
+      const now = audioCtx.currentTime;
+      gainNode.gain.cancelScheduledValues(now);
+      gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+      gainNode.gain.linearRampToValueAtTime(0, now + GAIN_RAMP_SECONDS);
+    }
   }
 
+  /** Ramps playback volume back up. If nothing is currently playing, this
+   * just clears the muted flag so the next turn starts audible. */
   function unmuteTTS() {
     setIsMuted(false);
+    const audioCtx = ttsAudioContextRef.current;
+    const gainNode = ttsGainNodeRef.current;
+    if (audioCtx && gainNode) {
+      const now = audioCtx.currentTime;
+      gainNode.gain.cancelScheduledValues(now);
+      gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+      gainNode.gain.linearRampToValueAtTime(1, now + GAIN_RAMP_SECONDS);
+    }
+  }
+
+  /** Genuine pause: suspends the AudioContext clock itself, so all scheduled
+   * buffer sources freeze in place rather than being destroyed. resumeTTS()
+   * continues from exactly where playback left off. */
+  function pauseTTS() {
+    const audioCtx = ttsAudioContextRef.current;
+    if (!audioCtx || audioCtx.state !== "running") return;
+    audioCtx.suspend().catch(console.error);
+    setIsPaused(true);
+    setTtsState("paused");
+  }
+
+  function resumeTTS() {
+    const audioCtx = ttsAudioContextRef.current;
+    if (!audioCtx || audioCtx.state !== "suspended") return;
+    audioCtx.resume().catch(console.error);
+    setIsPaused(false);
+    setTtsState((state) => (state === "paused" ? "playing" : state));
   }
 
   async function submitFeedback(rating?: -1 | 1) {
@@ -950,6 +1093,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     recordingState,
     audioAnalyserNode,
     isMuted,
+    isPaused,
     voiceDraft,
     feedbackSubmitted,
     feedbackRating,
@@ -964,6 +1108,9 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     submitFeedback,
     resetConversation,
     muteTTS,
-    unmuteTTS
+    unmuteTTS,
+    pauseTTS,
+    resumeTTS
   };
 }
+

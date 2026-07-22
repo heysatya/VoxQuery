@@ -6,7 +6,7 @@ import concurrent.futures
 from threading import local as _ThreadLocal
 
 import snowflake.connector
-from app.models.contracts import ChartType, ResultPayload, ResultShape, SchemaTable, ColumnInfo
+from app.models.contracts import ChartType, ResultPayload, ResultShape, SchemaTable, ColumnInfo, ApiError, ErrorCode
 from app.warehouse.connector import WarehouseConnector
 from app.warehouse.sql_policy import SqlPolicyError, canonicalize_readonly_sql
 
@@ -79,9 +79,7 @@ class SnowflakeConnectionPool:
                 columns = [d[0].lower() for d in cur.description] if cur.description else []
                 return rows, columns, cur.rowcount
         except snowflake.connector.errors.OperationalError as e:
-            raise RuntimeError(
-                f"Snowflake warehouse error: {type(e).__name__}"
-            ) from e
+            raise ApiError(ErrorCode.warehouse_error, status_code=502, detail=f"Snowflake warehouse error: {type(e).__name__}") from e
 
     async def execute(self, sql: str, snowflake_role: str) -> tuple:
         """Async entry point — dispatches to the pre-warmed thread pool."""
@@ -153,15 +151,18 @@ class SnowflakeWarehouseConnector(WarehouseConnector):
                     row_count = cur.rowcount
                     return rows, columns, row_count
         except snowflake.connector.errors.OperationalError as e:
-            # Re-raise as structured timeout / warehouse error — never leak the DSN
             redacted = _redact_dsn(self.dsn)
-            raise RuntimeError(
-                f"Snowflake warehouse timeout or connection error (DSN redacted: {redacted}): {type(e).__name__}"
+            raise ApiError(
+                ErrorCode.warehouse_error,
+                status_code=502,
+                detail=f"Snowflake warehouse timeout or connection error (DSN redacted: {redacted}): {type(e).__name__}"
             ) from e
         except Exception as e:
             redacted = _redact_dsn(self.dsn)
-            raise RuntimeError(
-                f"Snowflake warehouse error (DSN redacted: {redacted}): {type(e).__name__} - {str(e)}"
+            raise ApiError(
+                ErrorCode.warehouse_error,
+                status_code=502,
+                detail=f"Snowflake warehouse error (DSN redacted: {redacted}): {type(e).__name__} - {str(e)}"
             ) from e
 
     async def execute_readonly(self, sql: str, *, snowflake_role: str, tenant_id: UUID | None = None) -> tuple[ResultPayload, ResultShape]:
@@ -183,8 +184,10 @@ class SnowflakeWarehouseConnector(WarehouseConnector):
                 )
         except asyncio.TimeoutError:
             redacted = _redact_dsn(self.dsn)
-            raise RuntimeError(
-                f"Snowflake query timed out after {self.timeout_seconds}s (DSN redacted: {redacted})."
+            raise ApiError(
+                ErrorCode.warehouse_timeout,
+                status_code=504,
+                detail=f"Snowflake query timed out after {self.timeout_seconds}s (DSN redacted: {redacted})."
             )
 
         list_rows = [list(r) for r in rows]

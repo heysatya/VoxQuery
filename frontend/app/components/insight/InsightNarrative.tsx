@@ -2,16 +2,24 @@
 
 import React from "react";
 import { motion } from "framer-motion";
-import { Volume2, VolumeX } from "lucide-react";
+import { Volume2, VolumeX, Pause, Play } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
 type InsightNarrativeProps = {
   text: string;
-  isMuted: boolean;
-  onToggleMute: () => void;
+  isMuted?: boolean;
+  isPaused?: boolean;
+  onToggleMute?: () => void;
+  onTogglePause?: () => void;
 };
 
-export function InsightNarrative({ text, isMuted, onToggleMute }: InsightNarrativeProps) {
+export function InsightNarrative({
+  text,
+  isMuted = false,
+  isPaused = false,
+  onToggleMute,
+  onTogglePause
+}: InsightNarrativeProps) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -32,14 +40,30 @@ export function InsightNarrative({ text, isMuted, onToggleMute }: InsightNarrati
           {text}
         </ReactMarkdown>
       </div>
-      <button
-        type="button"
-        onClick={onToggleMute}
-        className="mt-4 flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--accent-blue)] transition-colors"
-      >
-        {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-[var(--accent-blue)]" />}
-        <span>{isMuted ? "Voice summary off" : "Playing voice summary"}</span>
-      </button>
+      
+      <div className="mt-4 flex items-center gap-4">
+        {onTogglePause && (
+          <button
+            type="button"
+            onClick={onTogglePause}
+            className="flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--accent-blue)] transition-colors px-3 py-1.5 rounded-lg bg-[var(--bg-glass)] border border-[var(--border-glass)]"
+          >
+            {isPaused ? <Play className="w-4 h-4 text-[var(--accent-green)]" /> : <Pause className="w-4 h-4 text-[var(--accent-blue)]" />}
+            <span>{isPaused ? "Resume voice" : "Pause voice"}</span>
+          </button>
+        )}
+
+        {onToggleMute && (
+          <button
+            type="button"
+            onClick={onToggleMute}
+            className="flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--accent-blue)] transition-colors px-3 py-1.5 rounded-lg bg-[var(--bg-glass)] border border-[var(--border-glass)]"
+          >
+            {isMuted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4 text-[var(--accent-blue)]" />}
+            <span>{isMuted ? "Muted" : "Mute"}</span>
+          </button>
+        )}
+      </div>
     </motion.div>
   );
 }

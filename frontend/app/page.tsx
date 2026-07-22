@@ -18,7 +18,7 @@ import { getStatusLabel } from "./state/interactionState";
 
 const authMode = process.env.NEXT_PUBLIC_AUTH_MODE ?? "fake";
 
-/* ── Auth wrappers (unchanged contracts) ─────────────────────── */
+/* -- Auth wrappers (unchanged contracts) ----------------------- */
 
 export default function HomePage() {
   if (authMode === "clerk") return <ClerkHomePage />;
@@ -286,7 +286,9 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               <InsightNarrative
                 text={engine.lastResult.resultData.tts_text}
                 isMuted={engine.isMuted}
+                isPaused={engine.isPaused}
                 onToggleMute={engine.isMuted ? engine.unmuteTTS : engine.muteTTS}
+                onTogglePause={engine.isPaused ? engine.resumeTTS : engine.pauseTTS}
               />
 
               {/* Chart card */}

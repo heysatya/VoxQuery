@@ -12,7 +12,7 @@ import {
   resultRowSummary,
 } from "../../../lib/resultSemantics";
 
-/* ── Trust Panel (Phase 4.1) ───────────────────────────────────── */
+/* -- Trust Panel (Phase 4.1) ------------------------------------- */
 
 type TrustPanelProps = {
   result: LastResult;

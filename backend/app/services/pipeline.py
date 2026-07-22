@@ -3,7 +3,10 @@ from typing import Any
 import asyncio
 import hashlib
 import json
+import logging
 from time import perf_counter
+
+logger = logging.getLogger(__name__)
 from uuid import UUID
 
 from app.audit.store import AuditStore, AuditClarification
@@ -198,7 +201,13 @@ class PipelineOrchestrator:
                         message=ERROR_MESSAGES[ErrorCode.internal_error],
                     ),
                 )
-                print(f"BACKGROUND EXCEPTION: {exc}")
+                logger.exception(
+                    "Background pipeline turn failed: turn_id=%s session_id=%s tenant_id=%s error=%s",
+                    turn.turn_id,
+                    session.session_id,
+                    session.tenant_id,
+                    str(exc)
+                )
                 raise exc
             finally:
                 self._in_flight.discard(session.session_id)

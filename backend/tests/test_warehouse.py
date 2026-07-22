@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import snowflake.connector as sf_connector
 
-from app.models.contracts import SchemaTable, ColumnInfo
+from app.models.contracts import SchemaTable, ColumnInfo, ApiError
 from app.warehouse.sql_policy import SqlPolicyError, canonicalize_readonly_sql, build_allowlist, SchemaAllowlist
 from app.warehouse.snowflake import SnowflakeWarehouseConnector, _redact_dsn
 
@@ -238,18 +238,14 @@ async def test_snowflake_connector_timeout_returns_structured_error():
         timeout_seconds=1
     )
 
-    # Simulate a blocking call that exceeds the timeout
-    async def slow_execute(*args, **kwargs):
-        await asyncio.sleep(10)
-
-    with patch("asyncio.to_thread", new=AsyncMock(side_effect=asyncio.TimeoutError())):
-        with pytest.raises(RuntimeError) as exc_info:
+    with patch("asyncio.to_thread", side_effect=asyncio.TimeoutError()):
+        with pytest.raises(ApiError) as exc_info:
             await connector.execute_readonly(
                 "SELECT region, revenue FROM sales LIMIT 10000",
                 snowflake_role="analyst"
             )
 
-    error_msg = str(exc_info.value)
+    error_msg = exc_info.value.detail or str(exc_info.value)
     # Error message must mention timeout
     assert "timed out" in error_msg.lower()
     # Error message must NOT contain the raw password
@@ -268,13 +264,13 @@ async def test_snowflake_connector_dsn_redacted_in_errors(mock_connect):
         dsn="snowflake://prod_user:highly_secret_pw@acme.snowflakecomputing.com/prod/analytics"
     )
 
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(ApiError) as exc_info:
         await connector.execute_readonly(
             "SELECT * FROM orders LIMIT 10000",
             snowflake_role="readonly_role"
         )
 
-    error_msg = str(exc_info.value)
+    error_msg = exc_info.value.detail or str(exc_info.value)
     assert "highly_secret_pw" not in error_msg
     assert "prod_user" in error_msg  # user prefix is preserved for debugging
 

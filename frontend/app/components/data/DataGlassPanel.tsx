@@ -24,7 +24,7 @@ import {
 } from "recharts";
 import { TrustPanel } from "./TrustPanel";
 
-/* ── Chart Renderer ────────────────────────────────────────────── */
+/* -- Chart Renderer ---------------------------------------------- */
 
 function ChartRenderer({ type, result, onDrillDown }: { type: ChartType; result: LastResult["resultData"]; onDrillDown?: (query: string) => void }) {
   const data = result.result;

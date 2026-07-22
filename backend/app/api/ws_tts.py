@@ -97,7 +97,7 @@ async def tts_socket(
         except Exception:
             pass
     except Exception as exc:
-        logger.error(f"TTS streaming error: {exc}")
+        logger.exception("TTS streaming error: %s", str(exc))
         telemetry.emit("tts.error", tier=2, error_type="relay")
         close_code = 1011
         try:
@@ -113,3 +113,4 @@ async def tts_socket(
             pass
     finally:
         telemetry.emit("tts.ws.lifecycle", tier=2, action="closed", close_code=close_code)
+
