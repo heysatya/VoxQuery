@@ -7,15 +7,15 @@ import { Sun, TrendingUp, TrendingDown, AlertTriangle, Sparkles, ChevronRight, X
 export type BriefingKpi = {
   label: string;
   value: string;
-  change_pct: float;
+  change_pct: number;
   trend: "up" | "down" | "neutral";
   insight: string;
 };
 
 export type BriefingAnomaly = {
   severity: "warning" | "critical" | "info";
-  title: str;
-  description: str;
+  title: string;
+  description: string;
 };
 
 export type ExecutiveBriefingData = {
