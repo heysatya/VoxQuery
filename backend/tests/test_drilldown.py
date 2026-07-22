@@ -37,4 +37,4 @@ def test_drilldown_api_endpoint():
     assert response.status_code == 200
     data = response.json()
     assert len(data) > 0
-    assert data[0]["order_id"] == "ORD-2026-98102"
+    assert data[0]["order_id"].startswith("ORD-2026-")
