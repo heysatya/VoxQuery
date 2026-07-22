@@ -17,6 +17,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.briefing import router as briefing_router
 from app.api.rest import router as rest_router
 from app.api.ws_audio import router as ws_audio_router
 from app.api.ws_pipeline import router as ws_pipeline_router
@@ -250,3 +251,4 @@ app.include_router(ws_audio_router)
 app.include_router(ws_tts_router)
 app.include_router(telemetry_router)
 app.include_router(webhooks_router)
+app.include_router(briefing_router)

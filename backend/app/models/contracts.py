@@ -630,3 +630,27 @@ class TurnRecord(BaseModel):
 
 def _normalize_transcript(value: str) -> str:
     return " ".join(value.strip().casefold().split())
+
+
+class BriefingKpi(BaseModel):
+    label: str
+    value: str
+    change_pct: float
+    trend: Literal["up", "down", "neutral"]
+    insight: str
+
+
+class BriefingAnomaly(BaseModel):
+    severity: Literal["warning", "critical", "info"]
+    title: str
+    description: str
+
+
+class ExecutiveBriefingResponse(BaseModel):
+    date: str
+    greeting: str
+    kpis: list[BriefingKpi]
+    summary_narrative: str
+    anomalies: list[BriefingAnomaly]
+    proactive_insights: list[str]
+

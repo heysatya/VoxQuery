@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { RotateCcw } from "lucide-react";
 import { useVoxQuerySession, type VoxQueryAuthRelay } from "./hooks/useVoxQuerySession";
 import { VoiceVisualizer } from "./components/hero/VoiceVisualizer";
+import { MorningBriefingCard } from "./components/briefing/MorningBriefingCard";
 import { DataGlassPanel } from "./components/data/DataGlassPanel";
 import { InsightNarrative } from "./components/insight/InsightNarrative";
 import { FollowUpSuggestions } from "./components/insight/FollowUpSuggestions";
@@ -121,8 +122,15 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0, y: -20 }}
               transition={{ duration: 0.4 }}
-              className="flex-1 flex flex-col items-center justify-center min-h-[80vh] max-w-2xl w-full"
+              className="flex-1 flex flex-col items-center justify-center min-h-[80vh] max-w-2xl w-full pt-6"
             >
+              <MorningBriefingCard
+                onSelectInsight={(q) => {
+                  engine.setSubmittedText(q);
+                  engine.submitQuery(q);
+                }}
+              />
+
               <VoiceVisualizer
                 state={engine.recordingState}
                 analyser={engine.audioAnalyserNode}
