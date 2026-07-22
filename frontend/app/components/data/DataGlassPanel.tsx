@@ -98,6 +98,27 @@ function ChartRenderer({ type, result, onDrillDown }: { type: ChartType; result:
     onDrillDown(`Tell me more about ${data.activeLabel}`);
   };
 
+  // Z-score statistical outlier detection
+  const outlierIndexes = React.useMemo(() => {
+    if (!yKeys || yKeys.length === 0) return new Set<number>();
+    const values = chartData.map((row) => {
+      const v = row[yKeys[0]];
+      return typeof v === "number" ? v : parseFloat(String(v)) || 0;
+    });
+    if (values.length < 3) return new Set<number>();
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
+    const stdDev = Math.sqrt(variance);
+    if (stdDev === 0) return new Set<number>();
+    const outliers = new Set<number>();
+    values.forEach((v, idx) => {
+      if (Math.abs(v - mean) / stdDev > 1.5) {
+        outliers.add(idx);
+      }
+    });
+    return outliers;
+  }, [chartData, yKeys]);
+
   if (type === "line") {
     return (
       <div className="h-72 w-full">
@@ -108,7 +129,27 @@ function ChartRenderer({ type, result, onDrillDown }: { type: ChartType; result:
             <YAxis axisLine={false} tickLine={false} tick={{ fill: "#8B8FA3", fontSize: 12 }} />
             <RechartsTooltip contentStyle={tooltipStyle} />
             {yKeys.map((key, i) => (
-              <Line key={key} type="monotone" dataKey={key} stroke={colors[i % 3]} strokeWidth={2.5} dot={{ r: 3, strokeWidth: 2, fill: "#0C0D11" }} activeDot={{ r: 5 }} />
+              <Line
+                key={key}
+                type="monotone"
+                dataKey={key}
+                stroke={colors[i % 3]}
+                strokeWidth={2.5}
+                dot={(props: any) => {
+                  const { cx, cy, index } = props;
+                  const isAnomaly = outlierIndexes.has(index);
+                  if (isAnomaly) {
+                    return (
+                      <g key={index}>
+                        <circle cx={cx} cy={cy} r={8} fill="#EF4444" opacity={0.3} className="animate-pulse" />
+                        <circle cx={cx} cy={cy} r={4} fill="#EF4444" stroke="#ffffff" strokeWidth={1.5} />
+                      </g>
+                    );
+                  }
+                  return <circle key={index} cx={cx} cy={cy} r={3} fill="#0C0D11" stroke={colors[i % 3]} strokeWidth={2} />;
+                }}
+                activeDot={{ r: 6 }}
+              />
             ))}
           </LineChart>
         </ResponsiveContainer>
@@ -125,8 +166,28 @@ function ChartRenderer({ type, result, onDrillDown }: { type: ChartType; result:
           <YAxis axisLine={false} tickLine={false} tick={{ fill: "#8B8FA3", fontSize: 12 }} />
           <RechartsTooltip cursor={{ fill: "rgba(255,255,255,0.03)" }} contentStyle={tooltipStyle} />
           {yKeys.map((key, i) => (
-            <Bar key={key} dataKey={key} fill={colors[i % 3]} radius={[6, 6, 0, 0]} />
+            <Bar key={key} dataKey={key} fill={colors[i % 3]} radius={[6, 6, 0, 0]}>
+              {chartData.map((entry, index) => {
+                const isAnomaly = outlierIndexes.has(index);
+                return (
+                  <React.Fragment key={`cell-${index}`}>
+                    {isAnomaly ? (
+                      // Glowing Red/Rose for Anomaly bars
+                      <rect fill="url(#anomaly-grad)" />
+                    ) : (
+                      <rect fill={colors[i % 3]} />
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </Bar>
           ))}
+          <defs>
+            <linearGradient id="anomaly-grad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#F43F5E" />
+              <stop offset="100%" stopColor="#BE123C" />
+            </linearGradient>
+          </defs>
         </BarChart>
       </ResponsiveContainer>
     </div>
