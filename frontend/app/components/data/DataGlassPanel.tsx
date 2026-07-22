@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { motion } from "framer-motion";
-import { ThumbsDown, ThumbsUp, Code, Download, ChevronDown, Link, Printer } from "lucide-react";
+import { ThumbsDown, ThumbsUp, Code, Download, ChevronDown, Link, Printer, Pin } from "lucide-react";
 import { format as formatSql } from "sql-formatter";
 import { cn } from "../../../lib/utils";
 import type { LastResult } from "../../../lib/types";
@@ -206,6 +206,7 @@ type DataGlassPanelProps = {
   onUnmute: () => void;
   onDrillDown?: (query: string) => void;
   onDrilldownOpen?: (turnId: string) => void;
+  onPin?: (result: LastResult) => void;
 };
 
 export function DataGlassPanel({
@@ -214,6 +215,7 @@ export function DataGlassPanel({
   onFeedback,
   onDrillDown,
   onDrilldownOpen,
+  onPin,
 }: DataGlassPanelProps) {
   const [showSql, setShowSql] = useState(false);
   const [userChartOverride, setUserChartOverride] = useState<string | null>(null);
@@ -343,6 +345,18 @@ export function DataGlassPanel({
               title="Drilldown Raw Data"
             >
               <Code className="h-4 w-4" />
+            </button>
+          )}
+
+          {/* Pin to Workspace */}
+          {onPin && (
+            <button
+              type="button"
+              onClick={() => onPin(result)}
+              className="p-2 text-[var(--text-muted)] hover:text-[var(--accent-blue)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] rounded-lg transition-colors"
+              title="Pin to Workspace"
+            >
+              <Pin className="h-4 w-4" />
             </button>
           )}
 

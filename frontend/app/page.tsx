@@ -9,6 +9,7 @@ import { VoiceVisualizer } from "./components/hero/VoiceVisualizer";
 import { MorningBriefingCard } from "./components/briefing/MorningBriefingCard";
 import { ExecutiveMemoryGraph } from "./components/memory/ExecutiveMemoryGraph";
 import { DataGlassPanel } from "./components/data/DataGlassPanel";
+import { ExecutiveWorkspace } from "./components/workspace/ExecutiveWorkspace";
 import { RowDrilldownModal } from "./components/data/RowDrilldownModal";
 import { InsightNarrative } from "./components/insight/InsightNarrative";
 import { FollowUpSuggestions } from "./components/insight/FollowUpSuggestions";
@@ -94,6 +95,21 @@ const STARTER_QUESTIONS = [
 function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
   const engine = useVoxQuerySession(auth);
   const [drilldownTurnId, setDrilldownTurnId] = React.useState<string | null>(null);
+  const [pinnedWidgets, setPinnedWidgets] = React.useState<any[]>([]);
+
+  const handlePinWidget = (result: any) => {
+    setPinnedWidgets((prev) => {
+      if (prev.some((w) => w.id === result.turnId)) return prev;
+      return [
+        ...prev,
+        {
+          id: result.turnId,
+          title: `Trend: ${result.resultData.result.columns.slice(1).join(", ")} by ${result.resultData.result.columns[0]}`,
+          result,
+        },
+      ];
+    });
+  };
 
   // Phase 3.2: derive visible state from explicit lifecycle dimensions
   const isReviewing = engine.voiceState === "reviewing";
@@ -166,6 +182,13 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                     {q}
                   </button>
                 ))}
+              </div>
+
+              <div className="mt-12 w-full">
+                <ExecutiveWorkspace
+                  pinnedWidgets={pinnedWidgets}
+                  onRemoveWidget={(id) => setPinnedWidgets((prev) => prev.filter((w) => w.id !== id))}
+                />
               </div>
 
               {/* Phase 3.3: show error notice in ready state if a prior query failed */}
@@ -312,6 +335,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 onUnmute={engine.unmuteTTS}
                 onDrillDown={engine.submitQuery}
                 onDrilldownOpen={setDrilldownTurnId}
+                onPin={handlePinWidget}
               />
 
               {/* Follow-up suggestions */}
