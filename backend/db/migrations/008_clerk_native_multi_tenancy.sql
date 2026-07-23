@@ -1,55 +1,52 @@
--- Step 1: Remove dependent views and existing FK constraints referencing tenants.id and users.id
+-- Migration 008: Clerk-Native Multi-Tenancy (String IDs, Tenant Memberships, Composite Snowflake Roles)
+
+-- Step 1: Remove dependent views
 DROP VIEW IF EXISTS admin_glossary_view CASCADE;
 DROP VIEW IF EXISTS admin_workspaces_view CASCADE;
 
-ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_tenant_id_fkey;
-ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_user_id_fkey;
+-- Step 1b: Dynamically drop ALL foreign key constraints referencing tenants.id or users.id across ALL tables
+DO $$
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN (
+        SELECT DISTINCT tc.table_name, tc.constraint_name
+        FROM information_schema.table_constraints AS tc
+        JOIN information_schema.key_column_usage AS kcu
+          ON tc.constraint_name = kcu.constraint_name
+        JOIN information_schema.constraint_column_usage AS ccu
+          ON ccu.constraint_name = tc.constraint_name
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND ccu.table_name IN ('tenants', 'users')
+    ) LOOP
+        EXECUTE format('ALTER TABLE %I DROP CONSTRAINT IF EXISTS %I;', r.table_name, r.constraint_name);
+    END LOOP;
+END $$;
 
-ALTER TABLE turns DROP CONSTRAINT IF EXISTS turns_tenant_id_fkey;
-ALTER TABLE turns DROP CONSTRAINT IF EXISTS turns_user_id_fkey;
-
-ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_tenant_id_fkey;
-ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_user_id_fkey;
-
-ALTER TABLE user_snowflake_roles DROP CONSTRAINT IF EXISTS user_snowflake_roles_tenant_id_fkey;
-ALTER TABLE user_snowflake_roles DROP CONSTRAINT IF EXISTS user_snowflake_roles_user_id_fkey;
-
-ALTER TABLE tenant_connections DROP CONSTRAINT IF EXISTS tenant_connections_tenant_id_fkey;
-ALTER TABLE schema_chunks DROP CONSTRAINT IF EXISTS schema_chunks_tenant_id_fkey;
-ALTER TABLE tenant_glossary DROP CONSTRAINT IF EXISTS tenant_glossary_tenant_id_fkey;
-
-ALTER TABLE pinned_widgets DROP CONSTRAINT IF EXISTS pinned_widgets_tenant_id_fkey;
-ALTER TABLE pinned_widgets DROP CONSTRAINT IF EXISTS pinned_widgets_user_id_fkey;
-
-ALTER TABLE briefing_send_log DROP CONSTRAINT IF EXISTS briefing_send_log_tenant_id_fkey;
-ALTER TABLE briefing_send_log DROP CONSTRAINT IF EXISTS briefing_send_log_user_id_fkey;
-
--- Step 2: Convert ID columns in tenants and users to TEXT
-ALTER TABLE tenants ALTER COLUMN id TYPE TEXT USING id::text;
-ALTER TABLE users ALTER COLUMN id TYPE TEXT USING id::text;
-
--- Step 3: Convert foreign key columns across all tables to TEXT
-ALTER TABLE conversations ALTER COLUMN tenant_id TYPE TEXT USING tenant_id::text;
-ALTER TABLE conversations ALTER COLUMN user_id TYPE TEXT USING user_id::text;
-
-ALTER TABLE turns ALTER COLUMN tenant_id TYPE TEXT USING tenant_id::text;
-ALTER TABLE turns ALTER COLUMN user_id TYPE TEXT USING user_id::text;
-
-ALTER TABLE sessions ALTER COLUMN tenant_id TYPE TEXT USING tenant_id::text;
-ALTER TABLE sessions ALTER COLUMN user_id TYPE TEXT USING user_id::text;
-
-ALTER TABLE user_snowflake_roles ALTER COLUMN tenant_id TYPE TEXT USING tenant_id::text;
-ALTER TABLE user_snowflake_roles ALTER COLUMN user_id TYPE TEXT USING user_id::text;
-
-ALTER TABLE tenant_connections ALTER COLUMN tenant_id TYPE TEXT USING tenant_id::text;
-ALTER TABLE schema_chunks ALTER COLUMN tenant_id TYPE TEXT USING tenant_id::text;
-ALTER TABLE tenant_glossary ALTER COLUMN tenant_id TYPE TEXT USING tenant_id::text;
-
-ALTER TABLE pinned_widgets ALTER COLUMN tenant_id TYPE TEXT USING tenant_id::text;
-ALTER TABLE pinned_widgets ALTER COLUMN user_id TYPE TEXT USING user_id::text;
-
-ALTER TABLE briefing_send_log ALTER COLUMN tenant_id TYPE TEXT USING tenant_id::text;
-ALTER TABLE briefing_send_log ALTER COLUMN user_id TYPE TEXT USING user_id::text;
+-- Step 2 & 3: Dynamically convert ANY tenant_id or user_id column across ALL tables to TEXT
+DO $$
+DECLARE
+    r RECORD;
+BEGIN
+    -- Convert tenant_id and user_id in all public tables
+    FOR r IN (
+        SELECT table_name, column_name
+        FROM information_schema.columns
+        WHERE column_name IN ('tenant_id', 'user_id')
+          AND table_schema = 'public'
+          AND data_type != 'text'
+    ) LOOP
+        EXECUTE format('ALTER TABLE %I ALTER COLUMN %I TYPE TEXT USING %I::text;', r.table_name, r.column_name, r.column_name);
+    END LOOP;
+    
+    -- Convert primary keys tenants.id and users.id to TEXT
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'tenants' AND column_name = 'id' AND data_type != 'text') THEN
+        ALTER TABLE tenants ALTER COLUMN id TYPE TEXT USING id::text;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'id' AND data_type != 'text') THEN
+        ALTER TABLE users ALTER COLUMN id TYPE TEXT USING id::text;
+    END IF;
+END $$;
 
 -- Step 4: Create tenant_memberships table
 CREATE TABLE IF NOT EXISTS tenant_memberships (
@@ -88,25 +85,43 @@ ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;
 DROP INDEX IF EXISTS users_email_key;
 CREATE UNIQUE INDEX IF NOT EXISTS users_active_email_key ON users(email) WHERE deleted_at IS NULL;
 
--- Step 5: Re-add FK constraints
-ALTER TABLE conversations ADD CONSTRAINT conversations_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-ALTER TABLE conversations ADD CONSTRAINT conversations_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
-
-ALTER TABLE turns ADD CONSTRAINT turns_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-ALTER TABLE turns ADD CONSTRAINT turns_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
-
-ALTER TABLE sessions ADD CONSTRAINT sessions_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-ALTER TABLE sessions ADD CONSTRAINT sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
-
-ALTER TABLE tenant_connections ADD CONSTRAINT tenant_connections_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-ALTER TABLE schema_chunks ADD CONSTRAINT schema_chunks_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-ALTER TABLE tenant_glossary ADD CONSTRAINT tenant_glossary_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-
-ALTER TABLE pinned_widgets ADD CONSTRAINT pinned_widgets_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-ALTER TABLE pinned_widgets ADD CONSTRAINT pinned_widgets_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
-
-ALTER TABLE briefing_send_log ADD CONSTRAINT briefing_send_log_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-ALTER TABLE briefing_send_log ADD CONSTRAINT briefing_send_log_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+-- Step 5: Re-add FK constraints for core tables if present
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'conversations') THEN
+    ALTER TABLE conversations ADD CONSTRAINT conversations_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+    ALTER TABLE conversations ADD CONSTRAINT conversations_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'turns') THEN
+    ALTER TABLE turns ADD CONSTRAINT turns_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+    ALTER TABLE turns ADD CONSTRAINT turns_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'sessions') THEN
+    ALTER TABLE sessions ADD CONSTRAINT sessions_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+    ALTER TABLE sessions ADD CONSTRAINT sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'tenant_connections') THEN
+    ALTER TABLE tenant_connections ADD CONSTRAINT tenant_connections_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'schema_chunks') THEN
+    ALTER TABLE schema_chunks ADD CONSTRAINT schema_chunks_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'tenant_glossary') THEN
+    ALTER TABLE tenant_glossary ADD CONSTRAINT tenant_glossary_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'pinned_widgets') THEN
+    ALTER TABLE pinned_widgets ADD CONSTRAINT pinned_widgets_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+    ALTER TABLE pinned_widgets ADD CONSTRAINT pinned_widgets_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'briefing_send_log') THEN
+    ALTER TABLE briefing_send_log ADD CONSTRAINT briefing_send_log_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+    ALTER TABLE briefing_send_log ADD CONSTRAINT briefing_send_log_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'briefings') THEN
+    ALTER TABLE briefings ADD CONSTRAINT briefings_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+    ALTER TABLE briefings ADD CONSTRAINT briefings_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+  END IF;
+END $$;
 
 -- Step 6: Update user_snowflake_roles primary key to composite (tenant_id, user_id)
 DO $$
