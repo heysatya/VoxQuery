@@ -50,6 +50,7 @@ pitch-deck/
 docs/voice-subsystem/gate-*.md
 docs/voice-subsystem/*-gate*.md
 docs/transformation/
+docs/wow-features/
 
 # Exclude temp_voxquery directory
 temp_voxquery/

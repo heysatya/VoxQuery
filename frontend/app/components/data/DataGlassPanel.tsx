@@ -72,6 +72,48 @@ function ChartRenderer({ type, result, onDrillDown }: { type: ChartType; result:
     );
   }
 
+  const columnSemanticsMap = React.useMemo(() => {
+    const map: Record<string, typeof columnSemantics[number]> = {};
+    columnSemantics.forEach((col) => {
+      map[col.name] = col;
+    });
+    return map;
+  }, [columnSemantics]);
+
+  const yCol = columnSemantics.length > 1 ? columnSemantics[1] : undefined;
+
+  const formatXTick = (val: any) => {
+    if (val === null || val === undefined) return "";
+    const str = String(val);
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+      const datePart = str.substring(0, 10);
+      const [year, month, day] = datePart.split("-").map(Number);
+      const date = new Date(Date.UTC(year, month - 1, day));
+      if (!isNaN(date.getTime())) {
+        if (day === 1) {
+          return date.toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+        }
+        return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+      }
+      return datePart;
+    }
+    if (typeof val === "string" && val.length > 20) {
+      return val.slice(0, 18) + "…";
+    }
+    return String(val);
+  };
+
+  const formatYTick = (val: any) => {
+    if (typeof val !== "number") return String(val ?? "");
+    if (yCol?.format === "percentage") {
+      return new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 1, notation: "compact" }).format(val);
+    }
+    if ((yCol?.format === "compact currency" || yCol?.format === "full currency") && yCol?.unit) {
+      return new Intl.NumberFormat("en-US", { style: "currency", currency: yCol.unit, notation: "compact" }).format(val);
+    }
+    return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(val);
+  };
+
   const chartData = data.rows.map(row => {
     const obj: Record<string, ResultCell> = {};
     data.columns.forEach((col, i) => {
@@ -102,11 +144,18 @@ function ChartRenderer({ type, result, onDrillDown }: { type: ChartType; result:
     return (
       <div className="h-72 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ top: 20, right: 20, left: 0, bottom: 5 }} onClick={handleChartClick} style={{ cursor: onDrillDown ? "pointer" : "default" }}>
+          <LineChart data={chartData} margin={{ top: 20, right: 25, left: 15, bottom: 20 }} onClick={handleChartClick} style={{ cursor: onDrillDown ? "pointer" : "default" }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.04)" />
-            <XAxis dataKey={xKey} axisLine={false} tickLine={false} tick={{ fill: "#8B8FA3", fontSize: 12 }} />
-            <YAxis axisLine={false} tickLine={false} tick={{ fill: "#8B8FA3", fontSize: 12 }} />
-            <RechartsTooltip contentStyle={tooltipStyle} />
+            <XAxis dataKey={xKey} axisLine={false} tickLine={false} tickFormatter={formatXTick} tick={{ fill: "#8B8FA3", fontSize: 12 }} dy={8} />
+            <YAxis axisLine={false} tickLine={false} tickFormatter={formatYTick} width={55} tick={{ fill: "#8B8FA3", fontSize: 12 }} />
+            <RechartsTooltip
+              contentStyle={tooltipStyle}
+              labelFormatter={(label) => formatXTick(label)}
+              formatter={(value: any, name: any) => [
+                formatResultValue(value, columnSemanticsMap[String(name)]),
+                displayNameForColumn(result, String(name))
+              ]}
+            />
             {yKeys.map((key, i) => (
               <Line key={key} type="monotone" dataKey={key} stroke={colors[i % 3]} strokeWidth={2.5} dot={{ r: 3, strokeWidth: 2, fill: "#0C0D11" }} activeDot={{ r: 5 }} />
             ))}
@@ -119,11 +168,19 @@ function ChartRenderer({ type, result, onDrillDown }: { type: ChartType; result:
   return (
     <div className="h-72 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chartData} margin={{ top: 20, right: 20, left: 0, bottom: 5 }} onClick={handleChartClick} style={{ cursor: onDrillDown ? "pointer" : "default" }}>
+        <BarChart data={chartData} margin={{ top: 20, right: 25, left: 15, bottom: 20 }} onClick={handleChartClick} style={{ cursor: onDrillDown ? "pointer" : "default" }}>
           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.04)" />
-          <XAxis dataKey={xKey} axisLine={false} tickLine={false} tick={{ fill: "#8B8FA3", fontSize: 12 }} />
-          <YAxis axisLine={false} tickLine={false} tick={{ fill: "#8B8FA3", fontSize: 12 }} />
-          <RechartsTooltip cursor={{ fill: "rgba(255,255,255,0.03)" }} contentStyle={tooltipStyle} />
+          <XAxis dataKey={xKey} axisLine={false} tickLine={false} tickFormatter={formatXTick} tick={{ fill: "#8B8FA3", fontSize: 12 }} dy={8} />
+          <YAxis axisLine={false} tickLine={false} tickFormatter={formatYTick} width={55} tick={{ fill: "#8B8FA3", fontSize: 12 }} />
+          <RechartsTooltip
+            cursor={{ fill: "rgba(255,255,255,0.03)" }}
+            contentStyle={tooltipStyle}
+            labelFormatter={(label) => formatXTick(label)}
+            formatter={(value: any, name: any) => [
+              formatResultValue(value, columnSemanticsMap[String(name)]),
+              displayNameForColumn(result, String(name))
+            ]}
+          />
           {yKeys.map((key, i) => (
             <Bar key={key} dataKey={key} fill={colors[i % 3]} radius={[6, 6, 0, 0]} />
           ))}
