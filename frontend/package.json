@@ -8,6 +8,7 @@
     "build": "next build",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "start": "next start"
   },
   "engines": {
@@ -29,6 +30,7 @@
   },
   "devDependencies": {
     "@csstools/css-calc": "^3.2.1",
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4.3.2",
     "@testing-library/jest-dom": "^6.4.0",
     "@testing-library/react": "^15.0.0",
