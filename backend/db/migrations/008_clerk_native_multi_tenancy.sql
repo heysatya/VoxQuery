@@ -1,6 +1,7 @@
--- Migration 008: Clerk-Native Multi-Tenancy (String IDs, Tenant Memberships, Composite Snowflake Roles)
+-- Step 1: Remove dependent views and existing FK constraints referencing tenants.id and users.id
+DROP VIEW IF EXISTS admin_glossary_view CASCADE;
+DROP VIEW IF EXISTS admin_workspaces_view CASCADE;
 
--- Step 1: Remove existing FK constraints referencing tenants.id and users.id
 ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_tenant_id_fkey;
 ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_user_id_fkey;
 

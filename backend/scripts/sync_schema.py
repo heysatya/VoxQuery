@@ -79,12 +79,7 @@ async def sync_schema():
     parser.add_argument("--tenant-id", type=str, default="00000000-0000-0000-0000-000000000101", help="Tenant ID to provision the schema and DSN for.")
     args, unknown = parser.parse_known_args()
     
-    tenant_id_str = args.tenant_id
-    try:
-        tenant_id = uuid.UUID(tenant_id_str)
-    except ValueError:
-        print(f"Error: Invalid UUID format for tenant_id: {tenant_id_str}")
-        return
+    tenant_id = args.tenant_id
 
     print("2. Connecting to Supabase...")
     # Fix pgbouncer connection issue if needed by stripping it for asyncpg or using prepared statements safely
