@@ -114,6 +114,21 @@ def test_canonicalize_readonly_sql_rejects_join_without_condition():
         canonicalize_readonly_sql("SELECT * FROM orders JOIN customers")
 
 
+def test_canonicalize_readonly_sql_is_idempotent():
+    queries = [
+        "SELECT a / b FROM orders",
+        "SELECT SUM(a) / COUNT(b) FROM orders",
+        "SELECT DIV0(a, b) FROM orders",
+        "SELECT DATE_TRUNC('month', created_at) FROM orders",
+    ]
+    for q in queries:
+        pass1 = canonicalize_readonly_sql(q).sql
+        pass2 = canonicalize_readonly_sql(pass1).sql
+        pass3 = canonicalize_readonly_sql(pass2).sql
+        assert pass1 == pass2, f"Failed idempotency on pass 2 for query: {q}"
+        assert pass2 == pass3, f"Failed idempotency on pass 3 for query: {q}"
+
+
 # ── Phase 5.1: DSN redaction ──────────────────────────────────────────────────
 
 def test_redact_dsn_hides_password():

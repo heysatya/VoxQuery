@@ -99,6 +99,16 @@ def auto_fix_snowflake_types(parsed: exp.Expression) -> exp.Expression:
             return node
         return exp.Anonymous(this="TRY_TO_TIMESTAMP", expressions=[node])
 
+    def _is_inside_div0(node: exp.Expression) -> bool:
+        curr = node.parent
+        while curr:
+            if isinstance(curr, exp.If):
+                true_arg = curr.args.get("true")
+                if isinstance(true_arg, exp.Literal) and str(true_arg.this) == "0":
+                    return True
+            curr = curr.parent
+        return False
+
     # 1. Fix date/time function arguments
     for node in parsed.find_all(exp.DateTrunc):
         if node.this and not isinstance(node.this, (exp.Literal, exp.DateTrunc)) and not _is_already_timestamp_cast(node.this):
@@ -121,11 +131,13 @@ def auto_fix_snowflake_types(parsed: exp.Expression) -> exp.Expression:
 
     # 2. Convert division (a / b) to DIV0(a, b) for safe zero-division handling in Snowflake
     for div_node in list(parsed.find_all(exp.Div)):
+        if _is_inside_div0(div_node):
+            continue
         left = div_node.this
         right = div_node.expression
         if left and right:
-            div0_func = exp.Anonymous(this="DIV0", expressions=[left, right])
-            div_node.replace(div0_func)
+            div0_ast = sqlglot.parse_one(f"DIV0({left.sql(dialect='snowflake')}, {right.sql(dialect='snowflake')})", read="snowflake")
+            div_node.replace(div0_ast)
 
     return parsed
 
