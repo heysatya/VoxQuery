@@ -115,41 +115,48 @@ class PostgresAuditStore(AuditStore):
             async with conn.transaction():
                 # 1. Upsert tenant
                 await conn.execute("""
-                    INSERT INTO tenants (id, name) VALUES ($1::uuid, $2)
+                    INSERT INTO tenants (id, name) VALUES ($1, $2)
                     ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
                 """, identity["tenant_id"], identity.get("tenant_name", "Unknown"))
                 
                 # 2. Upsert user
                 await conn.execute("""
-                    INSERT INTO users (id, email, role, tenant_id) VALUES ($1::uuid, $2, $3, $4::uuid)
-                    ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, role = EXCLUDED.role, tenant_id = EXCLUDED.tenant_id
-                """, identity["user_id"], identity.get("email", ""), identity.get("role", "viewer"), identity["tenant_id"])
+                    INSERT INTO users (id, email) VALUES ($1, $2)
+                    ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email
+                """, identity["user_id"], identity.get("email", ""))
+
+                # 2b. Upsert tenant_memberships
+                await conn.execute("""
+                    INSERT INTO tenant_memberships (tenant_id, user_id, role) VALUES ($1, $2, $3)
+                    ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = EXCLUDED.role
+                """, identity["tenant_id"], identity["user_id"], identity.get("role", "viewer"))
                 
                 # 3. Upsert user_snowflake_roles
                 if identity.get("snowflake_role"):
                     await conn.execute("""
-                        INSERT INTO user_snowflake_roles (user_id, tenant_id, snowflake_role) VALUES ($1::uuid, $2::uuid, $3)
-                        ON CONFLICT (user_id) DO UPDATE SET snowflake_role = EXCLUDED.snowflake_role, tenant_id = EXCLUDED.tenant_id
-                    """, identity["user_id"], identity["tenant_id"], identity["snowflake_role"])
+                        INSERT INTO user_snowflake_roles (tenant_id, user_id, snowflake_role) VALUES ($1, $2, $3)
+                        ON CONFLICT (tenant_id, user_id) DO UPDATE SET snowflake_role = EXCLUDED.snowflake_role
+                    """, identity["tenant_id"], identity["user_id"], identity["snowflake_role"])
                     
                 # 4. Upsert conversation
                 await conn.execute("""
-                    INSERT INTO conversations (id, tenant_id, user_id, title) VALUES ($1::uuid, $2::uuid, $3::uuid, $4)
+                    INSERT INTO conversations (id, tenant_id, user_id, title) VALUES ($1::uuid, $2, $3, $4)
                     ON CONFLICT (id) DO NOTHING
                 """, identity["conversation_id"], identity["tenant_id"], identity["user_id"], identity.get("conversation_title", "New Conversation"))
                 
-                # 5. Insert turn
-                await conn.execute("""
+                # 5. Insert turn (handling turns.turn_id vs turns.id)
+                turn_col = "turn_id" if "turn_id" in turn_data else "id"
+                await conn.execute(f"""
                     INSERT INTO turns (
-                        id, conversation_id, user_id, tenant_id, user_input, raw_transcript,
+                        {turn_col}, conversation_id, user_id, tenant_id, user_input, raw_transcript,
                         deepgram_confidence_raw, generated_sql, result_json, chart_type,
                         chart_rationale, confidence_tier, composite_score, clarification_triggered,
                         quality_flag, source, input_modality, latency_ms, created_at
                     ) VALUES (
-                        $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::timestamptz
-                    ) ON CONFLICT (id) DO NOTHING
+                        $1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::timestamptz
+                    ) ON CONFLICT ({turn_col}) DO NOTHING
                 """,
-                    turn_data["turn_id"], turn_data["conversation_id"], turn_data["user_id"], turn_data["tenant_id"],
+                    turn_data.get("turn_id") or turn_data.get("id"), turn_data["conversation_id"], turn_data["user_id"], turn_data["tenant_id"],
                     turn_data["user_input"], turn_data.get("raw_transcript"), turn_data.get("deepgram_confidence_raw"),
                     turn_data.get("generated_sql", ""), result_json_str, turn_data.get("chart_type", "stat"),
                     turn_data.get("chart_rationale", ""), turn_data.get("confidence_tier", "low"),
@@ -172,20 +179,22 @@ class PostgresAuditStore(AuditStore):
                     )
             
     async def _update_feedback(self, turn_id: str, quality_flag: str) -> None:
-        query = "UPDATE turns SET quality_flag = $1 WHERE id = $2::uuid"
+        query = "UPDATE turns SET quality_flag = $1 WHERE turn_id = $2::uuid OR id = $2::uuid"
         async with self._pool.acquire() as conn:
             await conn.execute(query, quality_flag, turn_id)
 
-    async def get_low_quality_feedback(self, limit: int = 50, offset: int = 0) -> list[dict]:
+    async def get_low_quality_feedback(self, limit: int = 50, offset: int = 0, tenant_id: str | None = None) -> list[dict]:
         query = """
-            SELECT t.id, t.conversation_id, t.user_input, t.raw_transcript, 
+            SELECT COALESCE(t.turn_id, t.id) as turn_id, t.conversation_id, t.user_input, t.raw_transcript, 
                    t.generated_sql, t.chart_type, t.created_at, u.email as user_email
             FROM turns t
             LEFT JOIN users u ON t.user_id = u.id
             WHERE t.quality_flag = 'low'
+              AND ($1::text IS NULL OR t.tenant_id = $1::text)
             ORDER BY t.created_at DESC
-            LIMIT $1 OFFSET $2
+            LIMIT $2 OFFSET $3
         """
         async with self._pool.acquire() as conn:
-            rows = await conn.fetch(query, limit, offset)
+            rows = await conn.fetch(query, tenant_id, limit, offset)
             return [dict(row) for row in rows]
+

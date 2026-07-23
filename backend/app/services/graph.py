@@ -158,7 +158,7 @@ async def rewrite_query_node(state: PipelineGraphState) -> dict:
     if db_pool:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT metric_synonyms, table_synonyms FROM tenant_glossary WHERE tenant_id = $1::uuid",
+                "SELECT metric_synonyms, table_synonyms FROM tenant_glossary WHERE tenant_id = $1",
                 turn.tenant_id
             )
             if row:
@@ -179,7 +179,7 @@ async def rewrite_query_node(state: PipelineGraphState) -> dict:
                         (COALESCE(synonym_hits->$1, '0')::int + 1)::text::jsonb
                     ),
                     total_hits = total_hits + 1
-                    WHERE tenant_id = $2::uuid
+                    WHERE tenant_id = $2
                 """, metric, turn.tenant_id)
                 
     return {"rewritten_query": rewritten}

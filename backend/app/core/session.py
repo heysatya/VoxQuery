@@ -35,8 +35,8 @@ class InMemorySessionStore:
     def __init__(self, settings: Settings | None = None, counter: TokenCounter | None = None) -> None:
         self.settings = settings or get_settings()
         self.counter = counter or TokenCounter()
-        self._sessions: dict[tuple[UUID, UUID], VoiceSession] = {}
-        self._expires_at: dict[tuple[UUID, UUID], datetime] = {}
+        self._sessions: dict[tuple[str, UUID], VoiceSession] = {}
+        self._expires_at: dict[tuple[str, UUID], datetime] = {}
         self._sweep_task = None
 
     async def start(self) -> None:
@@ -83,7 +83,7 @@ class InMemorySessionStore:
         self._expires_at[key] = expires_at
         return session, expires_at
 
-    async def get(self, tenant_id: UUID, session_id: UUID) -> VoiceSession | None:
+    async def get(self, tenant_id: str, session_id: UUID) -> VoiceSession | None:
         key = self._key(tenant_id, session_id)
         expires_at = self._expires_at.get(key)
         if not expires_at or expires_at <= datetime.now(UTC):
@@ -98,7 +98,7 @@ class InMemorySessionStore:
             return None
         return session
 
-    async def delete(self, tenant_id: UUID, session_id: UUID) -> None:
+    async def delete(self, tenant_id: str, session_id: UUID) -> None:
         key = self._key(tenant_id, session_id)
         self._sessions.pop(key, None)
         self._expires_at.pop(key, None)
@@ -208,7 +208,7 @@ class InMemorySessionStore:
         return "local_stub"
 
     @staticmethod
-    def _key(tenant_id: UUID, session_id: UUID) -> tuple[UUID, UUID]:
+    def _key(tenant_id: str, session_id: UUID) -> tuple[str, UUID]:
         return tenant_id, session_id
 
 
@@ -240,7 +240,7 @@ class RedisSessionStore(InMemorySessionStore):
         expires_at = await self.save(session)
         return session, expires_at
 
-    async def get(self, tenant_id: UUID, session_id: UUID) -> VoiceSession | None:
+    async def get(self, tenant_id: str, session_id: UUID) -> VoiceSession | None:
         try:
             raw = await self.client.get(self.redis_key(tenant_id, session_id))
         except Exception as exc:
@@ -257,7 +257,7 @@ class RedisSessionStore(InMemorySessionStore):
             return None
         return session
 
-    async def delete(self, tenant_id: UUID, session_id: UUID) -> None:
+    async def delete(self, tenant_id: str, session_id: UUID) -> None:
         try:
             await self.client.delete(self.redis_key(tenant_id, session_id))
         except Exception as exc:
@@ -284,7 +284,7 @@ class RedisSessionStore(InMemorySessionStore):
         return "ok"
 
     @staticmethod
-    def redis_key(tenant_id: UUID, session_id: UUID) -> str:
+    def redis_key(tenant_id: str, session_id: UUID) -> str:
         return f"session:{tenant_id}:{session_id}"
 
     @staticmethod

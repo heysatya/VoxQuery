@@ -25,7 +25,7 @@ from app.llm.adapter import SqlGenerationResult
 
 @pytest.fixture
 def claims():
-    return AuthClaims(user_id=uuid.uuid4(), tenant_id=uuid.uuid4())
+    return AuthClaims(user_id=str(uuid.uuid4()), tenant_id=str(uuid.uuid4()))
 
 @pytest.fixture
 def req(claims):

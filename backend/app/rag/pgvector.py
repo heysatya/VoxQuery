@@ -1,5 +1,3 @@
-from uuid import UUID
-
 import asyncpg
 from app.models.contracts import SchemaChunk
 from app.rag.retriever import SchemaRetriever
@@ -12,7 +10,7 @@ class PgVectorSchemaRetriever(SchemaRetriever):
         self.openai = openai_client
         self.pool = db_pool
 
-    async def retrieve(self, rewritten: RewrittenQuery, tenant_id: UUID) -> tuple[list[SchemaChunk], float]:
+    async def retrieve(self, rewritten: RewrittenQuery, tenant_id: str) -> tuple[list[SchemaChunk], float]:
         retrieval_query = rewritten.get_retrieval_query()
         bm25_query = rewritten.original + " " + " ".join(rewritten.expanded_terms)
 
@@ -90,3 +88,4 @@ class PgVectorSchemaRetriever(SchemaRetriever):
             rag_score = min(1.0, scores[top_ref] / max_possible_rrf)
             
         return final_chunks, rag_score
+

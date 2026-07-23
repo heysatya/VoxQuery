@@ -125,7 +125,7 @@ async def sync_schema():
                     metric_synonyms = $2,
                     table_synonyms = $3,
                     updated_at = now();
-            """, tenant_id, json.dumps(METRIC_SYNONYMS), json.dumps(TABLE_SYNONYMS))
+            """, tenant_id, json.dumps(DEFAULT_METRIC_SYNONYMS), json.dumps(DEFAULT_TABLE_SYNONYMS))
             print("   -> Stored default business glossary in tenant_glossary.")
         except Exception as e:
             print(f"   -> Warning: Failed to populate tenant_glossary: {e}")

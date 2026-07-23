@@ -55,8 +55,8 @@ then subsequent requests are rejected with a 429 and a `retry_after` hint, until
 
 @pytest.mark.asyncio
 async def test_rate_limit_enforcement():
-    dummy_user = uuid4()
-    dummy_tenant = uuid4()
+    dummy_user = str(uuid4())
+    dummy_tenant = str(uuid4())
     
     async def mock_get_current_user():
         return AuthClaims(user_id=dummy_user, tenant_id=dummy_tenant, snowflake_role="viewer")

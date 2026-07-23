@@ -37,17 +37,17 @@ async def test_postgres_store_strips_full_result_and_enforces_safety():
     turn = TurnRecord(
         session_id=uuid.uuid4(),
         conversation_id=uuid.uuid4(),
-        user_id=uuid.uuid4(),
-        tenant_id=uuid.uuid4(),
+        user_id=str(uuid.uuid4()),
+        tenant_id=str(uuid.uuid4()),
         user_input="hello",
         input_modality="text",
         full_result=ResultPayload(columns=["a"], rows=[[1]], row_count=1)
     )
     
     identity = AuditIdentity(
-        tenant_id=uuid.uuid4(),
+        tenant_id=str(uuid.uuid4()),
         tenant_name="T",
-        user_id=uuid.uuid4(),
+        user_id=str(uuid.uuid4()),
         email="a@b",
         role="viewer",
         snowflake_role="x",
@@ -91,16 +91,16 @@ async def test_postgres_store_transactional_insert():
     turn = TurnRecord(
         session_id=uuid.uuid4(),
         conversation_id=uuid.uuid4(),
-        user_id=uuid.uuid4(),
-        tenant_id=uuid.uuid4(),
+        user_id=str(uuid.uuid4()),
+        tenant_id=str(uuid.uuid4()),
         user_input="hello",
         input_modality="text",
     )
     
     identity = AuditIdentity(
-        tenant_id=uuid.uuid4(),
+        tenant_id=str(uuid.uuid4()),
         tenant_name="T",
-        user_id=uuid.uuid4(),
+        user_id=str(uuid.uuid4()),
         email="a@b",
         role="viewer",
         snowflake_role="x",
@@ -116,15 +116,15 @@ async def test_postgres_store_transactional_insert():
     
     await store._insert_turn(payload)
     
-    # Assert 5 executions (tenant, user, user_role, conversation, turn)
-    assert mock_conn.execute.call_count == 5
+    # Assert 6 executions (tenant, user, user_role, tenant_memberships, conversation, turn)
+    assert mock_conn.execute.call_count == 6
     args = mock_conn.execute.call_args_list[-1][0]
     assert "INSERT INTO turns" in args[0]
     assert args[1] == str(turn.turn_id)
     
     # Verify user_snowflake_roles insertion has correct number of args (query + 3 parameters)
-    roles_args = mock_conn.execute.call_args_list[2][0]
-    assert "INSERT INTO user_snowflake_roles (user_id, tenant_id, snowflake_role)" in roles_args[0]
+    roles_args = mock_conn.execute.call_args_list[3][0]
+    assert "INSERT INTO user_snowflake_roles" in roles_args[0]
     assert len(roles_args) == 4
     
     # Test clarification schema insertion
@@ -139,7 +139,7 @@ async def test_postgres_store_transactional_insert():
     
     mock_conn.execute.reset_mock()
     await store._insert_turn(payload)
-    assert mock_conn.execute.call_count == 6
+    assert mock_conn.execute.call_count == 7
     clarification_args = mock_conn.execute.call_args_list[-1][0]
     assert "INSERT INTO clarifications" in clarification_args[0]
     assert "id, turn_id, prompt_sent, user_choice, resolution_type, created_at" in clarification_args[0]

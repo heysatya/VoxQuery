@@ -138,15 +138,15 @@ class ErrorEnvelope(BaseModel):
 
 
 class AuthClaims(BaseModel):
-    user_id: UUID
-    tenant_id: UUID
+    user_id: str
+    tenant_id: str
     email: str = "local-user@voxquery.test"
     role: str = "viewer"
     snowflake_role: str = "ANALYST_READONLY"
 
 
 class SessionCreateRequest(BaseModel):
-    tenant_id: UUID | None = None
+    tenant_id: str | None = None
 
 
 class SessionCreateResponse(BaseModel):
@@ -472,8 +472,8 @@ class ClarificationState(BaseModel):
 
 class VoiceSession(BaseModel):
     session_id: UUID
-    user_id: UUID
-    tenant_id: UUID
+    user_id: str
+    tenant_id: str
     conversation_id: UUID
     turn_count: int = 0
     last_interaction_ts: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -600,8 +600,8 @@ class TurnRecord(BaseModel):
     session_id: UUID
     conversation_id: UUID
     parent_turn_id: UUID | None = None
-    user_id: UUID
-    tenant_id: UUID
+    user_id: str
+    tenant_id: str
     user_input: str
     raw_transcript: str | None = None
     deepgram_confidence_raw: float | None = None
@@ -630,3 +630,34 @@ class TurnRecord(BaseModel):
 
 def _normalize_transcript(value: str) -> str:
     return " ".join(value.strip().casefold().split())
+
+
+class BriefingKpi(BaseModel):
+    label: str
+    value: str
+    change_pct: float
+    trend: str
+    insight: str
+
+
+class BriefingAnomaly(BaseModel):
+    severity: str
+    title: str
+    description: str
+
+
+class ExecutiveBriefingResponse(BaseModel):
+    date: str
+    greeting: str
+    kpis: list[BriefingKpi] = Field(default_factory=list)
+    summary_narrative: str
+    anomalies: list[BriefingAnomaly] = Field(default_factory=list)
+    proactive_insights: list[str] = Field(default_factory=list)
+
+
+class UserPreferences(BaseModel):
+    user_id: str | None = None
+    email_briefing_enabled: bool = False
+    email: str | None = None
+    delivery_time: str = "09:00"
+    timezone: str = "UTC"

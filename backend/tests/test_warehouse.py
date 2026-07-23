@@ -44,6 +44,17 @@ def test_canonicalize_readonly_sql_applies_row_limit_policy():
     assert cte.limit_added is True
 
 
+def test_canonicalize_readonly_sql_strips_markdown_and_xml():
+    wrapped_sql = """```xml
+<sql>
+SELECT * FROM test
+</sql>
+```"""
+    res = canonicalize_readonly_sql(wrapped_sql)
+    assert res.sql == "SELECT * FROM test LIMIT 10000"
+
+
+
 def test_schema_allowlist_validation_success():
     schema = [
         SchemaTable(table_name="orders", columns=[ColumnInfo(name="id", data_type="int"), ColumnInfo(name="amount", data_type="float")])

@@ -165,7 +165,7 @@ class SnowflakeWarehouseConnector(WarehouseConnector):
                 detail=f"Snowflake warehouse error (DSN redacted: {redacted}): {type(e).__name__} - {str(e)}"
             ) from e
 
-    async def execute_readonly(self, sql: str, *, snowflake_role: str, tenant_id: UUID | None = None) -> tuple[ResultPayload, ResultShape]:
+    async def execute_readonly(self, sql: str, *, snowflake_role: str, tenant_id: str | None = None) -> tuple[ResultPayload, ResultShape]:
         canonical = canonicalize_readonly_sql(sql)
         if canonical.sql != sql:
             raise SqlPolicyError("Warehouse received SQL that was not canonicalized by the pipeline.")

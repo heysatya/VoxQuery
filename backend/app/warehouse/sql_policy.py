@@ -83,6 +83,23 @@ def canonicalize_readonly_sql(
     allowlist: SchemaAllowlist | None = None
 ) -> CanonicalSql:
     """Return read-only SQL with the top-level row limit made explicit, optionally checking schema."""
+    if sql:
+        import re
+        sql = sql.strip()
+        # Strip XML tags if present
+        sql_match = re.search(r"<sql>(.*?)</sql>", sql, flags=re.IGNORECASE | re.DOTALL)
+        if sql_match:
+            sql = sql_match.group(1).strip()
+        else:
+            unclosed_match = re.search(r"<sql>(.*)", sql, flags=re.IGNORECASE | re.DOTALL)
+            if unclosed_match:
+                sql = unclosed_match.group(1).strip()
+        # Strip markdown fences
+        sql = re.sub(r"^```[a-zA-Z]*\n?", "", sql.strip())
+        sql = re.sub(r"\n?```$", "", sql.strip())
+        lines = [l for l in sql.splitlines() if l.strip().lower() not in ("<sql>", "</sql>", "```", "```sql", "```xml")]
+        sql = "\n".join(lines).strip()
+
     try:
         statements = sqlglot.parse(sql, read=dialect)
     except Exception as exc:

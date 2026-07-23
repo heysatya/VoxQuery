@@ -177,7 +177,7 @@ async def test_positive_feedback_records_ok_quality_flag():
     )
 
     assert feedback.status_code == 200
-    stored = await app.state.sessions.get(UUID(TENANT_ID), UUID(session["session_id"]))
+    stored = await app.state.sessions.get(TENANT_ID, UUID(session["session_id"]))
     assert stored is not None
     assert stored.history[-1].quality_flag == "ok"
 
@@ -230,7 +230,7 @@ def test_clarification_timeout_is_silently_ignored():
     
     # Manually expire the clarification state in the session store
     store = app.state.sessions
-    s = store._sessions.get((UUID(TENANT_ID), UUID(session["session_id"])))
+    s = store._sessions.get((TENANT_ID, UUID(session["session_id"])))
     if s and s.clarification_state:
         s.clarification_state.issued_at = datetime.now(UTC) - timedelta(minutes=11)
 

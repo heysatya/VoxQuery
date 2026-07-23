@@ -46,3 +46,34 @@ def event_loop():
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
+
+
+@pytest.fixture
+async def db_pool():
+    url = os.getenv("SUPABASE_DATABASE_URL")
+    if url:
+        try:
+            import asyncpg
+            pool = await asyncpg.create_pool(url, timeout=3.0)
+            yield pool
+            await pool.close()
+            return
+        except Exception:
+            pass
+
+    from unittest.mock import AsyncMock, MagicMock
+    mock_pool = MagicMock()
+    mock_conn = AsyncMock()
+
+    class AsyncContextManagerMock:
+        async def __aenter__(self):
+            return mock_conn
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    mock_pool.acquire.return_value = AsyncContextManagerMock()
+    mock_conn.fetchrow.return_value = None
+    mock_conn.fetch.return_value = []
+    mock_conn.execute.return_value = "UPDATE 1"
+    yield mock_pool

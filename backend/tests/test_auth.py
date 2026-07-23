@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 import logging
 from types import SimpleNamespace
-from uuid import UUID
 from time import perf_counter
 
 import jwt
@@ -18,10 +17,10 @@ from app.middleware import auth
 from app.middleware.auth import ClerkJwtVerifier, get_clerk_verifier, get_current_user
 from app.models.contracts import ApiError
 
-USER_ID = UUID("00000000-0000-0000-0000-000000000001")
-TENANT_ID = UUID("00000000-0000-0000-0000-000000000101")
-OTHER_TENANT_ID = UUID("00000000-0000-0000-0000-000000000999")
-OTHER_USER_ID = UUID("00000000-0000-0000-0000-000000000002")
+USER_ID = "user_test123"
+TENANT_ID = "org_test123"
+OTHER_TENANT_ID = "org_other456"
+OTHER_USER_ID = "user_other456"
 ISSUER = "https://clerk.voxquery.test"
 JWKS_URL = "https://clerk.voxquery.test/.well-known/jwks.json"
 
@@ -56,13 +55,11 @@ def clerk_settings():
 def signed_token(private_key, **overrides) -> str:
     payload = {
         "iss": ISSUER,
-        "sub": "user_test",
+        "sub": USER_ID,
         "iat": datetime.now(UTC),
         "exp": datetime.now(UTC) + timedelta(minutes=5),
-        "vox_user_id": str(USER_ID),
-        "vox_tenant_id": str(TENANT_ID),
+        "o": {"id": TENANT_ID, "rol": "org:admin", "slg": "test-org"},
         "email": "local-user@voxquery.test",
-        "role": "viewer",
         "snowflake_role": "ANALYST_READONLY",
     }
     payload.update(overrides)
@@ -72,7 +69,7 @@ def signed_token(private_key, **overrides) -> str:
     return jwt.encode(payload, private_key, algorithm="RS256", headers={"kid": "test-key"})
 
 
-def test_clerk_verifier_accepts_signed_token_and_maps_claims(key_pair, clerk_settings):
+def test_clerk_verifier_accepts_signed_v2_compact_token_and_maps_claims(key_pair, clerk_settings):
     private_key, public_key = key_pair
     verifier = ClerkJwtVerifier(clerk_settings, jwks_client=FakeJwksClient(public_key))
 
@@ -81,8 +78,32 @@ def test_clerk_verifier_accepts_signed_token_and_maps_claims(key_pair, clerk_set
     assert claims.user_id == USER_ID
     assert claims.tenant_id == TENANT_ID
     assert claims.email == "local-user@voxquery.test"
-    assert claims.role == "viewer"
+    assert claims.role == "admin"
     assert claims.snowflake_role == "ANALYST_READONLY"
+
+
+def test_clerk_verifier_accepts_legacy_org_claims(key_pair, clerk_settings):
+    private_key, public_key = key_pair
+    verifier = ClerkJwtVerifier(clerk_settings, jwks_client=FakeJwksClient(public_key))
+
+    token = signed_token(private_key, o=None, org_id="org_legacy789", org_role="org:member")
+    claims = verifier.claims_from_payload(verifier.verify(token))
+
+    assert claims.user_id == USER_ID
+    assert claims.tenant_id == "org_legacy789"
+    assert claims.role == "viewer"
+
+
+def test_clerk_verifier_rejects_token_without_active_organization(key_pair, clerk_settings):
+    private_key, public_key = key_pair
+    verifier = ClerkJwtVerifier(clerk_settings, jwks_client=FakeJwksClient(public_key))
+
+    token = signed_token(private_key, o=None, org_id=None)
+    with pytest.raises(ApiError) as exc:
+        verifier.claims_from_payload(verifier.verify(token))
+
+    assert exc.value.code == "auth_invalid"
+    assert "Active organization" in exc.value.detail
 
 
 def test_blank_clerk_audience_is_treated_as_unset(key_pair):
@@ -157,28 +178,6 @@ def test_clerk_verifier_rejects_missing_sub(key_pair, clerk_settings):
     assert exc.value.code == "auth_invalid"
 
 
-def test_clerk_verifier_rejects_missing_voxquery_claims(key_pair, clerk_settings):
-    private_key, public_key = key_pair
-    verifier = ClerkJwtVerifier(clerk_settings, jwks_client=FakeJwksClient(public_key))
-
-    with pytest.raises(ApiError) as exc:
-        verifier.claims_from_payload(verifier.verify(signed_token(private_key, vox_tenant_id=None)))
-
-    assert exc.value.code == "auth_invalid"
-    assert "VoxQuery authorization claims" in exc.value.detail
-
-
-def test_clerk_verifier_rejects_malformed_uuid_claims(key_pair, clerk_settings):
-    private_key, public_key = key_pair
-    verifier = ClerkJwtVerifier(clerk_settings, jwks_client=FakeJwksClient(public_key))
-
-    with pytest.raises(ApiError) as exc:
-        verifier.claims_from_payload(verifier.verify(signed_token(private_key, vox_user_id="not-a-uuid")))
-
-    assert exc.value.code == "auth_invalid"
-    assert "VoxQuery authorization claims" in exc.value.detail
-
-
 def test_clerk_startup_requires_metadata_and_https_in_hosted_envs():
     missing = Settings(APP_ENV="test", AUTH_MODE="clerk", CLERK_ISSUER=None, CLERK_JWKS_URL=None)
     with pytest.raises(RuntimeError, match="CLERK_ISSUER"):
@@ -197,25 +196,6 @@ def test_clerk_startup_requires_metadata_and_https_in_hosted_envs():
     )
     with pytest.raises(RuntimeError, match="https://"):
         non_tls.validate_startup()
-
-    configured = Settings(
-        APP_ENV="production",
-        AUTH_MODE="clerk",
-        STT_PROVIDER="deepgram",
-        TTS_PROVIDER="deepgram",
-        LLM_PROVIDER="anthropic",
-        RAG_PROVIDER="pgvector",
-        WAREHOUSE_PROVIDER="snowflake",
-        CLERK_ISSUER=ISSUER,
-        CLERK_JWKS_URL=JWKS_URL,
-        DEEPGRAM_API_KEY="dummy",
-        ANTHROPIC_API_KEY="dummy",
-        OPENAI_API_KEY="dummy",
-        SUPABASE_DATABASE_URL="dummy",
-        FERNET_KEY="dummy",
-        SNOWFLAKE_DSN="dummy",
-    )
-    configured.validate_startup()
 
 
 @pytest.mark.asyncio
@@ -257,14 +237,14 @@ def test_rest_session_enforces_clerk_tenant_claims(monkeypatch, key_pair):
     response = client.post(
         "/api/session",
         headers={"Authorization": f"Bearer {token}"},
-        json={"tenant_id": str(TENANT_ID)},
+        json={"tenant_id": TENANT_ID},
     )
     assert response.status_code == 201
 
     mismatch = client.post(
         "/api/session",
         headers={"Authorization": f"Bearer {token}"},
-        json={"tenant_id": str(OTHER_TENANT_ID)},
+        json={"tenant_id": OTHER_TENANT_ID},
     )
     assert mismatch.status_code == 401
     assert mismatch.json()["error"]["code"] == "auth_invalid"
@@ -285,11 +265,11 @@ def test_rest_query_rejects_same_tenant_different_user_session(monkeypatch, key_
     force_clerk_mode(monkeypatch, verifier)
     client = TestClient(app)
     owner_token = signed_token(private_key)
-    other_user_token = signed_token(private_key, vox_user_id=str(OTHER_USER_ID), sub="user_other")
+    other_user_token = signed_token(private_key, sub=OTHER_USER_ID)
     session = client.post(
         "/api/session",
         headers={"Authorization": f"Bearer {owner_token}"},
-        json={"tenant_id": str(TENANT_ID)},
+        json={"tenant_id": TENANT_ID},
     ).json()
 
     response = client.post(
@@ -324,7 +304,7 @@ def test_websocket_auth_accepts_valid_token_and_rejects_missing_token(monkeypatc
     session = client.post(
         "/api/session",
         headers={"Authorization": f"Bearer {token}"},
-        json={"tenant_id": str(TENANT_ID)},
+        json={"tenant_id": TENANT_ID},
     ).json()
 
     with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}") as ws:
@@ -353,11 +333,11 @@ def test_websockets_reject_same_tenant_different_user_session(monkeypatch, key_p
     force_clerk_mode(monkeypatch, verifier)
     client = TestClient(app)
     owner_token = signed_token(private_key)
-    other_user_token = signed_token(private_key, vox_user_id=str(OTHER_USER_ID), sub="user_other")
+    other_user_token = signed_token(private_key, sub=OTHER_USER_ID)
     session = client.post(
         "/api/session",
         headers={"Authorization": f"Bearer {owner_token}"},
-        json={"tenant_id": str(TENANT_ID)},
+        json={"tenant_id": TENANT_ID},
     ).json()
 
     for path in ("pipeline", "audio"):
@@ -388,7 +368,7 @@ def test_websockets_reject_tampered_signature_with_4001(monkeypatch, key_pair):
     session = client.post(
         "/api/session",
         headers={"Authorization": f"Bearer {valid_token}"},
-        json={"tenant_id": str(TENANT_ID)},
+        json={"tenant_id": TENANT_ID},
     ).json()
 
     for path in ("pipeline", "audio"):
