@@ -64,18 +64,12 @@ CREATE TABLE IF NOT EXISTS tenant_memberships (
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'tenant_id') THEN
-    INSERT INTO tenant_memberships (tenant_id, user_id, role, created_at)
-    SELECT tenant_id::text, id::text, COALESCE(role, 'viewer'), created_at
-    FROM users
-    WHERE tenant_id IS NOT NULL
-    ON CONFLICT (tenant_id, user_id) DO NOTHING;
-    
-    ALTER TABLE users DROP COLUMN tenant_id;
-  END IF;
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'role') THEN
-    ALTER TABLE users DROP COLUMN role;
+    EXECUTE 'INSERT INTO tenant_memberships (tenant_id, user_id, role, created_at) SELECT tenant_id::text, id::text, COALESCE(role, ''viewer''), created_at FROM users WHERE tenant_id IS NOT NULL ON CONFLICT (tenant_id, user_id) DO NOTHING';
   END IF;
 END $$;
+
+ALTER TABLE users DROP COLUMN IF EXISTS tenant_id;
+ALTER TABLE users DROP COLUMN IF EXISTS role;
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
@@ -85,40 +79,60 @@ ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;
 DROP INDEX IF EXISTS users_email_key;
 CREATE UNIQUE INDEX IF NOT EXISTS users_active_email_key ON users(email) WHERE deleted_at IS NULL;
 
--- Step 5: Re-add FK constraints for core tables if present
+-- Step 5: Re-add FK constraints ONLY if both table and column exist
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'conversations') THEN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'conversations' AND column_name = 'tenant_id') THEN
     ALTER TABLE conversations ADD CONSTRAINT conversations_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'conversations' AND column_name = 'user_id') THEN
     ALTER TABLE conversations ADD CONSTRAINT conversations_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
   END IF;
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'turns') THEN
+
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'turns' AND column_name = 'tenant_id') THEN
     ALTER TABLE turns ADD CONSTRAINT turns_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'turns' AND column_name = 'user_id') THEN
     ALTER TABLE turns ADD CONSTRAINT turns_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
   END IF;
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'sessions') THEN
+
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sessions' AND column_name = 'tenant_id') THEN
     ALTER TABLE sessions ADD CONSTRAINT sessions_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sessions' AND column_name = 'user_id') THEN
     ALTER TABLE sessions ADD CONSTRAINT sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
   END IF;
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'tenant_connections') THEN
+
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'tenant_connections' AND column_name = 'tenant_id') THEN
     ALTER TABLE tenant_connections ADD CONSTRAINT tenant_connections_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
   END IF;
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'schema_chunks') THEN
+
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'schema_chunks' AND column_name = 'tenant_id') THEN
     ALTER TABLE schema_chunks ADD CONSTRAINT schema_chunks_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
   END IF;
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'tenant_glossary') THEN
+
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'tenant_glossary' AND column_name = 'tenant_id') THEN
     ALTER TABLE tenant_glossary ADD CONSTRAINT tenant_glossary_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
   END IF;
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'pinned_widgets') THEN
+
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'pinned_widgets' AND column_name = 'tenant_id') THEN
     ALTER TABLE pinned_widgets ADD CONSTRAINT pinned_widgets_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'pinned_widgets' AND column_name = 'user_id') THEN
     ALTER TABLE pinned_widgets ADD CONSTRAINT pinned_widgets_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
   END IF;
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'briefing_send_log') THEN
+
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'briefing_send_log' AND column_name = 'tenant_id') THEN
     ALTER TABLE briefing_send_log ADD CONSTRAINT briefing_send_log_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'briefing_send_log' AND column_name = 'user_id') THEN
     ALTER TABLE briefing_send_log ADD CONSTRAINT briefing_send_log_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
   END IF;
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'briefings') THEN
+
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'briefings' AND column_name = 'tenant_id') THEN
     ALTER TABLE briefings ADD CONSTRAINT briefings_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'briefings' AND column_name = 'user_id') THEN
     ALTER TABLE briefings ADD CONSTRAINT briefings_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
   END IF;
 END $$;
