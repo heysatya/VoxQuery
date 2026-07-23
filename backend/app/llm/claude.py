@@ -105,7 +105,12 @@ class ClaudeAdapter(LlmAdapter):
         
         system_prompt = """You are an expert Snowflake SQL generator. Generate a read-only SQL query for the following request.
 Always LIMIT to 10000 rows maximum.
-IMPORTANT: For any relative date filters (e.g. 'last 30 days', 'recent', 'past week', 'this month'), DO NOT use `CURRENT_DATE()`. Instead, query relative to the max date in the target table using a subquery (e.g., `WHERE date_column >= DATEADD(day, -30, (SELECT MAX(date_column) FROM table_name))`).
+IMPORTANT DIALECT & TYPE RULES:
+1. Relative Date Filters: DO NOT use `CURRENT_DATE()`. Query relative to the max date in target table (e.g. `WHERE date_col >= DATEADD(day, -30, (SELECT MAX(date_col) FROM table_name))`).
+2. Date/Time Functions: `DATE_TRUNC`, `DATEADD`, and `DATEDIFF` require TIMESTAMP/DATE types. If a column is stored as VARCHAR/string, explicitly cast with `TRY_TO_TIMESTAMP(col)` (e.g., `DATE_TRUNC('month', TRY_TO_TIMESTAMP(date_col))`).
+3. Safe Division: Always use `DIV0(numerator, denominator)` when dividing to prevent division by zero runtime errors.
+4. Case-Insensitive Matching: Use `ILIKE` or `LOWER(col) = LOWER('val')` for string filters.
+5. Numeric Operations: If aggregating numerical values stored in VARCHAR fields, wrap with `TRY_TO_DOUBLE(col)` or `TRY_TO_NUMBER(col)`.
 Return your output exactly in the following XML format:
 <sql>
 your valid SQL query here

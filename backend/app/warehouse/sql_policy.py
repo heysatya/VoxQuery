@@ -75,6 +75,61 @@ def _is_readonly_query(node: exp.Expression) -> bool:
     return False
 
 
+def auto_fix_snowflake_types(parsed: exp.Expression) -> exp.Expression:
+    """
+    Safely rewrites AST nodes for Snowflake execution:
+    1. Wraps date parameters in DATE_TRUNC, DATEADD, DATEDIFF with TRY_TO_TIMESTAMP(...) to prevent VARCHAR compilation errors.
+    2. Converts division operations (a / b) to DIV0(a, b) to prevent Division by Zero runtime crashes.
+    """
+    def _is_already_timestamp_cast(node: exp.Expression) -> bool:
+        if isinstance(node, (exp.Cast, exp.TryCast)):
+            return True
+        if isinstance(node, exp.Anonymous) and node.name.upper() in (
+            "TRY_TO_TIMESTAMP", "TO_TIMESTAMP", "TRY_TO_DATE", "TO_DATE", "TRY_TO_TIME", "TO_TIME"
+        ):
+            return True
+        if isinstance(node, exp.Func) and str(node).upper().startswith((
+            "TRY_TO_TIMESTAMP", "TO_TIMESTAMP", "TRY_TO_DATE", "TO_DATE"
+        )):
+            return True
+        return False
+
+    def _wrap(node: exp.Expression) -> exp.Expression:
+        if _is_already_timestamp_cast(node):
+            return node
+        return exp.Anonymous(this="TRY_TO_TIMESTAMP", expressions=[node])
+
+    # 1. Fix date/time function arguments
+    for node in parsed.find_all(exp.DateTrunc):
+        if node.this and not isinstance(node.this, (exp.Literal, exp.DateTrunc)) and not _is_already_timestamp_cast(node.this):
+            node.set("this", _wrap(node.this))
+
+    for node in list(parsed.find_all(exp.Anonymous)):
+        func_name = node.name.upper()
+        exprs = node.expressions
+        if func_name == "DATE_TRUNC" and len(exprs) >= 2:
+            if not _is_already_timestamp_cast(exprs[1]) and not isinstance(exprs[1], exp.Literal):
+                exprs[1] = _wrap(exprs[1])
+        elif func_name == "DATEADD" and len(exprs) >= 3:
+            if not _is_already_timestamp_cast(exprs[2]) and not isinstance(exprs[2], exp.Literal):
+                exprs[2] = _wrap(exprs[2])
+        elif func_name == "DATEDIFF" and len(exprs) >= 3:
+            if not _is_already_timestamp_cast(exprs[1]) and not isinstance(exprs[1], exp.Literal):
+                exprs[1] = _wrap(exprs[1])
+            if not _is_already_timestamp_cast(exprs[2]) and not isinstance(exprs[2], exp.Literal):
+                exprs[2] = _wrap(exprs[2])
+
+    # 2. Convert division (a / b) to DIV0(a, b) for safe zero-division handling in Snowflake
+    for div_node in list(parsed.find_all(exp.Div)):
+        left = div_node.this
+        right = div_node.expression
+        if left and right:
+            div0_func = exp.Anonymous(this="DIV0", expressions=[left, right])
+            div_node.replace(div0_func)
+
+    return parsed
+
+
 def canonicalize_readonly_sql(
     sql: str, 
     *, 
@@ -113,6 +168,9 @@ def canonicalize_readonly_sql(
         raise SqlPolicyError("Only SELECT, UNION, INTERSECT, and EXCEPT statements are allowed.")
 
     validate_no_cartesian_joins(parsed)
+
+    if dialect == "snowflake":
+        parsed = auto_fix_snowflake_types(parsed)
 
     if allowlist:
         validate_against_allowlist(parsed, allowlist)
