@@ -22,6 +22,27 @@ def _redact_dsn(dsn: str) -> str:
     return re.sub(r"(snowflake://[^:]+:)[^@]+(@)", r"\1***\2", dsn)
 
 
+# Snowflake unquoted identifiers: letters, digits, underscores, and '$', not
+# starting with a digit. `snowflake_role` originates from a Clerk JWT claim
+# (see app/middleware/auth.py) rather than raw end-user input, but it is still
+# untrusted-until-validated data that ends up spliced into a SQL string below
+# (`USE ROLE IDENTIFIER('...')`) rather than passed as a bound parameter.
+# Validating it against this allowlist before use is defense-in-depth against
+# a malformed or compromised claim being used for SQL injection at the
+# role-switch step, which would otherwise be a privilege-escalation vector.
+_VALID_SNOWFLAKE_ROLE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
+
+
+def _validate_snowflake_role(snowflake_role: str) -> str:
+    if not _VALID_SNOWFLAKE_ROLE.match(snowflake_role):
+        raise ApiError(
+            ErrorCode.internal_error,
+            status_code=500,
+            detail="Snowflake role claim is not a valid identifier.",
+        )
+    return snowflake_role
+
+
 class SnowflakeConnectionPool:
     """
     A bounded pool of pre-authenticated, long-lived Snowflake connections.
@@ -73,7 +94,7 @@ class SnowflakeConnectionPool:
         try:
             with conn.cursor() as cur:
                 if snowflake_role:
-                    cur.execute(f"USE ROLE IDENTIFIER('{snowflake_role}')")
+                    cur.execute(f"USE ROLE IDENTIFIER('{_validate_snowflake_role(snowflake_role)}')")
                 cur.execute(sql)
                 rows = cur.fetchall()
                 columns = [d[0].lower() for d in cur.description] if cur.description else []

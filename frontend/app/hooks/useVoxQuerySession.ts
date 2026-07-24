@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ApiRequestError,
   audioSocketUrl,
   createSession,
   deleteSession,
@@ -162,6 +163,12 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
   const pendingAudioFramesRef = useRef<ArrayBuffer[]>([]);
   const currentTurnIdRef = useRef<string | null>(null);
   const currentTurnRequestRef = useRef<{ submittedText: string; parentTurnId: string | null } | null>(null);
+  // Tracks the turn_id that has already produced a terminal outcome (result
+  // loaded, or a pipeline_error was shown), whichever path — WebSocket event
+  // or watchdog poll — got there first. Prevents the two paths from double
+  // processing the same turn.
+  const resolvedTurnIdRef = useRef<string | null>(null);
+  const watchdogTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [audioAnalyserNode, setAudioAnalyserNode] = useState<AnalyserNode | null>(null);
 
   const ttsAudioContextRef = useRef<AudioContext | null>(null);
@@ -192,6 +199,73 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     currentTurnRequestRef.current = { submittedText: submitted, parentTurnId };
   }
 
+  // ── Result watchdog ──────────────────────────────────────────────────
+  // The pipeline result normally arrives via the `result_ready` WebSocket
+  // event. But that event (and `pipeline_progress`/`pipeline_error`) is
+  // filtered against `currentTurnIdRef.current`, which is only set *after*
+  // the submit-query HTTP round trip resolves. For a fast pipeline run
+  // (cache hit, fake/dev mode, etc.) the background pipeline can publish
+  // its event before that round trip completes, in which case the event is
+  // compared against a stale turn_id and silently dropped — with nothing
+  // to ever recover from it. The same is true for any WebSocket message
+  // lost to a reconnect or dropped frame.
+  //
+  // This watchdog is a general-purpose safety net for all of that: a short
+  // delay after any turn is accepted, it starts polling GET /api/result/
+  // {turn_id} (which returns 202 until the turn completes) until either the
+  // result shows up or a bounded number of attempts is exhausted. It is a
+  // backstop, not the primary path — the WebSocket path is still faster in
+  // the common case and this only kicks in when that path goes quiet.
+  const WATCHDOG_INITIAL_DELAY_MS = 6000;
+  const WATCHDOG_POLL_INTERVAL_MS = 3000;
+  const WATCHDOG_MAX_ATTEMPTS = 12;
+
+  function clearWatchdog() {
+    if (watchdogTimeoutRef.current !== null) {
+      clearTimeout(watchdogTimeoutRef.current);
+      watchdogTimeoutRef.current = null;
+    }
+  }
+
+  function scheduleWatchdog(turnId: string, delayMs: number = WATCHDOG_INITIAL_DELAY_MS, attempt: number = 0) {
+    clearWatchdog();
+    watchdogTimeoutRef.current = setTimeout(() => {
+      void pollForResult(turnId, attempt);
+    }, delayMs);
+  }
+
+  async function pollForResult(turnId: string, attempt: number) {
+    // Superseded by a newer turn, or already resolved by the WebSocket path.
+    if (turnId !== currentTurnIdRef.current || resolvedTurnIdRef.current === turnId) {
+      return;
+    }
+    try {
+      await loadResult(turnId);
+      // On success loadResult() itself marks resolvedTurnIdRef and clears
+      // the watchdog — nothing further to do here.
+    } catch (error) {
+      if (turnId !== currentTurnIdRef.current || resolvedTurnIdRef.current === turnId) {
+        return;
+      }
+      if (error instanceof ApiRequestError && error.status === 202) {
+        // Turn is still processing — keep waiting, up to the attempt cap.
+        if (attempt < WATCHDOG_MAX_ATTEMPTS) {
+          scheduleWatchdog(turnId, WATCHDOG_POLL_INTERVAL_MS, attempt + 1);
+        } else {
+          resolvedTurnIdRef.current = turnId;
+          setPipelineInFlight(false);
+          setTurnState("recoverable_error");
+          setNotice("This is taking longer than expected. Please try again.", "error");
+        }
+        return;
+      }
+      resolvedTurnIdRef.current = turnId;
+      setPipelineInFlight(false);
+      setTurnState("recoverable_error");
+      setNotice(errorMessage(error, "Something went wrong while waiting for your result."), "error");
+    }
+  }
+
   const ensureSession = useCallback(async () => {
     if (!auth.ready || !auth.signedIn) {
       return;
@@ -210,6 +284,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
   }, [auth, session.sessionId]);
 
   const resetConversation = useCallback(async () => {
+    clearWatchdog();
     setPipelineInFlight(false);
     setPipelineStage(null);
     setActiveTurnId(null);
@@ -272,6 +347,49 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     };
   }, []);
 
+  // Pre-warm the recording AudioContext and its worklet module as soon as
+  // the app mounts, instead of only inside startRecording()'s click handler.
+  // Constructing the AudioContext and awaiting audioWorklet.addModule() (a
+  // network fetch + compile of /audio-processor.js) used to happen entirely
+  // after the user granted mic permission and often after they had already
+  // started talking — that dead-air window is where the first few words of
+  // a user's very first recording were silently lost, since the capture
+  // graph wasn't wired up yet. Pre-loading here means startRecording() only
+  // needs a cheap AudioContext.resume() (a real user gesture, which the mic
+  // click itself provides) before audio starts flowing.
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof navigator === "undefined") {
+      return;
+    }
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+          return;
+        }
+        const audioContext = createBrowserAudioContext({ sampleRate: 16000 });
+        await audioContext.audioWorklet.addModule("/audio-processor.js");
+        if (cancelled) {
+          await audioContext.close().catch(() => {});
+          return;
+        }
+        audioContextRef.current = audioContext;
+      } catch (error) {
+        // Non-fatal: startRecording() falls back to creating the context
+        // itself on click if pre-warming failed for any reason (e.g. the
+        // worklet file 404s, or a browser policy blocks node creation
+        // before a user gesture).
+        console.error("Audio pre-warm failed:", error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     if (typeof navigator === "undefined" || !navigator.permissions) {
       return;
@@ -286,6 +404,52 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       })
       .catch(() => {
       });
+  }, []);
+
+  // Pre-warm the recording AudioContext and its worklet module as soon as
+  // the app mounts, instead of only inside the mic-press click handler.
+  // AudioContext construction + audioWorklet.addModule() (a same-origin
+  // fetch + compile of /audio-processor.js) were previously the first thing
+  // startRecording() did after the mic permission prompt resolved — a real
+  // dead-air window where the audio graph isn't connected yet, so anything
+  // the user says the instant they grant mic permission (extremely common
+  // behavior) was never captured at all. Doing this ahead of time means
+  // startRecording() usually only needs a cheap `resume()` before audio
+  // starts flowing. Creating an AudioContext without a user gesture is
+  // allowed by browsers (it just stays "suspended" until resumed by one,
+  // which the mic-press click itself provides); only playback requires the
+  // gesture, and no audio is played here.
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (!navigator?.mediaDevices?.getUserMedia || typeof AudioWorkletNode === "undefined") {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+          return;
+        }
+        const audioContext = createBrowserAudioContext({ sampleRate: 16000 });
+        await audioContext.audioWorklet.addModule("/audio-processor.js");
+        if (cancelled) {
+          await audioContext.close().catch(() => {});
+          return;
+        }
+        audioContextRef.current = audioContext;
+      } catch (error) {
+        // Non-fatal: startRecording() falls back to creating the context
+        // itself on click if pre-warming failed for any reason (e.g. the
+        // worklet file failed to load, or a restrictive browser policy
+        // blocked audio node creation before any user gesture).
+        console.error("Audio pre-warm failed:", error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const getTokenRef = useRef(auth.getToken);
@@ -325,6 +489,10 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
             if (currentTurnIdRef.current && event.turn_id !== currentTurnIdRef.current) {
               return;
             }
+            // Pipeline is legitimately paused waiting on the user, not stuck —
+            // stop the completion watchdog; submitClarification() restarts it
+            // once the user responds.
+            clearWatchdog();
             setActiveTurnId(event.turn_id);
             setClarification({
               pending: true,
@@ -352,6 +520,8 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
             if (event.turn_id !== currentTurnIdRef.current) {
               return;
             }
+            resolvedTurnIdRef.current = event.turn_id;
+            clearWatchdog();
             setClarification({ pending: false, question: null, options: [] });
             setPipelineInFlight(false);
             setPipelineStage(null);
@@ -724,12 +894,18 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
 
     const submitted = text.trim();
     const parentTurnId = lastResult?.turnId ?? null;
+    // Preserved so that a follow-up question which fails to submit (network
+    // blip, rate limit, etc.) restores the conversation the user was already
+    // looking at, instead of falling through to the blank "ready" home
+    // screen and losing the parent-turn link for a retry.
+    const previousResult = lastResult;
     const activeVoiceDraft = voiceDraft;
     const transcriptEdited = activeVoiceDraft
       ? normalizeTranscript(submitted) !== normalizeTranscript(activeVoiceDraft.rawTranscript)
       : false;
     setSubmittedText(submitted);
 
+    clearWatchdog();
     setPipelineInFlight(true);
     setPipelineStage("sql_generation");
     setTurnState("submitting");
@@ -755,6 +931,8 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       );
       setActiveTurnId(accepted.turn_id);
       setActiveTurnRequest(submitted, parentTurnId);
+      resolvedTurnIdRef.current = null;
+      scheduleWatchdog(accepted.turn_id);
       setVoiceDraft(null);
       setFeedbackSubmitted(false);
       setFeedbackRating(null);
@@ -763,6 +941,9 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     } catch (error) {
       setPipelineInFlight(false);
       setTurnState("recoverable_error");
+      if (previousResult) {
+        setLastResult(previousResult);
+      }
       setNotice(errorMessage(error, "Failed to submit query. Please check your network connection and try again."), "error");
     }
   }
@@ -813,6 +994,8 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       setClarification({ pending: false, question: null, options: [] });
       setTurnState("executing");
       setNotice("Clarification submitted. Waiting for pipeline result.");
+      resolvedTurnIdRef.current = null;
+      scheduleWatchdog(currentTurnId);
     } catch (error) {
       setPipelineInFlight(false);
       setTurnState("recoverable_error");
@@ -821,12 +1004,22 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
   }
 
   async function loadResult(turnId: string) {
+    if (resolvedTurnIdRef.current === turnId) {
+      // Already handled by the other path (WebSocket event vs. watchdog
+      // poll racing each other) — nothing further to do.
+      return;
+    }
     setPipelineStage("rendering");
     setTurnState("preparing_answer");
     const result = await fetchResult(turnId, await auth.getToken());
     if (turnId !== currentTurnIdRef.current || result.turn_id !== turnId) {
       return;
     }
+    if (resolvedTurnIdRef.current === turnId) {
+      return;
+    }
+    resolvedTurnIdRef.current = turnId;
+    clearWatchdog();
     const request = currentTurnRequestRef.current;
     const completedResult: LastResult = {
       turnId,

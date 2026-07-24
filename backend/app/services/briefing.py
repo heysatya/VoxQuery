@@ -31,7 +31,7 @@ async def generate_morning_briefing(
                 insight="Expansion in North America division.",
             ),
         ],
-        summary_narrative=f"Enterprise revenue grew by 12.4% month-over-month. All key operational metrics remain healthy.",
+        summary_narrative="Enterprise revenue grew by 12.4% month-over-month. All key operational metrics remain healthy.",
         anomalies=[
             BriefingAnomaly(
                 severity="info",

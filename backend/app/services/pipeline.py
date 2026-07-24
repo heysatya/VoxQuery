@@ -272,14 +272,16 @@ class PipelineOrchestrator:
         )
 
 
-    async def _get_cached_result(self, tenant_id: UUID, sql: str) -> tuple[ResultPayload, ResultShape] | None:
+    async def _get_cached_result(
+        self, tenant_id: UUID, sql: str, snowflake_role: str
+    ) -> tuple[ResultPayload, ResultShape] | None:
         if self.settings.result_cache_ttl_seconds <= 0:
             return None
         client = getattr(self.sessions, "client", None)
         if client is None:
             return None
         try:
-            raw = await client.get(self._cache_key(tenant_id, sql))
+            raw = await client.get(self._cache_key(tenant_id, sql, snowflake_role))
         except Exception:
             return None
         if raw is None:
@@ -301,6 +303,7 @@ class PipelineOrchestrator:
         sql: str,
         result: ResultPayload,
         shape: ResultShape,
+        snowflake_role: str,
     ) -> None:
         if self.settings.result_cache_ttl_seconds <= 0:
             return
@@ -314,14 +317,23 @@ class PipelineOrchestrator:
             }
         )
         try:
-            await client.setex(self._cache_key(tenant_id, sql), self.settings.result_cache_ttl_seconds, payload)
+            await client.setex(
+                self._cache_key(tenant_id, sql, snowflake_role),
+                self.settings.result_cache_ttl_seconds,
+                payload,
+            )
         except Exception:
             return
 
     @staticmethod
-    def _cache_key(tenant_id: UUID, sql: str) -> str:
+    def _cache_key(tenant_id: UUID, sql: str, snowflake_role: str) -> str:
+        # Snowflake row-level security is enforced per-role at execution time, so
+        # the cache MUST be scoped by role in addition to tenant + SQL text.
+        # Without this, two users in the same tenant with different roles (and
+        # therefore different row-level visibility) could silently receive each
+        # other's cached, role-scoped results for identical SQL text.
         sql_hash = hashlib.sha256(sql.encode("utf-8")).hexdigest()
-        return f"query_cache:{tenant_id}:{sql_hash}"
+        return f"query_cache:{tenant_id}:{snowflake_role}:{sql_hash}"
 
     async def _publish_stage(
         self, session_id: UUID, turn_id: UUID, stage: PipelineStage, started: float

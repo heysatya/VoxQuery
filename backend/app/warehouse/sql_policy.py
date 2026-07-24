@@ -164,7 +164,7 @@ def canonicalize_readonly_sql(
         # Strip markdown fences
         sql = re.sub(r"^```[a-zA-Z]*\n?", "", sql.strip())
         sql = re.sub(r"\n?```$", "", sql.strip())
-        lines = [l for l in sql.splitlines() if l.strip().lower() not in ("<sql>", "</sql>", "```", "```sql", "```xml")]
+        lines = [line for line in sql.splitlines() if line.strip().lower() not in ("<sql>", "</sql>", "```", "```sql", "```xml")]
         sql = "\n".join(lines).strip()
 
     try:
