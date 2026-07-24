@@ -116,8 +116,10 @@ async def lifespan(app: FastAPI):
             sf_conn_params = SnowflakeWarehouseConnector(dsn=settings.snowflake_dsn or "")._parse_dsn() if settings.snowflake_dsn else None
             sf_pool = SnowflakeConnectionPool(conn_params=sf_conn_params, pool_size=5) if sf_conn_params else None
             
-            base_connector = SnowflakeWarehouseConnector(dsn=settings.snowflake_dsn or "", pool=sf_pool)
-            warehouse_connector = TenantRoutingWarehouseConnector(settings=settings, db_pool=pool)
+            # Pass the pre-warmed pool to the routing connector so that
+            # tenant-resolved connectors reuse persistent connections instead
+            # of opening a fresh TLS handshake per query (slow path).
+            warehouse_connector = TenantRoutingWarehouseConnector(settings=settings, db_pool=pool, sf_pool=sf_pool)
             app.state.sf_pool = sf_pool  # stored for teardown
         else:
             dsn = settings.snowflake_dsn or "dummy_dsn"

@@ -199,12 +199,14 @@ async def test_deepgram_provider_happy_path_interim_then_final(mock_logger):
         async for evt in provider.stream(fake_frames()):
             events.append(evt)
 
-    assert len(events) == 2
+    assert len(events) == 3
     assert isinstance(events[0], InterimTranscriptEvent)
     assert events[0].text == "show revenue"
-    assert isinstance(events[1], FinalTranscriptEvent)
+    assert isinstance(events[1], InterimTranscriptEvent)
     assert events[1].text == "show revenue by region"
-    assert events[1].confidence == 0.94
+    assert isinstance(events[2], FinalTranscriptEvent)
+    assert events[2].text == "show revenue by region"
+    assert events[2].confidence == 0.94
 
 async def test_deepgram_provider_concatenates_final_segments_until_stream_close(mock_logger):
     first_final_segment = json.dumps({

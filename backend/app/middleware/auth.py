@@ -97,7 +97,10 @@ class ClerkJwtVerifier:
 
         snowflake_role_claim = payload.get(self.settings.clerk_snowflake_role_claim)
         if not snowflake_role_claim:
-            logger.warning(
+            # In the Clerk native org flow (no JWT templates), this claim is
+            # absent by design on every request. Log at DEBUG, not WARNING, to
+            # avoid polluting the error channel with expected behaviour.
+            logger.debug(
                 "auth.snowflake_role_claim_missing user_id=%s tenant_id=%s falling_back_to=ANALYST_READONLY",
                 user_id_str,
                 tenant_id_str,

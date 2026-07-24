@@ -406,51 +406,6 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       });
   }, []);
 
-  // Pre-warm the recording AudioContext and its worklet module as soon as
-  // the app mounts, instead of only inside the mic-press click handler.
-  // AudioContext construction + audioWorklet.addModule() (a same-origin
-  // fetch + compile of /audio-processor.js) were previously the first thing
-  // startRecording() did after the mic permission prompt resolved — a real
-  // dead-air window where the audio graph isn't connected yet, so anything
-  // the user says the instant they grant mic permission (extremely common
-  // behavior) was never captured at all. Doing this ahead of time means
-  // startRecording() usually only needs a cheap `resume()` before audio
-  // starts flowing. Creating an AudioContext without a user gesture is
-  // allowed by browsers (it just stays "suspended" until resumed by one,
-  // which the mic-press click itself provides); only playback requires the
-  // gesture, and no audio is played here.
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    if (!navigator?.mediaDevices?.getUserMedia || typeof AudioWorkletNode === "undefined") {
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-          return;
-        }
-        const audioContext = createBrowserAudioContext({ sampleRate: 16000 });
-        await audioContext.audioWorklet.addModule("/audio-processor.js");
-        if (cancelled) {
-          await audioContext.close().catch(() => {});
-          return;
-        }
-        audioContextRef.current = audioContext;
-      } catch (error) {
-        // Non-fatal: startRecording() falls back to creating the context
-        // itself on click if pre-warming failed for any reason (e.g. the
-        // worklet file failed to load, or a restrictive browser policy
-        // blocked audio node creation before any user gesture).
-        console.error("Audio pre-warm failed:", error);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const getTokenRef = useRef(auth.getToken);
   useEffect(() => {
@@ -991,6 +946,12 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
         },
         await auth.getToken()
       );
+      // Update the displayed text to reflect the clarified intent so the
+      // QueryDock, the active-state transcript, and the result echo all show
+      // what the user actually resolved to, not just the original raw query.
+      const clarifiedText = `${submittedText} → ${selection}`;
+      setSubmittedText(clarifiedText);
+      setActiveTurnRequest(clarifiedText, currentTurnRequestRef.current?.parentTurnId ?? null);
       setClarification({ pending: false, question: null, options: [] });
       setTurnState("executing");
       setNotice("Clarification submitted. Waiting for pipeline result.");
@@ -1001,6 +962,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       setTurnState("recoverable_error");
       setNotice(errorMessage(error, "Could not resolve clarification. Try submitting again."), "error");
     }
+
   }
 
   async function loadResult(turnId: string) {

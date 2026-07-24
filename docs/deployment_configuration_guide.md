@@ -119,3 +119,11 @@ Whenever a new Clerk Organization is onboarded:
    * Open `https://<your-vercel-domain>.vercel.app`.
    * Sign in with a Clerk user. Select an active organization using the `<OrganizationSwitcher />`.
 3. **Run Query**: Ask *"Show total revenue for delivered orders"* to verify end-to-end multi-tenant routing against Snowflake.
+
+## 4. Demo Preparation for Snowflake Timeout
+
+1. **Snowflake**:
+   ```sql
+   ALTER WAREHOUSE COMPUTE_WH SET AUTO_SUSPEND = 300;
+   ```
+*This keeps the warehouse warm for 5 minutes after each query instead of 60 seconds, dramatically reducing the window where a cold-start is possible during back-to-back demo queries.*

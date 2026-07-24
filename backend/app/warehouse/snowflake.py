@@ -12,8 +12,10 @@ from app.warehouse.sql_policy import SqlPolicyError, canonicalize_readonly_sql
 
 logger = logging.getLogger(__name__)
 
-# Default query timeout in seconds. Configurable via constructor.
-_DEFAULT_TIMEOUT_SECONDS = 30
+# Default query timeout in seconds. 60s gives Snowflake's COMPUTE_WH enough
+# time to resume from auto-suspend (which can take 30-45s on a cold start)
+# without hanging indefinitely. Configurable via constructor.
+_DEFAULT_TIMEOUT_SECONDS = 60
 
 
 def _redact_dsn(dsn: str) -> str:

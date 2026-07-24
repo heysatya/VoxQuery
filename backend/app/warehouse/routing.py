@@ -9,14 +9,15 @@ from cryptography.fernet import Fernet
 from app.config import Settings
 from app.models.contracts import ResultPayload, ResultShape, SchemaTable
 from app.warehouse.connector import WarehouseConnector
-from app.warehouse.snowflake import SnowflakeWarehouseConnector
+from app.warehouse.snowflake import SnowflakeConnectionPool, SnowflakeWarehouseConnector
 
 logger = logging.getLogger(__name__)
 
 class TenantRoutingWarehouseConnector(WarehouseConnector):
-    def __init__(self, settings: Settings, db_pool: asyncpg.Pool):
+    def __init__(self, settings: Settings, db_pool: asyncpg.Pool, sf_pool: SnowflakeConnectionPool | None = None):
         self.settings = settings
         self.db_pool = db_pool
+        self.sf_pool = sf_pool  # Pre-warmed pool shared across all tenants
         self.fernet = Fernet(settings.fernet_key.encode()) if settings.fernet_key else None
         self._cache: dict[str, tuple[WarehouseConnector, datetime]] = {}
 
@@ -29,7 +30,7 @@ class TenantRoutingWarehouseConnector(WarehouseConnector):
         if not self.fernet:
             # Fallback for dev/test mode if no encryption configured
             if self.settings.snowflake_dsn:
-                connector = SnowflakeWarehouseConnector(dsn=self.settings.snowflake_dsn)
+                connector = SnowflakeWarehouseConnector(dsn=self.settings.snowflake_dsn, pool=self.sf_pool)
                 self._cache[tenant_id] = (connector, datetime.now(UTC))
                 return connector
             raise RuntimeError("FERNET_KEY is required to decrypt tenant warehouse configurations.")
@@ -50,7 +51,7 @@ class TenantRoutingWarehouseConnector(WarehouseConnector):
             logger.error(f"Failed to decrypt DSN for tenant {tenant_id}: {e}")
             raise RuntimeError("Failed to decrypt warehouse connection configuration.") from e
 
-        connector = SnowflakeWarehouseConnector(dsn=decrypted_dsn)
+        connector = SnowflakeWarehouseConnector(dsn=decrypted_dsn, pool=self.sf_pool)
         self._cache[tenant_id] = (connector, datetime.now(UTC))
         return connector
 

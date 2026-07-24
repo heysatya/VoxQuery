@@ -132,8 +132,8 @@ class DeepgramSttProvider(SttProvider):
             "&sample_rate=16000"
             "&channels=1"
             "&interim_results=true"
-            "&endpointing=500"
-            "&utterance_end_ms=1000"
+            "&endpointing=1500"         # 1.5s silence before speech_final fires.
+            "&utterance_end_ms=2500"    # 2.5s silence before UtteranceEnd fires — the authoritative submission signal.
             "&vad_events=true"
             f"{keyterm_params}"
             f"{mip_opt_out_param}"
@@ -287,12 +287,14 @@ class DeepgramSttProvider(SttProvider):
                             latest_interim = None
                             text = aggregate_interim()
 
-                            if data.get("speech_final", False):
-                                final_event = aggregate_final()
-                                if final_event:
-                                    yield final_event
-                                    break
-                            elif sender_done.is_set():
+                            # speech_final=True means Deepgram's VAD detected
+                            # an endpointing silence boundary. We accumulate it
+                            # into final_segments but do NOT submit yet — we wait
+                            # for UtteranceEnd (the authoritative signal) so that
+                            # mid-sentence thinking pauses don't trigger early
+                            # submission. Only a manual stop_recording bypasses
+                            # this and flushes immediately.
+                            if sender_done.is_set():
                                 # Manual stop: keep reading until Deepgram flushes or closes.
                                 if text:
                                     yield InterimTranscriptEvent(text=text)
