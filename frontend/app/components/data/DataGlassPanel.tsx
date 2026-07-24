@@ -29,6 +29,15 @@ import { TrustPanel } from "./TrustPanel";
 function ChartRenderer({ type, result, onDrillDown }: { type: ChartType; result: LastResult["resultData"]; onDrillDown?: (query: string) => void }) {
   const data = result.result;
   const columnSemantics = semanticColumns(result);
+
+  const columnSemanticsMap = React.useMemo(() => {
+    const map: Record<string, typeof columnSemantics[number]> = {};
+    columnSemantics.forEach((col) => {
+      map[col.name] = col;
+    });
+    return map;
+  }, [columnSemantics]);
+
   if (!data.columns || !data.rows || data.rows.length === 0) {
     return <div className="p-8 text-center text-[var(--text-muted)]">No data to display</div>;
   }
@@ -71,14 +80,6 @@ function ChartRenderer({ type, result, onDrillDown }: { type: ChartType; result:
       </div>
     );
   }
-
-  const columnSemanticsMap = React.useMemo(() => {
-    const map: Record<string, typeof columnSemantics[number]> = {};
-    columnSemantics.forEach((col) => {
-      map[col.name] = col;
-    });
-    return map;
-  }, [columnSemantics]);
 
   const yCol = columnSemantics.length > 1 ? columnSemantics[1] : undefined;
 
