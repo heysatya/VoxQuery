@@ -23,7 +23,7 @@ async def test_pipeline_enqueues_turn_with_identity():
     audit = MagicMock(spec=AuditStore)
     
     pipeline = PipelineOrchestrator(sessions, events, audit)
-    claims = AuthClaims(user_id=uuid.uuid4(), tenant_id=uuid.uuid4())
+    claims = AuthClaims(user_id=str(uuid.uuid4()), tenant_id=str(uuid.uuid4()))
     session, _ = await sessions.create(claims)
     req = QueryRequest(session_id=session.session_id, submitted_text="hello", input_modality="text")
     
@@ -71,7 +71,7 @@ async def test_pipeline_resolves_ambiguity_with_actual_term():
     audit = MagicMock(spec=AuditStore)
     
     pipeline = PipelineOrchestrator(sessions, events, audit)
-    claims = AuthClaims(user_id=uuid.uuid4(), tenant_id=uuid.uuid4())
+    claims = AuthClaims(user_id=str(uuid.uuid4()), tenant_id=str(uuid.uuid4()))
     session, _ = await sessions.create(claims)
     req = QueryRequest(session_id=session.session_id, submitted_text="hello", input_modality="text")
     

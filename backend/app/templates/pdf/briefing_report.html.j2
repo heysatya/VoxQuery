@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>VoxQuery Executive Briefing Report</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 20mm;
+      @bottom-right {
+        content: "Page " counter(page) " of " counter(pages);
+        font-family: Helvetica, Arial, sans-serif;
+        font-size: 9pt;
+        color: #666;
+      }
+    }
+    body {
+      font-family: Helvetica, Arial, sans-serif;
+      color: #1e293b;
+      line-height: 1.5;
+    }
+    h1 {
+      color: #0f172a;
+      font-size: 24pt;
+      margin-bottom: 4px;
+    }
+    .subtitle {
+      font-size: 10pt;
+      color: #64748b;
+      margin-bottom: 24px;
+      border-bottom: 2px solid #e2e8f0;
+      padding-bottom: 12px;
+    }
+    .section-title {
+      font-size: 14pt;
+      font-weight: bold;
+      color: #334155;
+      margin-top: 20px;
+      margin-bottom: 10px;
+      border-bottom: 1px solid #cbd5e1;
+      padding-bottom: 4px;
+    }
+    .kpi-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 20px;
+    }
+    .kpi-table th, .kpi-table td {
+      border: 1px solid #e2e8f0;
+      padding: 8px 12px;
+      text-align: left;
+      font-size: 10pt;
+    }
+    .kpi-table th {
+      background-color: #f8fafc;
+      font-weight: bold;
+    }
+    .narrative {
+      background-color: #f1f5f9;
+      padding: 12px 16px;
+      border-left: 4px solid #4f46e5;
+      border-radius: 4px;
+      font-size: 11pt;
+      margin-bottom: 20px;
+    }
+    ul {
+      margin-top: 4px;
+      padding-left: 20px;
+    }
+    li {
+      margin-bottom: 6px;
+      font-size: 10pt;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>VoxQuery Morning Briefing</h1>
+  <div class="subtitle">
+    Date: {{ briefing.date }} | Tenant: {{ tenant_name }} | Generated: {{ generated_at }}
+  </div>
+
+  <div class="narrative">
+    <strong>Executive Summary:</strong><br/>
+    {{ briefing.summary_narrative }}
+  </div>
+
+  <div class="section-title">Key Performance Indicators</div>
+  <table class="kpi-table">
+    <thead>
+      <tr>
+        <th>Metric Label</th>
+        <th>Current Value</th>
+        <th>Change</th>
+        <th>Trend</th>
+        <th>Key Insight</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for kpi in briefing.kpis %}
+      <tr>
+        <td><strong>{{ kpi.label }}</strong></td>
+        <td>{{ kpi.value }}</td>
+        <td>{{ kpi.change_pct }}%</td>
+        <td>{{ kpi.trend | upper }}</td>
+        <td>{{ kpi.insight }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if briefing.proactive_insights %}
+  <div class="section-title">Recommended Proactive Actions</div>
+  <ul>
+    {% for insight in briefing.proactive_insights %}
+    <li>{{ insight }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if briefing.anomalies %}
+  <div class="section-title">Detected Statistical Outliers</div>
+  <ul>
+    {% for anomaly in briefing.anomalies %}
+    <li><strong>[{{ anomaly.severity | upper }}]</strong> {{ anomaly.title }}: {{ anomaly.description }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+</body>
+</html>

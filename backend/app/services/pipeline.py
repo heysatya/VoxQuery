@@ -3,7 +3,10 @@ from typing import Any
 import asyncio
 import hashlib
 import json
+import logging
 from time import perf_counter
+
+logger = logging.getLogger(__name__)
 from uuid import UUID
 
 from app.audit.store import AuditStore, AuditClarification
@@ -63,6 +66,7 @@ class PipelineOrchestrator:
         self.db_pool = db_pool
         self.turns: dict[UUID, TurnRecord] = {}
         self._in_flight: set[UUID] = set()
+        self._background_tasks: set[asyncio.Task] = set()
 
     async def submit_query(self, request: QueryRequest, claims: AuthClaims) -> TurnRecord:
         session = await self.sessions.get_for_claims(claims, request.session_id)
@@ -170,7 +174,9 @@ class PipelineOrchestrator:
         return turn
 
     def _schedule_pipeline_task(self, coroutine, session_id: UUID) -> None:
-        asyncio.create_task(coroutine, name=f"pipeline-{session_id}")
+        task = asyncio.create_task(coroutine, name=f"pipeline-{session_id}")
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     async def _run_turn_background(self, session, turn: TurnRecord, claims: AuthClaims, *, clarification_triggered: bool = False, clarification: AuditClarification | None = None) -> None:
         await asyncio.sleep(0.05)
@@ -187,7 +193,14 @@ class PipelineOrchestrator:
                         message=ERROR_MESSAGES.get(exc.code, exc.code.value),
                     ),
                 )
-                raise exc
+                logger.warning(
+                    "Background pipeline turn ended with ApiError: turn_id=%s session_id=%s tenant_id=%s code=%s detail=%s",
+                    turn.turn_id,
+                    session.session_id,
+                    session.tenant_id,
+                    exc.code.value,
+                    exc.detail,
+                )
             except Exception as exc:
                 tracer.span_turn_completed(trace, turn.latency_ms, success=False)
                 await self.events.publish(
@@ -198,7 +211,13 @@ class PipelineOrchestrator:
                         message=ERROR_MESSAGES[ErrorCode.internal_error],
                     ),
                 )
-                print(f"BACKGROUND EXCEPTION: {exc}")
+                logger.exception(
+                    "Background pipeline turn failed: turn_id=%s session_id=%s tenant_id=%s error=%s",
+                    turn.turn_id,
+                    session.session_id,
+                    session.tenant_id,
+                    str(exc)
+                )
                 raise exc
             finally:
                 self._in_flight.discard(session.session_id)
@@ -253,14 +272,16 @@ class PipelineOrchestrator:
         )
 
 
-    async def _get_cached_result(self, tenant_id: UUID, sql: str) -> tuple[ResultPayload, ResultShape] | None:
+    async def _get_cached_result(
+        self, tenant_id: UUID, sql: str, snowflake_role: str
+    ) -> tuple[ResultPayload, ResultShape] | None:
         if self.settings.result_cache_ttl_seconds <= 0:
             return None
         client = getattr(self.sessions, "client", None)
         if client is None:
             return None
         try:
-            raw = await client.get(self._cache_key(tenant_id, sql))
+            raw = await client.get(self._cache_key(tenant_id, sql, snowflake_role))
         except Exception:
             return None
         if raw is None:
@@ -282,6 +303,7 @@ class PipelineOrchestrator:
         sql: str,
         result: ResultPayload,
         shape: ResultShape,
+        snowflake_role: str,
     ) -> None:
         if self.settings.result_cache_ttl_seconds <= 0:
             return
@@ -295,14 +317,23 @@ class PipelineOrchestrator:
             }
         )
         try:
-            await client.setex(self._cache_key(tenant_id, sql), self.settings.result_cache_ttl_seconds, payload)
+            await client.setex(
+                self._cache_key(tenant_id, sql, snowflake_role),
+                self.settings.result_cache_ttl_seconds,
+                payload,
+            )
         except Exception:
             return
 
     @staticmethod
-    def _cache_key(tenant_id: UUID, sql: str) -> str:
+    def _cache_key(tenant_id: UUID, sql: str, snowflake_role: str) -> str:
+        # Snowflake row-level security is enforced per-role at execution time, so
+        # the cache MUST be scoped by role in addition to tenant + SQL text.
+        # Without this, two users in the same tenant with different roles (and
+        # therefore different row-level visibility) could silently receive each
+        # other's cached, role-scoped results for identical SQL text.
         sql_hash = hashlib.sha256(sql.encode("utf-8")).hexdigest()
-        return f"query_cache:{tenant_id}:{sql_hash}"
+        return f"query_cache:{tenant_id}:{snowflake_role}:{sql_hash}"
 
     async def _publish_stage(
         self, session_id: UUID, turn_id: UUID, stage: PipelineStage, started: float

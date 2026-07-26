@@ -199,12 +199,14 @@ async def test_deepgram_provider_happy_path_interim_then_final(mock_logger):
         async for evt in provider.stream(fake_frames()):
             events.append(evt)
 
-    assert len(events) == 2
+    assert len(events) == 3
     assert isinstance(events[0], InterimTranscriptEvent)
     assert events[0].text == "show revenue"
-    assert isinstance(events[1], FinalTranscriptEvent)
+    assert isinstance(events[1], InterimTranscriptEvent)
     assert events[1].text == "show revenue by region"
-    assert events[1].confidence == 0.94
+    assert isinstance(events[2], FinalTranscriptEvent)
+    assert events[2].text == "show revenue by region"
+    assert events[2].confidence == 0.94
 
 async def test_deepgram_provider_concatenates_final_segments_until_stream_close(mock_logger):
     first_final_segment = json.dumps({
@@ -373,3 +375,125 @@ async def test_deepgram_provider_websocket_disconnect_passes_transparently(mock_
         with pytest.raises(WebSocketDisconnect):
             async for evt in provider.stream(disconnect_frames()):
                 pass
+
+
+# ---------------------------------------------------------------------------
+# URL construction: keyterm prompting (nova-3-compatible) and mip_opt_out.
+#
+# NOTE: nova-3 does not support the older `keywords` param with intensifier
+# syntax (e.g. "ARR:2.5") — Deepgram's docs are explicit that this only works
+# on Nova-2 and older models. The correct param for nova-3 is `keyterm`, as
+# plain phrases with no boost syntax. These tests assert the actual URL sent
+# to Deepgram uses the correct, functional parameter.
+# ---------------------------------------------------------------------------
+
+
+async def test_deepgram_provider_url_uses_keyterm_not_keywords(mock_logger):
+    """nova-3 only supports `keyterm`; the old `keywords=term:boost` syntax is
+    silently non-functional on this model and must never be sent."""
+    mock_ws = MockDeepgramWS([])
+    captured_urls = []
+
+    async def fake_frames():
+        yield b"chunk"
+
+    def capture_connect(url, **kwargs):
+        captured_urls.append(url)
+        return mock_ws
+
+    provider = DeepgramSttProvider(
+        api_key="sk-test-placeholder", logger=mock_logger, keyterms=["ARR", "MRR", "Snowflake"]
+    )
+
+    with patch("websockets.connect", side_effect=capture_connect):
+        async for _ in provider.stream(fake_frames()):
+            pass
+
+    assert len(captured_urls) == 1
+    url = captured_urls[0]
+    assert "model=nova-3" in url
+    assert "keyterm=ARR" in url
+    assert "keyterm=MRR" in url
+    assert "keyterm=Snowflake" in url
+    # The old, non-functional-on-nova-3 parameter must never appear.
+    assert "keywords=" not in url
+    # Old-style intensifier boost syntax must never appear either.
+    assert ":2.5" not in url and ":1.5" not in url
+
+
+async def test_deepgram_provider_defaults_to_generic_keyterms_when_none_given(mock_logger):
+    mock_ws = MockDeepgramWS([])
+    captured_urls = []
+
+    async def fake_frames():
+        yield b"chunk"
+
+    def capture_connect(url, **kwargs):
+        captured_urls.append(url)
+        return mock_ws
+
+    provider = DeepgramSttProvider(api_key="sk-test-placeholder", logger=mock_logger)
+
+    with patch("websockets.connect", side_effect=capture_connect):
+        async for _ in provider.stream(fake_frames()):
+            pass
+
+    url = captured_urls[0]
+    for term in DeepgramSttProvider.DEFAULT_KEYTERMS:
+        assert f"keyterm={term}" in url
+
+
+async def test_deepgram_provider_mip_opt_out_false_by_default(mock_logger):
+    """mip_opt_out has a real cost tradeoff (forgoes a Deepgram program
+    discount) so it must default to off/unset, not silently enabled."""
+    mock_ws = MockDeepgramWS([])
+    captured_urls = []
+
+    async def fake_frames():
+        yield b"chunk"
+
+    def capture_connect(url, **kwargs):
+        captured_urls.append(url)
+        return mock_ws
+
+    provider = DeepgramSttProvider(api_key="sk-test-placeholder", logger=mock_logger)
+
+    with patch("websockets.connect", side_effect=capture_connect):
+        async for _ in provider.stream(fake_frames()):
+            pass
+
+    assert "mip_opt_out" not in captured_urls[0]
+
+
+async def test_deepgram_provider_mip_opt_out_true_when_enabled(mock_logger):
+    mock_ws = MockDeepgramWS([])
+    captured_urls = []
+
+    async def fake_frames():
+        yield b"chunk"
+
+    def capture_connect(url, **kwargs):
+        captured_urls.append(url)
+        return mock_ws
+
+    provider = DeepgramSttProvider(api_key="sk-test-placeholder", logger=mock_logger, mip_opt_out=True)
+
+    with patch("websockets.connect", side_effect=capture_connect):
+        async for _ in provider.stream(fake_frames()):
+            pass
+
+    assert "mip_opt_out=true" in captured_urls[0]
+
+
+def test_build_stt_provider_wires_mip_opt_out_setting():
+    settings = Settings(
+        APP_ENV="test", STT_PROVIDER="deepgram", DEEPGRAM_API_KEY="sk-test", DEEPGRAM_MIP_OPT_OUT=True
+    )
+    provider = build_stt_provider(settings)
+    assert isinstance(provider, DeepgramSttProvider)
+    assert provider._mip_opt_out is True
+
+
+def test_deepgram_mip_opt_out_defaults_false_in_settings():
+    settings = Settings(APP_ENV="test", STT_PROVIDER="deepgram", DEEPGRAM_API_KEY="sk-test")
+    assert settings.deepgram_mip_opt_out is False

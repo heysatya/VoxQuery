@@ -1,8 +1,6 @@
 import logging
-from uuid import UUID
 
-import asyncpg
-from fastapi import Depends, Header, WebSocket
+from fastapi import Depends, Header, WebSocket, WebSocketDisconnect
 import jwt
 from jwt import PyJWKClient
 from jwt.exceptions import PyJWTError
@@ -12,13 +10,9 @@ from app.models.contracts import ApiError, AuthClaims, ErrorCode
 
 logger = logging.getLogger(__name__)
 
-LOCAL_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
-LOCAL_TENANT_ID = UUID("00000000-0000-0000-0000-000000000101")
+LOCAL_USER_ID = "00000000-0000-0000-0000-000000000001"
+LOCAL_TENANT_ID = "00000000-0000-0000-0000-000000000101"
 _VERIFIER_CACHE: dict[tuple[str | None, ...], "ClerkJwtVerifier"] = {}
-
-# Simple in-process role cache to avoid hitting DB on every request.
-# Key: user_id (str), Value: role (str)
-_ROLE_CACHE: dict[str, str] = {}
 
 
 class ClerkJwtVerifier:
@@ -54,33 +48,73 @@ class ClerkJwtVerifier:
                 detail=f"JWT validation failed: {type(exc).__name__}",
             ) from exc
 
-    def claims_from_payload(self, payload: dict, role: str = "viewer") -> AuthClaims:
-        try:
-            user_id_str = str(payload[self.settings.clerk_user_id_claim])
-            snowflake_role_claim = payload.get(self.settings.clerk_snowflake_role_claim)
-            if snowflake_role_claim is None:
-                # Not blocking here — a missing claim with a valid default is a legitimate
-                # setup for many tenants. But this is worth being visible in logs, since a
-                # silent fallback to a role that happens to lack grants on a given tenant's
-                # schema produces the same opaque "warehouse_error" this comment is next to.
-                logger.warning(
-                    "auth.snowflake_role_claim_missing user_id=%s tenant_id=%s falling_back_to=ANALYST_READONLY",
-                    user_id_str,
-                    payload.get(self.settings.clerk_tenant_id_claim),
-                )
-            return AuthClaims(
-                user_id=UUID(user_id_str),
-                tenant_id=UUID(str(payload[self.settings.clerk_tenant_id_claim])),
-                email=str(payload.get(self.settings.clerk_email_claim, f"unknown_{user_id_str}@voxquery.test")),
-                role=role,
-                snowflake_role=str(snowflake_role_claim or "ANALYST_READONLY"),
-            )
-        except (KeyError, TypeError, ValueError) as exc:
+    def claims_from_payload(self, payload: dict) -> AuthClaims:
+        user_id_val = payload.get("sub")
+        if not user_id_val:
             raise ApiError(
                 ErrorCode.auth_invalid,
                 status_code=401,
-                detail="JWT is missing required VoxQuery authorization claims.",
-            ) from exc
+                detail="JWT is missing required 'sub' claim.",
+            )
+
+        user_id_str = str(user_id_val).strip()
+        if not user_id_str:
+            raise ApiError(
+                ErrorCode.auth_invalid,
+                status_code=401,
+                detail="JWT 'sub' claim cannot be empty.",
+            )
+
+        # Extract active organization from v2 compact claim payload["o"] or legacy org_id
+        org_claim = payload.get("o")
+        tenant_id_val = None
+        raw_role = None
+
+        if isinstance(org_claim, dict):
+            tenant_id_val = org_claim.get("id")
+            raw_role = org_claim.get("rol")
+        
+        if not tenant_id_val:
+            tenant_id_val = payload.get("org_id")
+            if not raw_role:
+                raw_role = payload.get("org_role")
+
+        if not tenant_id_val:
+            raise ApiError(
+                ErrorCode.auth_invalid,
+                status_code=401,
+                detail="Active organization context is required. No active organization found in token.",
+            )
+
+        tenant_id_str = str(tenant_id_val)
+
+        # Normalize role: org:admin / admin -> admin; org:member / member -> viewer
+        normalized_role = "viewer"
+        if raw_role:
+            role_str = str(raw_role).lower()
+            if role_str in {"admin", "org:admin"}:
+                normalized_role = "admin"
+
+        snowflake_role_claim = payload.get(self.settings.clerk_snowflake_role_claim)
+        if not snowflake_role_claim:
+            # In the Clerk native org flow (no JWT templates), this claim is
+            # absent by design on every request. Log at DEBUG, not WARNING, to
+            # avoid polluting the error channel with expected behaviour.
+            logger.debug(
+                "auth.snowflake_role_claim_missing user_id=%s tenant_id=%s falling_back_to=ANALYST_READONLY",
+                user_id_str,
+                tenant_id_str,
+            )
+
+        email_val = payload.get(self.settings.clerk_email_claim) or payload.get("email") or ""
+
+        return AuthClaims(
+            user_id=user_id_str,
+            tenant_id=tenant_id_str,
+            email=str(email_val),
+            role=normalized_role,
+            snowflake_role=str(snowflake_role_claim or "ANALYST_READONLY"),
+        )
 
 
 def get_clerk_verifier(settings: Settings) -> ClerkJwtVerifier:
@@ -99,28 +133,6 @@ def get_clerk_verifier(settings: Settings) -> ClerkJwtVerifier:
     return _VERIFIER_CACHE[cache_key]
 
 
-async def _lookup_role_from_db(user_id: str, settings: Settings) -> str:
-    """Look up the user's role from Supabase. Falls back to 'viewer' on any error."""
-    if user_id in _ROLE_CACHE:
-        return _ROLE_CACHE[user_id]
-    if not settings.supabase_database_url:
-        return "viewer"
-    try:
-        conn = await asyncpg.connect(settings.supabase_database_url, statement_cache_size=0)
-        try:
-            row = await conn.fetchrow(
-                "SELECT role FROM users WHERE id = $1::uuid",
-                user_id,
-            )
-            role = row["role"] if row and row["role"] else "viewer"
-        finally:
-            await conn.close()
-        _ROLE_CACHE[user_id] = role
-        return role
-    except Exception:
-        return "viewer"
-
-
 async def get_current_user(
     authorization: str | None = Header(default=None),
     x_fake_user_id: str | None = Header(default=None),
@@ -130,8 +142,8 @@ async def get_current_user(
 ) -> AuthClaims:
     if settings.auth_mode == "fake":
         return AuthClaims(
-            user_id=UUID(x_fake_user_id) if x_fake_user_id else LOCAL_USER_ID,
-            tenant_id=UUID(x_fake_tenant_id) if x_fake_tenant_id else LOCAL_TENANT_ID,
+            user_id=x_fake_user_id if x_fake_user_id else LOCAL_USER_ID,
+            tenant_id=x_fake_tenant_id if x_fake_tenant_id else LOCAL_TENANT_ID,
             role=x_fake_role if x_fake_role else "admin",
         )
     if not authorization:
@@ -144,24 +156,7 @@ async def get_current_user(
 
     verifier = get_clerk_verifier(settings)
     payload = verifier.verify(token)
-
-    # The Clerk JWT does not include a `role` claim unless explicitly configured
-    # in a Clerk session token template. We resolve the role from the DB instead,
-    # using the vox_user_id embedded in the JWT. This makes the DB the single
-    # source of truth for authorization.
-    user_id_str = str(payload.get(settings.clerk_user_id_claim, ""))
-    role_from_jwt = str(payload.get(settings.clerk_role_claim, ""))
-
-    if role_from_jwt and role_from_jwt in {"admin", "viewer", "editor"}:
-        # If Clerk session template is configured and provides the role, use it.
-        role = role_from_jwt
-    elif user_id_str:
-        # Fall back to DB lookup.
-        role = await _lookup_role_from_db(user_id_str, settings)
-    else:
-        role = "viewer"
-
-    return verifier.claims_from_payload(payload, role=role)
+    return verifier.claims_from_payload(payload)
 
 
 async def authenticate_websocket_message(
@@ -173,18 +168,28 @@ async def authenticate_websocket_message(
     try:
         message = await websocket.receive_json()
         if message.get("event") != "auth" or not message.get("token"):
-            await websocket.close(code=4001)
+            try:
+                await websocket.close(code=4001)
+            except Exception:
+                pass
             return None
         token = message["token"]
         verifier = get_clerk_verifier(settings)
         payload = verifier.verify(token)
-        user_id_str = str(payload.get(settings.clerk_user_id_claim, ""))
-        role = await _lookup_role_from_db(user_id_str, settings) if user_id_str else "viewer"
-        return verifier.claims_from_payload(payload, role=role)
+        return verifier.claims_from_payload(payload)
+    except WebSocketDisconnect:
+        return None
     except ApiError:
-        await websocket.close(code=4001)
+        try:
+            await websocket.close(code=4001)
+        except Exception:
+            pass
         return None
     except Exception:
-        await websocket.close(code=4001)
+        try:
+            await websocket.close(code=4001)
+        except Exception:
+            pass
         return None
+
 

@@ -6,9 +6,9 @@ from app.models.contracts import TurnRecord
 
 @dataclass
 class AuditIdentity:
-    tenant_id: UUID
+    tenant_id: str
     tenant_name: str
-    user_id: UUID
+    user_id: str
     email: str
     role: str
     snowflake_role: str
@@ -50,9 +50,9 @@ class AuditStore(Protocol):
         """
         ...
         
-    async def get_low_quality_feedback(self, limit: int = 50, offset: int = 0) -> list[dict]:
+    async def get_low_quality_feedback(self, limit: int = 50, offset: int = 0, tenant_id: str | None = None) -> list[dict]:
         """
-        Asynchronously retrieve a list of turns marked with 'low' quality feedback.
+        Asynchronously retrieve a list of turns marked with 'low' quality feedback for a tenant.
         """
         ...
 

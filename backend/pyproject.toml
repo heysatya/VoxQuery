@@ -25,6 +25,8 @@ dependencies = [
   "cryptography>=43.0.0",
   "svix>=1.24.0",
   "clerk-backend-api>=1.0.0",
+  "jinja2>=3.1.0",
+  "weasyprint>=62.0",
 ]
 
 [project.optional-dependencies]
@@ -49,8 +51,10 @@ target-version = "py312"
 packages = ["app"]
 
 [tool.ruff.lint]
+select = ["E", "F"]
 ignore = [
   "E402", # Module level import not at top of file
+  "E501", # Line too long
   "F401", # Unused imports
   "F841", # Unused local variables
   "F811", # Redefinition of unused imports

@@ -79,8 +79,8 @@ def test_ws_tts_success(auth_token, override_tts_fake):
     
     # Manually inject a turn into the session for testing
     from app.main import app as main_app
-    fake_user_id = UUID("00000000-0000-0000-0000-000000000001")
-    fake_tenant_id = UUID("00000000-0000-0000-0000-000000000101")
+    fake_user_id = "00000000-0000-0000-0000-000000000001"
+    fake_tenant_id = "00000000-0000-0000-0000-000000000101"
     from app.models.contracts import InputModality, TurnRecord
     
     turn_id = uuid4()

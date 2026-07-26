@@ -22,24 +22,44 @@ export class ApiRequestError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit, authToken?: string | null): Promise<T> {
-  const response = await fetch(`${apiUrl}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-      ...(init?.headers ?? {})
-    }
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        ...(init?.headers ?? {})
+      }
+    });
+  } catch (error) {
+    // This catches network-level errors like offline, DNS resolution failure, or CORS rejection
+    throw new ApiRequestError(0, "A network error occurred. Please check your internet connection and ensure the server is reachable.", "network_error");
+  }
+
   if (!response.ok) {
-    let message = `Request failed: ${response.status}`;
+    let message = `Request failed with status ${response.status}`;
     let code: string | null = null;
+    
+    // Provide sensible human-readable defaults for common HTTP error codes
+    if (response.status >= 500 && response.status < 600) {
+      message = "The server is currently unreachable or experiencing issues. Please try again later.";
+    } else if (response.status === 404) {
+      message = "The requested resource could not be found.";
+    } else if (response.status === 401 || response.status === 403) {
+      message = "You do not have permission to perform this action. Please check your login status.";
+    } else if (response.status === 429) {
+      message = "Too many requests. Please wait a moment before trying again.";
+    }
+
     try {
       const payload = await response.json();
       message = payload?.error?.message ?? message;
       code = payload?.error?.code ?? null;
     } catch {
-      // Keep the generic status message when a non-contract error body is returned.
+      // Keep the fallback message when a non-contract error body (e.g. raw HTML from a 502) is returned.
     }
+    console.error(`[API Request Error] path=${path} status=${response.status} code=${code} message="${message}"`);
     throw new ApiRequestError(response.status, message, code);
   }
   return response.json() as Promise<T>;

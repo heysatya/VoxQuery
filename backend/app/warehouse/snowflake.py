@@ -6,20 +6,43 @@ import concurrent.futures
 from threading import local as _ThreadLocal
 
 import snowflake.connector
-from app.models.contracts import ChartType, ResultPayload, ResultShape, SchemaTable, ColumnInfo
+from app.models.contracts import ChartType, ResultPayload, ResultShape, SchemaTable, ColumnInfo, ApiError, ErrorCode
 from app.warehouse.connector import WarehouseConnector
 from app.warehouse.sql_policy import SqlPolicyError, canonicalize_readonly_sql
 
 logger = logging.getLogger(__name__)
 
-# Default query timeout in seconds. Configurable via constructor.
-_DEFAULT_TIMEOUT_SECONDS = 30
+# Default query timeout in seconds. 60s gives Snowflake's COMPUTE_WH enough
+# time to resume from auto-suspend (which can take 30-45s on a cold start)
+# without hanging indefinitely. Configurable via constructor.
+_DEFAULT_TIMEOUT_SECONDS = 60
 
 
 def _redact_dsn(dsn: str) -> str:
     """Redact credentials from a DSN string for safe logging."""
     # Replace user:password@... with user:***@...
     return re.sub(r"(snowflake://[^:]+:)[^@]+(@)", r"\1***\2", dsn)
+
+
+# Snowflake unquoted identifiers: letters, digits, underscores, and '$', not
+# starting with a digit. `snowflake_role` originates from a Clerk JWT claim
+# (see app/middleware/auth.py) rather than raw end-user input, but it is still
+# untrusted-until-validated data that ends up spliced into a SQL string below
+# (`USE ROLE IDENTIFIER('...')`) rather than passed as a bound parameter.
+# Validating it against this allowlist before use is defense-in-depth against
+# a malformed or compromised claim being used for SQL injection at the
+# role-switch step, which would otherwise be a privilege-escalation vector.
+_VALID_SNOWFLAKE_ROLE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
+
+
+def _validate_snowflake_role(snowflake_role: str) -> str:
+    if not _VALID_SNOWFLAKE_ROLE.match(snowflake_role):
+        raise ApiError(
+            ErrorCode.internal_error,
+            status_code=500,
+            detail="Snowflake role claim is not a valid identifier.",
+        )
+    return snowflake_role
 
 
 class SnowflakeConnectionPool:
@@ -73,15 +96,13 @@ class SnowflakeConnectionPool:
         try:
             with conn.cursor() as cur:
                 if snowflake_role:
-                    cur.execute(f"USE ROLE IDENTIFIER('{snowflake_role}')")
+                    cur.execute(f"USE ROLE IDENTIFIER('{_validate_snowflake_role(snowflake_role)}')")
                 cur.execute(sql)
                 rows = cur.fetchall()
                 columns = [d[0].lower() for d in cur.description] if cur.description else []
                 return rows, columns, cur.rowcount
         except snowflake.connector.errors.OperationalError as e:
-            raise RuntimeError(
-                f"Snowflake warehouse error: {type(e).__name__}"
-            ) from e
+            raise ApiError(ErrorCode.warehouse_error, status_code=502, detail=f"Snowflake warehouse error: {type(e).__name__}") from e
 
     async def execute(self, sql: str, snowflake_role: str) -> tuple:
         """Async entry point — dispatches to the pre-warmed thread pool."""
@@ -153,18 +174,21 @@ class SnowflakeWarehouseConnector(WarehouseConnector):
                     row_count = cur.rowcount
                     return rows, columns, row_count
         except snowflake.connector.errors.OperationalError as e:
-            # Re-raise as structured timeout / warehouse error — never leak the DSN
             redacted = _redact_dsn(self.dsn)
-            raise RuntimeError(
-                f"Snowflake warehouse timeout or connection error (DSN redacted: {redacted}): {type(e).__name__}"
+            raise ApiError(
+                ErrorCode.warehouse_error,
+                status_code=502,
+                detail=f"Snowflake warehouse timeout or connection error (DSN redacted: {redacted}): {type(e).__name__}"
             ) from e
         except Exception as e:
             redacted = _redact_dsn(self.dsn)
-            raise RuntimeError(
-                f"Snowflake warehouse error (DSN redacted: {redacted}): {type(e).__name__} - {str(e)}"
+            raise ApiError(
+                ErrorCode.warehouse_error,
+                status_code=502,
+                detail=f"Snowflake warehouse error (DSN redacted: {redacted}): {type(e).__name__} - {str(e)}"
             ) from e
 
-    async def execute_readonly(self, sql: str, *, snowflake_role: str, tenant_id: UUID | None = None) -> tuple[ResultPayload, ResultShape]:
+    async def execute_readonly(self, sql: str, *, snowflake_role: str, tenant_id: str | None = None) -> tuple[ResultPayload, ResultShape]:
         canonical = canonicalize_readonly_sql(sql)
         if canonical.sql != sql:
             raise SqlPolicyError("Warehouse received SQL that was not canonicalized by the pipeline.")
@@ -183,8 +207,10 @@ class SnowflakeWarehouseConnector(WarehouseConnector):
                 )
         except asyncio.TimeoutError:
             redacted = _redact_dsn(self.dsn)
-            raise RuntimeError(
-                f"Snowflake query timed out after {self.timeout_seconds}s (DSN redacted: {redacted})."
+            raise ApiError(
+                ErrorCode.warehouse_timeout,
+                status_code=504,
+                detail=f"Snowflake query timed out after {self.timeout_seconds}s (DSN redacted: {redacted})."
             )
 
         list_rows = [list(r) for r in rows]

@@ -17,15 +17,15 @@ async def test_noop_methods_do_not_throw():
     turn = TurnRecord(
         session_id=uuid.uuid4(),
         conversation_id=uuid.uuid4(),
-        user_id=uuid.uuid4(),
-        tenant_id=uuid.uuid4(),
+        user_id=str(uuid.uuid4()),
+        tenant_id=str(uuid.uuid4()),
         user_input="hello",
         input_modality="text"
     )
     identity = AuditIdentity(
-        tenant_id=uuid.uuid4(),
+        tenant_id=str(uuid.uuid4()),
         tenant_name="T",
-        user_id=uuid.uuid4(),
+        user_id=str(uuid.uuid4()),
         email="a@b",
         role="viewer",
         snowflake_role="x",

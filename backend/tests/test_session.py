@@ -54,15 +54,15 @@ class FakeRedis:
 
 def claims() -> AuthClaims:
     return AuthClaims(
-        user_id=UUID("00000000-0000-0000-0000-000000000001"),
-        tenant_id=UUID("00000000-0000-0000-0000-000000000101"),
+        user_id="00000000-0000-0000-0000-000000000001",
+        tenant_id="00000000-0000-0000-0000-000000000101",
     )
 
 
 def other_user_claims() -> AuthClaims:
     return AuthClaims(
-        user_id=UUID("00000000-0000-0000-0000-000000000002"),
-        tenant_id=UUID("00000000-0000-0000-0000-000000000101"),
+        user_id="00000000-0000-0000-0000-000000000002",
+        tenant_id="00000000-0000-0000-0000-000000000101",
     )
 
 

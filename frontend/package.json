@@ -5,30 +5,32 @@
   "scripts": {
     "dev": "next dev",
     "dev:fake": "npx cross-env NEXT_PUBLIC_AUTH_MODE=fake next dev",
-    "build": "next build",
+    "build": "npx next build",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "start": "next start"
   },
   "engines": {
-    "node": "24.x"
+    "node": ">=20.0.0"
   },
   "dependencies": {
-    "@clerk/nextjs": "^7.5.12",
+    "@clerk/nextjs": "^5.7.5",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "framer-motion": "^12.42.2",
     "lucide-react": "^1.23.0",
-    "next": "^16.2.10",
+    "next": "^14.2.35",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-markdown": "^10.1.0",
     "recharts": "^3.9.2",
+    "requires-port": "^1.0.0",
     "sql-formatter": "^15.8.2",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
-    "@csstools/css-calc": "^3.2.1",
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4.3.2",
     "@testing-library/jest-dom": "^6.4.0",
     "@testing-library/react": "^15.0.0",
@@ -36,8 +38,8 @@
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.19",
-    "eslint": "^9.39.4",
-    "eslint-config-next": "^16.2.10",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "^14.2.35",
     "jsdom": "^24.1.0",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.4.0",

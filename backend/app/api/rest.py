@@ -203,7 +203,7 @@ def get_audit(request: Request):
 
 
 def get_db_pool(request: Request):
-    return request.app.state.db_pool
+    return getattr(request.app.state, "db_pool", None)
 
 
 @router.get("/api/admin/feedback")
@@ -215,9 +215,9 @@ async def get_feedback(
 ):
     # Enforce admin role for this route
     if claims.role != "admin":
-        raise ApiError(ErrorCode.auth_invalid, status_code=403, details="Admin access required")
+        raise ApiError(ErrorCode.auth_invalid, status_code=403, detail="Admin access required")
         
-    feedback = await audit.get_low_quality_feedback(limit=limit, offset=offset)
+    feedback = await audit.get_low_quality_feedback(limit=limit, offset=offset, tenant_id=claims.tenant_id)
     return {"data": feedback}
 
 
@@ -227,12 +227,15 @@ async def get_glossary(
     pool = Depends(get_db_pool),
 ):
     if claims.role != "admin":
-        raise ApiError(ErrorCode.auth_invalid, status_code=403, details="Admin access required")
+        raise ApiError(ErrorCode.auth_invalid, status_code=403, detail="Admin access required")
     if not pool:
         return {"data": []}
         
     async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT tenant_id, workspace_name, metric_synonyms, table_synonyms, synonym_hits, total_hits, updated_at FROM admin_glossary_view ORDER BY updated_at DESC")
+        rows = await conn.fetch(
+            "SELECT tenant_id, workspace_name, metric_synonyms, table_synonyms, synonym_hits, total_hits, updated_at FROM admin_glossary_view WHERE tenant_id = $1 ORDER BY updated_at DESC",
+            claims.tenant_id
+        )
         
     import json
     results = []
@@ -251,15 +254,19 @@ async def get_glossary(
 
 @router.get("/api/admin/glossary/preview")
 async def preview_glossary(
-    tenant_id: str,
     text: str,
+    tenant_id: str | None = None,
     claims: AuthClaims = Depends(get_current_user),
     pool = Depends(get_db_pool),
 ):
-    """Run QueryRewriter with tenant's glossary and return the enriched result."""
+    """Run QueryRewriter with active tenant's glossary and return the enriched result."""
     if claims.role != "admin":
-        raise ApiError(ErrorCode.auth_invalid, status_code=403, details="Admin access required")
+        raise ApiError(ErrorCode.auth_invalid, status_code=403, detail="Admin access required")
+    if tenant_id and tenant_id != claims.tenant_id:
+        raise ApiError(ErrorCode.auth_invalid, status_code=403, detail="Tenant ID mismatch")
     
+    effective_tenant_id = claims.tenant_id
+
     import json
     from app.rag.query_rewriter import QueryRewriter
     
@@ -267,8 +274,8 @@ async def preview_glossary(
     if pool:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT metric_synonyms, table_synonyms FROM tenant_glossary WHERE tenant_id = $1::uuid",
-                tenant_id
+                "SELECT metric_synonyms, table_synonyms FROM tenant_glossary WHERE tenant_id = $1",
+                effective_tenant_id
             )
             if row:
                 metric_synonyms = json.loads(row["metric_synonyms"]) if isinstance(row["metric_synonyms"], str) else row["metric_synonyms"]
@@ -292,13 +299,14 @@ async def get_workspaces(
     pool = Depends(get_db_pool),
 ):
     if claims.role != "admin":
-        raise ApiError(ErrorCode.auth_invalid, status_code=403, details="Admin access required")
+        raise ApiError(ErrorCode.auth_invalid, status_code=403, detail="Admin access required")
     if not pool:
         return {"data": []}
     
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id::text, workspace_name, has_glossary, total_turns, last_active_at FROM admin_workspaces_view ORDER BY last_active_at DESC NULLS LAST"
+            "SELECT id::text, workspace_name, has_glossary, total_turns, last_active_at FROM admin_workspaces_view WHERE id = $1 ORDER BY last_active_at DESC NULLS LAST",
+            claims.tenant_id
         )
     return {"data": [dict(r) for r in rows]}
 
@@ -326,14 +334,15 @@ async def get_stats(
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""
             SELECT 
-              (SELECT COUNT(*) FROM tenants) AS total_workspaces,
-              (SELECT COUNT(*) FROM tenant_glossary) AS total_glossaries,
+              (SELECT COUNT(*) FROM tenants WHERE id = $1) AS total_workspaces,
+              (SELECT COUNT(*) FROM tenant_glossary WHERE tenant_id = $1) AS total_glossaries,
               COUNT(*) AS total_turns,
               AVG(latency_ms) AS avg_latency,
               COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') AS queries_today,
               ROUND(100.0 * COUNT(*) FILTER (WHERE quality_flag = 'low') / NULLIF(COUNT(*), 0), 1) AS error_rate_pct
             FROM turns
-        """)
+            WHERE tenant_id = $1
+        """, claims.tenant_id)
         
     return {
         "total_workspaces": row["total_workspaces"] or 0,
@@ -352,32 +361,34 @@ async def update_glossary(
     pool = Depends(get_db_pool),
 ):
     if claims.role != "admin":
-        raise ApiError(ErrorCode.auth_invalid, status_code=403, details="Admin access required")
+        raise ApiError(ErrorCode.auth_invalid, status_code=403, detail="Admin access required")
     if not pool:
-        raise ApiError(ErrorCode.internal_error, status_code=500, details="Database not configured")
+        raise ApiError(ErrorCode.internal_error, status_code=500, detail="Database not configured")
         
     import json
     data = await request.json()
-    tenant_id = data.get("tenant_id")
+    req_tenant_id = data.get("tenant_id")
+    if req_tenant_id and req_tenant_id != claims.tenant_id:
+        raise ApiError(ErrorCode.auth_invalid, status_code=403, detail="Tenant ID mismatch")
+
+    effective_tenant_id = claims.tenant_id
     metric_synonyms = data.get("metric_synonyms", {})
     table_synonyms = data.get("table_synonyms", {})
     
-    if not tenant_id:
-        raise ApiError(ErrorCode.invalid_request, status_code=400, details="tenant_id required")
-        
     async with pool.acquire() as conn:
         await conn.execute(
             """
             INSERT INTO tenant_glossary (tenant_id, metric_synonyms, table_synonyms)
-            VALUES ($1::uuid, $2, $3)
+            VALUES ($1, $2, $3)
             ON CONFLICT (tenant_id) DO UPDATE 
             SET metric_synonyms = EXCLUDED.metric_synonyms,
                 table_synonyms = EXCLUDED.table_synonyms,
                 updated_at = NOW()
             """,
-            tenant_id,
+            effective_tenant_id,
             json.dumps(metric_synonyms),
             json.dumps(table_synonyms)
         )
         
     return StatusResponse(status="recorded")
+

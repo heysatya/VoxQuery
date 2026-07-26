@@ -263,3 +263,63 @@ async def test_system_prompt_separation(mock_anthropic_sql_client, mock_anthropi
     assert "system" in proactive_call_kwargs
     assert proactive_call_kwargs["system"].startswith("You are an expert")
     assert proactive_call_kwargs["messages"][0]["role"] == "user"
+
+
+from app.llm.claude import extract_sql_and_confidence
+
+
+def test_extract_sql_and_confidence_markdown_xml_wrapper():
+    """Test extracting SQL when wrapped in ```xml <sql> ... (the error reported by user)."""
+    raw_response = """```xml
+<sql>
+SELECT 
+  p.PRODUCT_CATEGORY_NAME,
+  COUNT(DISTINCT o.CUSTOMER_ID) AS unique_customers
+FROM products p
+JOIN orders o ON p.id = o.product_id
+GROUP BY 1
+</sql>
+<confidence>
+0.92
+</confidence>
+```"""
+    sql, confidence = extract_sql_and_confidence(raw_response)
+    assert confidence == 0.92
+    assert "```" not in sql
+    assert "<sql>" not in sql
+    assert "</sql>" not in sql
+    assert sql.startswith("SELECT")
+
+
+def test_extract_sql_and_confidence_unclosed_sql_tag():
+    """Test extracting SQL when LLM output has unclosed <sql> tag inside ```xml fence."""
+    raw_response = """```xml
+<sql>
+SELECT * FROM orders LIMIT 100
+"""
+    sql, confidence = extract_sql_and_confidence(raw_response)
+    assert confidence is None
+    assert sql == "SELECT * FROM orders LIMIT 100"
+
+
+@pytest.mark.asyncio
+async def test_generate_sql_with_markdown_xml_response(mock_anthropic_sql_client):
+    """Test that generate_sql validates successfully when LLM returns ```xml <sql> markup."""
+    mock_anthropic_sql_client.messages.create.return_value.content[0].text = """```xml
+<sql>
+SELECT customer_id, COUNT(*) FROM orders GROUP BY customer_id LIMIT 10000
+</sql>
+<confidence>
+0.88
+</confidence>
+```"""
+    adapter = ClaudeAdapter(mock_anthropic_sql_client)
+    result = await adapter.generate_sql(
+        submitted_text="Show order count per customer",
+        schema_chunks=[],
+        conversation_history=[],
+    )
+    assert result.validation_passed is True
+    assert result.sql == "SELECT customer_id, COUNT(*) FROM orders GROUP BY customer_id LIMIT 10000"
+    assert result.llm_self_confidence == 0.88
+

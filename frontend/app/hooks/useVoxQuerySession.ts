@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ApiRequestError,
   audioSocketUrl,
   createSession,
   deleteSession,
@@ -30,6 +31,7 @@ import {
   type UserNotice,
   type VoiceCaptureState
 } from "../state/interactionState";
+import { PcmChunkReassembler } from "../../lib/audio/pcmReassembler";
 
 export type VoxQueryAuthMode = "fake" | "clerk";
 
@@ -70,6 +72,7 @@ export type VoxQueryEngine = {
   recordingState: ReturnType<typeof mapVoiceToRecordingState>;
   audioAnalyserNode: AnalyserNode | null;
   isMuted: boolean;
+  isPaused: boolean;
   voiceDraft: VoiceDraft | null;
 
   feedbackSubmitted: boolean;
@@ -87,6 +90,8 @@ export type VoxQueryEngine = {
   resetConversation: () => Promise<void>;
   muteTTS: () => void;
   unmuteTTS: () => void;
+  pauseTTS: () => void;
+  resumeTTS: () => void;
 };
 
 const tenantId =
@@ -158,14 +163,27 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
   const pendingAudioFramesRef = useRef<ArrayBuffer[]>([]);
   const currentTurnIdRef = useRef<string | null>(null);
   const currentTurnRequestRef = useRef<{ submittedText: string; parentTurnId: string | null } | null>(null);
+  // Tracks the turn_id that has already produced a terminal outcome (result
+  // loaded, or a pipeline_error was shown), whichever path — WebSocket event
+  // or watchdog poll — got there first. Prevents the two paths from double
+  // processing the same turn.
+  const resolvedTurnIdRef = useRef<string | null>(null);
+  const watchdogTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [audioAnalyserNode, setAudioAnalyserNode] = useState<AnalyserNode | null>(null);
 
   const ttsAudioContextRef = useRef<AudioContext | null>(null);
   const ttsSocketRef = useRef<WebSocket | null>(null);
   const activeTtsSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextPlayTimeRef = useRef<number>(0);
+  const ttsGainNodeRef = useRef<GainNode | null>(null);
+  const ttsReassemblerRef = useRef<PcmChunkReassembler>(new PcmChunkReassembler());
   const [isMuted, setIsMuted] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [ttsState, setTtsState] = useState<TtsLifecycleState>("idle");
+
+  /** Ramp duration for mute/unmute/stop fades, matched to avoid audible clicks
+   * from an instantaneous gain or amplitude discontinuity. */
+  const GAIN_RAMP_SECONDS = 0.03;
 
   const isReady = useMemo(
     () => auth.ready && auth.signedIn && Boolean(session.sessionId),
@@ -179,6 +197,73 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
 
   function setActiveTurnRequest(submitted: string, parentTurnId: string | null) {
     currentTurnRequestRef.current = { submittedText: submitted, parentTurnId };
+  }
+
+  // ── Result watchdog ──────────────────────────────────────────────────
+  // The pipeline result normally arrives via the `result_ready` WebSocket
+  // event. But that event (and `pipeline_progress`/`pipeline_error`) is
+  // filtered against `currentTurnIdRef.current`, which is only set *after*
+  // the submit-query HTTP round trip resolves. For a fast pipeline run
+  // (cache hit, fake/dev mode, etc.) the background pipeline can publish
+  // its event before that round trip completes, in which case the event is
+  // compared against a stale turn_id and silently dropped — with nothing
+  // to ever recover from it. The same is true for any WebSocket message
+  // lost to a reconnect or dropped frame.
+  //
+  // This watchdog is a general-purpose safety net for all of that: a short
+  // delay after any turn is accepted, it starts polling GET /api/result/
+  // {turn_id} (which returns 202 until the turn completes) until either the
+  // result shows up or a bounded number of attempts is exhausted. It is a
+  // backstop, not the primary path — the WebSocket path is still faster in
+  // the common case and this only kicks in when that path goes quiet.
+  const WATCHDOG_INITIAL_DELAY_MS = 6000;
+  const WATCHDOG_POLL_INTERVAL_MS = 3000;
+  const WATCHDOG_MAX_ATTEMPTS = 12;
+
+  function clearWatchdog() {
+    if (watchdogTimeoutRef.current !== null) {
+      clearTimeout(watchdogTimeoutRef.current);
+      watchdogTimeoutRef.current = null;
+    }
+  }
+
+  function scheduleWatchdog(turnId: string, delayMs: number = WATCHDOG_INITIAL_DELAY_MS, attempt: number = 0) {
+    clearWatchdog();
+    watchdogTimeoutRef.current = setTimeout(() => {
+      void pollForResult(turnId, attempt);
+    }, delayMs);
+  }
+
+  async function pollForResult(turnId: string, attempt: number) {
+    // Superseded by a newer turn, or already resolved by the WebSocket path.
+    if (turnId !== currentTurnIdRef.current || resolvedTurnIdRef.current === turnId) {
+      return;
+    }
+    try {
+      await loadResult(turnId);
+      // On success loadResult() itself marks resolvedTurnIdRef and clears
+      // the watchdog — nothing further to do here.
+    } catch (error) {
+      if (turnId !== currentTurnIdRef.current || resolvedTurnIdRef.current === turnId) {
+        return;
+      }
+      if (error instanceof ApiRequestError && error.status === 202) {
+        // Turn is still processing — keep waiting, up to the attempt cap.
+        if (attempt < WATCHDOG_MAX_ATTEMPTS) {
+          scheduleWatchdog(turnId, WATCHDOG_POLL_INTERVAL_MS, attempt + 1);
+        } else {
+          resolvedTurnIdRef.current = turnId;
+          setPipelineInFlight(false);
+          setTurnState("recoverable_error");
+          setNotice("This is taking longer than expected. Please try again.", "error");
+        }
+        return;
+      }
+      resolvedTurnIdRef.current = turnId;
+      setPipelineInFlight(false);
+      setTurnState("recoverable_error");
+      setNotice(errorMessage(error, "Something went wrong while waiting for your result."), "error");
+    }
   }
 
   const ensureSession = useCallback(async () => {
@@ -199,6 +284,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
   }, [auth, session.sessionId]);
 
   const resetConversation = useCallback(async () => {
+    clearWatchdog();
     setPipelineInFlight(false);
     setPipelineStage(null);
     setActiveTurnId(null);
@@ -240,9 +326,9 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     async function startSession() {
       try {
         await ensureSession();
-      } catch {
+      } catch (error) {
         if (!cancelled) {
-          setNotice("Could not create a local session. Is the backend running?");
+          setNotice(errorMessage(error, "Could not create a local session. Is the backend running?"), "error");
         }
       }
     }
@@ -251,6 +337,58 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       cancelled = true;
     };
   }, [ensureSession, setNotice]);
+
+  // The recording AudioContext is deliberately kept alive (suspended, not
+  // closed) across individual recordings for reuse — see recorderCleanup.
+  // Only fully release it when the hook itself unmounts.
+  useEffect(() => {
+    return () => {
+      closeRecordingAudioContext();
+    };
+  }, []);
+
+  // Pre-warm the recording AudioContext and its worklet module as soon as
+  // the app mounts, instead of only inside startRecording()'s click handler.
+  // Constructing the AudioContext and awaiting audioWorklet.addModule() (a
+  // network fetch + compile of /audio-processor.js) used to happen entirely
+  // after the user granted mic permission and often after they had already
+  // started talking — that dead-air window is where the first few words of
+  // a user's very first recording were silently lost, since the capture
+  // graph wasn't wired up yet. Pre-loading here means startRecording() only
+  // needs a cheap AudioContext.resume() (a real user gesture, which the mic
+  // click itself provides) before audio starts flowing.
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof navigator === "undefined") {
+      return;
+    }
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+          return;
+        }
+        const audioContext = createBrowserAudioContext({ sampleRate: 16000 });
+        await audioContext.audioWorklet.addModule("/audio-processor.js");
+        if (cancelled) {
+          await audioContext.close().catch(() => {});
+          return;
+        }
+        audioContextRef.current = audioContext;
+      } catch (error) {
+        // Non-fatal: startRecording() falls back to creating the context
+        // itself on click if pre-warming failed for any reason (e.g. the
+        // worklet file 404s, or a browser policy blocks node creation
+        // before a user gesture).
+        console.error("Audio pre-warm failed:", error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof navigator === "undefined" || !navigator.permissions) {
@@ -267,6 +405,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       .catch(() => {
       });
   }, []);
+
 
   const getTokenRef = useRef(auth.getToken);
   useEffect(() => {
@@ -305,6 +444,10 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
             if (currentTurnIdRef.current && event.turn_id !== currentTurnIdRef.current) {
               return;
             }
+            // Pipeline is legitimately paused waiting on the user, not stuck —
+            // stop the completion watchdog; submitClarification() restarts it
+            // once the user responds.
+            clearWatchdog();
             setActiveTurnId(event.turn_id);
             setClarification({
               pending: true,
@@ -332,6 +475,8 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
             if (event.turn_id !== currentTurnIdRef.current) {
               return;
             }
+            resolvedTurnIdRef.current = event.turn_id;
+            clearWatchdog();
             setClarification({ pending: false, question: null, options: [] });
             setPipelineInFlight(false);
             setPipelineStage(null);
@@ -339,7 +484,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
             setNotice(event.message, "error");
           }
         };
-        socket.onerror = () => setNotice("Pipeline event stream unavailable. Check that the backend is running.", "error");
+        socket.onerror = () => setNotice("Could not connect to the real-time event stream. Please check your network connection.", "error");
         socket.onclose = (event) => {
           if (event.code !== 4002) {
             return;
@@ -368,7 +513,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     audioStopAfterFlushRef.current = false;
     pendingAudioFramesRef.current = [];
     if (audioWorkletRef.current) {
-      if (audioWorkletRef.current && audioWorkletRef.current.disconnect) { try { audioWorkletRef.current.disconnect(); } catch (e) {} }
+      if (audioWorkletRef.current && audioWorkletRef.current.disconnect) { try { audioWorkletRef.current.disconnect(); } catch (e) { } }
       audioWorkletRef.current = null;
     }
     setAudioAnalyserNode(null);
@@ -376,11 +521,12 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
     }
-    if (audioContextRef.current) {
-      if (audioContextRef.current.state !== "closed") {
-        audioContextRef.current.close().catch(console.error);
-      }
-      audioContextRef.current = null;
+    // Suspend rather than close: the context (and its already-loaded worklet
+    // module) is reused on the next recording instead of being torn down and
+    // reconstructed from scratch, which previously added avoidable latency
+    // and overhead to every single mic click.
+    if (audioContextRef.current && audioContextRef.current.state === "running") {
+      audioContextRef.current.suspend().catch(console.error);
     }
     if (audioSocketRef.current) {
       const socket = audioSocketRef.current;
@@ -390,6 +536,16 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
         socket.close();
       }
     }
+  }
+
+  /** Fully tears down the recording AudioContext — only used on unmount, not
+   * between individual recordings (see recorderCleanup, which suspends and
+   * reuses it instead). */
+  function closeRecordingAudioContext() {
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      audioContextRef.current.close().catch(console.error);
+    }
+    audioContextRef.current = null;
   }
 
   async function startRecording() {
@@ -418,24 +574,16 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       setPartialTranscript("");
       stopTTS("idle");
       setVoiceState((state) => transitionVoiceState(state, "request_permission"));
+
+      // Open the backend audio WebSocket immediately, in parallel with the mic
+      // permission prompt and token fetch, rather than waiting for both to
+      // resolve first. The backend begins connecting to Deepgram as soon as it
+      // accepts+authenticates this socket, so this removes a full WS-handshake
+      // round-trip (browser<->backend) from the critical path before the user
+      // can start being transcribed, without pre-opening anything before the
+      // click (which would risk the backend's idle-timeout on a connection
+      // opened too far ahead of actual speech).
       const tokenPromise = auth.getToken();
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          autoGainControl: true,
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true
-        }
-      });
-      mediaStreamRef.current = stream;
-      setMicPermission("granted");
-
-      const token = await tokenPromise;
-      postTelemetry({ event: "stt.mic.permission", outcome: "granted", session_id: session.sessionId }, token).catch(console.error);
-
-      setVoiceState((state) => transitionVoiceState(state, "permission_granted"));
-      setNotice("Microphone access granted. Connecting...");
-
       const socket = new WebSocket(audioSocketUrl(session.sessionId));
       audioSocketRef.current = socket;
       pendingAudioFramesRef.current = [];
@@ -454,11 +602,15 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       };
 
       socket.onopen = () => {
-        socket.send(JSON.stringify({ event: "auth", token: token ?? "fake" }));
-        flushQueuedAudio();
-        if (audioWorkletRef.current) {
-          markRecording();
-        }
+        tokenPromise
+          .then((token) => {
+            socket.send(JSON.stringify({ event: "auth", token: token ?? "fake" }));
+            flushQueuedAudio();
+            if (audioWorkletRef.current) {
+              markRecording();
+            }
+          })
+          .catch(console.error);
       };
 
       socket.onmessage = (message) => {
@@ -497,11 +649,44 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
         recorderCleanup();
       };
 
-      try {
-        const audioContext = createBrowserAudioContext();
-        audioContextRef.current = audioContext;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          autoGainControl: true,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true
+        }
+      });
+      mediaStreamRef.current = stream;
+      setMicPermission("granted");
 
-        await audioContext.audioWorklet.addModule("/audio-processor.js");
+      const token = await tokenPromise;
+      postTelemetry({ event: "stt.mic.permission", outcome: "granted", session_id: session.sessionId }, token).catch(console.error);
+
+      setVoiceState((state) => transitionVoiceState(state, "permission_granted"));
+      setNotice("Microphone access granted. Connecting...");
+
+      try {
+        // Reuse a single AudioContext across recordings instead of creating and
+        // tearing one down on every click — avoids the setup/teardown latency
+        // and overhead of repeated AudioContext construction.
+        let audioContext = audioContextRef.current;
+        if (!audioContext || audioContext.state === "closed") {
+          // Request 16kHz directly: on browsers that honor it, the browser's
+          // native (anti-aliased) resampler does this work instead of the
+          // worklet's manual linear-interpolation downsample loop — the
+          // worklet already guards this correctly (downsample() short-circuits
+          // when inputRate === outputRate, and reads the real negotiated rate
+          // live via AudioWorkletGlobalScope.sampleRate), so browsers that
+          // don't honor the request (some older Safari/WebKit builds) safely
+          // fall back to the existing manual downsample instead of silently
+          // sending audio at the wrong implied rate.
+          audioContext = createBrowserAudioContext({ sampleRate: 16000 });
+          audioContextRef.current = audioContext;
+          await audioContext.audioWorklet.addModule("/audio-processor.js");
+        } else if (audioContext.state === "suspended") {
+          await audioContext.resume();
+        }
 
         const source = audioContext.createMediaStreamSource(stream);
         const analyser = audioContext.createAnalyser();
@@ -647,7 +832,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     };
     socket.onerror = () => {
       setVoiceState("capture_error");
-      setNotice("Fake voice WebSocket unavailable. Check that the backend is running.", "error");
+      setNotice("Could not connect to the fake voice service. Please check your network connection.", "error");
     };
     socket.onclose = () => setVoiceState((state) => (state === "finalizing" ? "idle" : state));
   }
@@ -664,12 +849,18 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
 
     const submitted = text.trim();
     const parentTurnId = lastResult?.turnId ?? null;
+    // Preserved so that a follow-up question which fails to submit (network
+    // blip, rate limit, etc.) restores the conversation the user was already
+    // looking at, instead of falling through to the blank "ready" home
+    // screen and losing the parent-turn link for a retry.
+    const previousResult = lastResult;
     const activeVoiceDraft = voiceDraft;
     const transcriptEdited = activeVoiceDraft
       ? normalizeTranscript(submitted) !== normalizeTranscript(activeVoiceDraft.rawTranscript)
       : false;
     setSubmittedText(submitted);
 
+    clearWatchdog();
     setPipelineInFlight(true);
     setPipelineStage("sql_generation");
     setTurnState("submitting");
@@ -695,6 +886,8 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       );
       setActiveTurnId(accepted.turn_id);
       setActiveTurnRequest(submitted, parentTurnId);
+      resolvedTurnIdRef.current = null;
+      scheduleWatchdog(accepted.turn_id);
       setVoiceDraft(null);
       setFeedbackSubmitted(false);
       setFeedbackRating(null);
@@ -703,7 +896,10 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     } catch (error) {
       setPipelineInFlight(false);
       setTurnState("recoverable_error");
-      setNotice(errorMessage(error, "Query failed. Check that the backend is running."), "error");
+      if (previousResult) {
+        setLastResult(previousResult);
+      }
+      setNotice(errorMessage(error, "Failed to submit query. Please check your network connection and try again."), "error");
     }
   }
   async function submitCurrentQuery() {
@@ -750,23 +946,42 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
         },
         await auth.getToken()
       );
+      // Update the displayed text to reflect the clarified intent so the
+      // QueryDock, the active-state transcript, and the result echo all show
+      // what the user actually resolved to, not just the original raw query.
+      const clarifiedText = `${submittedText} → ${selection}`;
+      setSubmittedText(clarifiedText);
+      setActiveTurnRequest(clarifiedText, currentTurnRequestRef.current?.parentTurnId ?? null);
       setClarification({ pending: false, question: null, options: [] });
       setTurnState("executing");
       setNotice("Clarification submitted. Waiting for pipeline result.");
+      resolvedTurnIdRef.current = null;
+      scheduleWatchdog(currentTurnId);
     } catch (error) {
       setPipelineInFlight(false);
       setTurnState("recoverable_error");
       setNotice(errorMessage(error, "Could not resolve clarification. Try submitting again."), "error");
     }
+
   }
 
   async function loadResult(turnId: string) {
+    if (resolvedTurnIdRef.current === turnId) {
+      // Already handled by the other path (WebSocket event vs. watchdog
+      // poll racing each other) — nothing further to do.
+      return;
+    }
     setPipelineStage("rendering");
     setTurnState("preparing_answer");
     const result = await fetchResult(turnId, await auth.getToken());
     if (turnId !== currentTurnIdRef.current || result.turn_id !== turnId) {
       return;
     }
+    if (resolvedTurnIdRef.current === turnId) {
+      return;
+    }
+    resolvedTurnIdRef.current = turnId;
+    clearWatchdog();
     const request = currentTurnRequestRef.current;
     const completedResult: LastResult = {
       turnId,
@@ -795,9 +1010,14 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
 
   function ensureTTSContext() {
     if (!ttsAudioContextRef.current || ttsAudioContextRef.current.state === "closed") {
-      ttsAudioContextRef.current = createBrowserAudioContext({ sampleRate: 16000 });
+      const ctx = createBrowserAudioContext({ sampleRate: 16000 });
+      ttsAudioContextRef.current = ctx;
+      const gain = ctx.createGain();
+      gain.gain.value = isMuted ? 0 : 1;
+      gain.connect(ctx.destination);
+      ttsGainNodeRef.current = gain;
     }
-    if (ttsAudioContextRef.current.state === "suspended") {
+    if (ttsAudioContextRef.current.state === "suspended" && !isPaused) {
       ttsAudioContextRef.current.resume().catch(console.error);
     }
     return ttsAudioContextRef.current;
@@ -810,11 +1030,13 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       ttsSocketRef.current.close();
       ttsSocketRef.current = null;
     }
-    setIsMuted(false);
+    ttsReassemblerRef.current.reset();
+    setIsPaused(false);
     setTtsState("loading");
 
     try {
       const audioCtx = ensureTTSContext();
+      const gainNode = ttsGainNodeRef.current;
       nextPlayTimeRef.current = audioCtx.currentTime + 0.1;
 
       const socket = new WebSocket(ttsSocketUrl(session.sessionId, turnId));
@@ -827,15 +1049,15 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       socket.onmessage = (event) => {
         if (event.data && typeof event.data === "string") return;
         if (ttsAudioContextRef.current?.state === "closed") return;
-        
+
         if (!(event.data instanceof ArrayBuffer)) {
           return;
         }
 
-        const buffer = event.data as ArrayBuffer;
-        const safeBuffer = buffer.byteLength % 2 !== 0 ? buffer.slice(0, buffer.byteLength - 1) : buffer;
-        const int16Array = new Int16Array(safeBuffer);
-        
+        // Reassemble across chunk boundaries instead of truncating a trailing
+        // odd byte, which previously corrupted samples split across two
+        // WebSocket messages and produced audible clicks/static.
+        const int16Array = ttsReassemblerRef.current.push(event.data as ArrayBuffer);
         if (int16Array.length === 0) return;
 
         setTtsState("playing");
@@ -850,8 +1072,8 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
 
           const source = audioCtx.createBufferSource();
           source.buffer = audioBuffer;
-          source.connect(audioCtx.destination);
-        
+          source.connect(gainNode ?? audioCtx.destination);
+
           activeTtsSourcesRef.current.add(source);
           source.onended = () => {
             activeTtsSourcesRef.current.delete(source);
@@ -881,32 +1103,107 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     }
   }
 
-  function stopTTS(nextState: TtsLifecycleState = "ended", shouldMute = true) {
+  function stopTTS(nextState: TtsLifecycleState = "ended", shouldMute = false) {
+    const audioCtx = ttsAudioContextRef.current;
+    const gainNode = ttsGainNodeRef.current;
+
     if (shouldMute) {
       setIsMuted(true);
     }
+    setIsPaused(false);
+
     if (ttsSocketRef.current) {
       ttsSocketRef.current.close();
       ttsSocketRef.current = null;
     }
-    activeTtsSourcesRef.current.forEach((source) => {
-      try {
-        source.stop();
-      } catch (e) {
-        // ignore if already stopped
-      }
-    });
-    activeTtsSourcesRef.current.clear();
+
+    if (audioCtx && gainNode && activeTtsSourcesRef.current.size > 0) {
+      // Fade out over GAIN_RAMP_SECONDS before cutting playback, instead of an
+      // instantaneous stop, which truncates the waveform at an arbitrary,
+      // non-zero amplitude and produces an audible click.
+      const now = audioCtx.currentTime;
+      gainNode.gain.cancelScheduledValues(now);
+      gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+      gainNode.gain.linearRampToValueAtTime(0, now + GAIN_RAMP_SECONDS);
+
+      const sourcesToStop = Array.from(activeTtsSourcesRef.current);
+      window.setTimeout(() => {
+        sourcesToStop.forEach((source) => {
+          try {
+            source.stop();
+          } catch (e) {
+            // ignore if already stopped
+          }
+        });
+        activeTtsSourcesRef.current.clear();
+        // Restore gain for the next playback, honoring current mute state.
+        if (ttsGainNodeRef.current && ttsAudioContextRef.current) {
+          const restoreCtx = ttsAudioContextRef.current;
+          ttsGainNodeRef.current.gain.setValueAtTime(isMuted ? 0 : 1, restoreCtx.currentTime);
+        }
+      }, GAIN_RAMP_SECONDS * 1000 + 10);
+    } else {
+      activeTtsSourcesRef.current.forEach((source) => {
+        try {
+          source.stop();
+        } catch (e) {
+          // ignore if already stopped
+        }
+      });
+      activeTtsSourcesRef.current.clear();
+    }
+
+    ttsReassemblerRef.current.reset();
     nextPlayTimeRef.current = 0;
     setTtsState(nextState);
   }
 
+  /** True mute: ramps playback volume to 0 without stopping generation or
+   * losing playback position. Audio keeps arriving and queuing in the
+   * background — unmuteTTS() ramps volume back up seamlessly. */
   function muteTTS() {
-    stopTTS();
+    setIsMuted(true);
+    const audioCtx = ttsAudioContextRef.current;
+    const gainNode = ttsGainNodeRef.current;
+    if (audioCtx && gainNode) {
+      const now = audioCtx.currentTime;
+      gainNode.gain.cancelScheduledValues(now);
+      gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+      gainNode.gain.linearRampToValueAtTime(0, now + GAIN_RAMP_SECONDS);
+    }
   }
 
+  /** Ramps playback volume back up. If nothing is currently playing, this
+   * just clears the muted flag so the next turn starts audible. */
   function unmuteTTS() {
     setIsMuted(false);
+    const audioCtx = ttsAudioContextRef.current;
+    const gainNode = ttsGainNodeRef.current;
+    if (audioCtx && gainNode) {
+      const now = audioCtx.currentTime;
+      gainNode.gain.cancelScheduledValues(now);
+      gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+      gainNode.gain.linearRampToValueAtTime(1, now + GAIN_RAMP_SECONDS);
+    }
+  }
+
+  /** Genuine pause: suspends the AudioContext clock itself, so all scheduled
+   * buffer sources freeze in place rather than being destroyed. resumeTTS()
+   * continues from exactly where playback left off. */
+  function pauseTTS() {
+    const audioCtx = ttsAudioContextRef.current;
+    if (!audioCtx || audioCtx.state !== "running") return;
+    audioCtx.suspend().catch(console.error);
+    setIsPaused(true);
+    setTtsState("paused");
+  }
+
+  function resumeTTS() {
+    const audioCtx = ttsAudioContextRef.current;
+    if (!audioCtx || audioCtx.state !== "suspended") return;
+    audioCtx.resume().catch(console.error);
+    setIsPaused(false);
+    setTtsState((state) => (state === "paused" ? "playing" : state));
   }
 
   async function submitFeedback(rating?: -1 | 1) {
@@ -950,6 +1247,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     recordingState,
     audioAnalyserNode,
     isMuted,
+    isPaused,
     voiceDraft,
     feedbackSubmitted,
     feedbackRating,
@@ -964,6 +1262,9 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     submitFeedback,
     resetConversation,
     muteTTS,
-    unmuteTTS
+    unmuteTTS,
+    pauseTTS,
+    resumeTTS
   };
 }
+

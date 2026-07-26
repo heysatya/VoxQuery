@@ -14,6 +14,56 @@ from langfuse import observe, get_client
 logger = logging.getLogger(__name__)
 
 
+def extract_sql_and_confidence(response_text: str) -> tuple[str, float | None]:
+    """Extract clean SQL and self-confidence float from raw LLM text response.
+    
+    Handles XML tags (<sql>, <confidence>), unclosed tags, and markdown code fences
+    (e.g. ```xml, ```sql, ```) in any order or combination.
+    """
+    text = response_text.strip()
+
+    # 1. Extract confidence if present
+    llm_self_confidence = None
+    confidence_match = re.search(r"<confidence>\s*([0-9\.]+)\s*</confidence>", text, flags=re.IGNORECASE | re.DOTALL)
+    if confidence_match:
+        try:
+            llm_self_confidence = float(confidence_match.group(1).strip())
+        except ValueError:
+            pass
+
+    # Remove confidence block before SQL extraction
+    text_no_conf = re.sub(r"<confidence>.*?</confidence>", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+
+    # 2. Extract SQL portion
+    sql_match = re.search(r"<sql>(.*?)</sql>", text_no_conf, flags=re.IGNORECASE | re.DOTALL)
+    if sql_match:
+        raw_sql = sql_match.group(1).strip()
+    else:
+        unclosed_match = re.search(r"<sql>(.*)", text_no_conf, flags=re.IGNORECASE | re.DOTALL)
+        if unclosed_match:
+            raw_sql = unclosed_match.group(1).strip()
+        else:
+            raw_sql = text_no_conf
+
+    # 3. Strip code fences and tags
+    raw_sql = re.sub(r"^```[a-zA-Z]*\n?", "", raw_sql.strip())
+    raw_sql = re.sub(r"\n?```$", "", raw_sql.strip())
+
+    lines = raw_sql.splitlines()
+    cleaned_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.lower() in ("<sql>", "</sql>", "```", "```sql", "```xml"):
+            continue
+        cleaned_lines.append(line)
+
+    sql = "\n".join(cleaned_lines).strip()
+    sql = re.sub(r"^```[a-zA-Z]*\n?", "", sql)
+    sql = re.sub(r"\n?```$", "", sql).strip()
+
+    return sql, llm_self_confidence
+
+
 def _safe_update_current_generation(**kwargs: Any) -> None:
     try:
         get_client().update_current_generation(**kwargs)
@@ -55,7 +105,12 @@ class ClaudeAdapter(LlmAdapter):
         
         system_prompt = """You are an expert Snowflake SQL generator. Generate a read-only SQL query for the following request.
 Always LIMIT to 10000 rows maximum.
-IMPORTANT: For any relative date filters (e.g. 'last 30 days', 'recent', 'past week', 'this month'), DO NOT use `CURRENT_DATE()`. Instead, query relative to the max date in the target table using a subquery (e.g., `WHERE date_column >= DATEADD(day, -30, (SELECT MAX(date_column) FROM table_name))`).
+IMPORTANT DIALECT & TYPE RULES:
+1. Relative Date Filters: DO NOT use `CURRENT_DATE()`. Query relative to the max date in target table (e.g. `WHERE date_col >= DATEADD(day, -30, (SELECT MAX(date_col) FROM table_name))`).
+2. Date/Time Functions: `DATE_TRUNC`, `DATEADD`, and `DATEDIFF` require TIMESTAMP/DATE types. If a column is stored as VARCHAR/string, explicitly cast with `TRY_TO_TIMESTAMP(col)` (e.g., `DATE_TRUNC('month', TRY_TO_TIMESTAMP(date_col))`).
+3. Safe Division: Always use `DIV0(numerator, denominator)` when dividing to prevent division by zero runtime errors.
+4. Case-Insensitive Matching: Use `ILIKE` or `LOWER(col) = LOWER('val')` for string filters.
+5. Numeric Operations: If aggregating numerical values stored in VARCHAR fields, wrap with `TRY_TO_DOUBLE(col)` or `TRY_TO_NUMBER(col)`.
 Return your output exactly in the following XML format:
 <sql>
 your valid SQL query here
@@ -95,28 +150,7 @@ Request: {submitted_text}"""
             raise ApiError(ErrorCode.llm_unavailable, status_code=503) from e
 
         response_text = response.content[0].text.strip()
-        
-        sql_match = re.search(r"<sql>(.*?)</sql>", response_text, re.DOTALL)
-        confidence_match = re.search(r"<confidence>(.*?)</confidence>", response_text, re.DOTALL)
-        
-        if sql_match:
-            sql = sql_match.group(1).strip()
-        else:
-            sql = response_text
-            
-        llm_self_confidence = None
-        if confidence_match:
-            try:
-                llm_self_confidence = float(confidence_match.group(1).strip())
-            except ValueError:
-                pass
-
-        # Strip markdown if LLM disobeyed
-        if sql.startswith("```sql"):
-            sql = sql[6:]
-        if sql.endswith("```"):
-            sql = sql[:-3]
-        sql = sql.strip()
+        sql, llm_self_confidence = extract_sql_and_confidence(response_text)
 
         # Validate with sqlglot
         validation_passed = True

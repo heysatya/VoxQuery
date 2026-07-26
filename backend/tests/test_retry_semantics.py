@@ -23,7 +23,7 @@ from tests.test_session import FakeRedis
 
 @pytest.fixture
 def claims():
-    return AuthClaims(user_id=uuid.uuid4(), tenant_id=uuid.uuid4())
+    return AuthClaims(user_id=str(uuid.uuid4()), tenant_id=str(uuid.uuid4()))
 
 
 @pytest.fixture

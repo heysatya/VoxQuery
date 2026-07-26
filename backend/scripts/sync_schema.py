@@ -79,12 +79,7 @@ async def sync_schema():
     parser.add_argument("--tenant-id", type=str, default="00000000-0000-0000-0000-000000000101", help="Tenant ID to provision the schema and DSN for.")
     args, unknown = parser.parse_known_args()
     
-    tenant_id_str = args.tenant_id
-    try:
-        tenant_id = uuid.UUID(tenant_id_str)
-    except ValueError:
-        print(f"Error: Invalid UUID format for tenant_id: {tenant_id_str}")
-        return
+    tenant_id = args.tenant_id
 
     print("2. Connecting to Supabase...")
     # Fix pgbouncer connection issue if needed by stripping it for asyncpg or using prepared statements safely
@@ -125,7 +120,7 @@ async def sync_schema():
                     metric_synonyms = $2,
                     table_synonyms = $3,
                     updated_at = now();
-            """, tenant_id, json.dumps(METRIC_SYNONYMS), json.dumps(TABLE_SYNONYMS))
+            """, tenant_id, json.dumps(DEFAULT_METRIC_SYNONYMS), json.dumps(DEFAULT_TABLE_SYNONYMS))
             print("   -> Stored default business glossary in tenant_glossary.")
         except Exception as e:
             print(f"   -> Warning: Failed to populate tenant_glossary: {e}")
@@ -193,7 +188,7 @@ async def sync_schema():
             ("completed_orders_only", "Always filter ORDERS with WHERE order_status = 'delivered'.", "orders, sales, delivery", "revenue, order_count", "ORDERS"),
             ("revenue_net_of_discounts", "Net revenue: price * (1 - discount_rate). Never use raw price.", "revenue, sales, profit", "revenue", "ORDER_ITEMS"),
             ("duckdb_date_syntax", "DuckDB: DATE_TRUNC('month', col), CURRENT_DATE - INTERVAL '30 days', DATEDIFF('day', start, end)", "date, time, trend, monthly, yearly", "all", "all"),
-            ("snowflake_date_syntax", "Use Snowflake date syntax: DATEADD('day', -30, CURRENT_DATE()), DATE_TRUNC('month', col), DATEDIFF('day', start, end)", "date, time, trend, monthly, yearly", "all", "all"),
+            ("snowflake_date_syntax", "Use Snowflake date syntax: DATEADD('day', -30, CURRENT_DATE()), DATE_TRUNC('month', TRY_TO_TIMESTAMP(col)), DATEDIFF('day', TRY_TO_TIMESTAMP(start), TRY_TO_TIMESTAMP(end)). Note: Always use TRY_TO_TIMESTAMP(col) inside DATE_TRUNC/DATEADD/DATEDIFF if column type is VARCHAR.", "date, time, trend, monthly, yearly", "all", "all"),
             ("customer_geolocation_join", "Join CUSTOMERS to GEOLOCATION on customer_zip_code_prefix = geolocation_zip_code_prefix.", "customers, location, city, state, zip", "all", "CUSTOMERS, GEOLOCATION"),
             ("profit_calculation", "Profit is calculated as (price - freight_value).", "profit, cost, freight", "profit_margin, total_profit", "ORDER_ITEMS"),
             ("delivery_time_calculation", "Delivery time is DATEDIFF('day', order_purchase_timestamp, order_delivered_customer_date).", "delivery, late, time, days", "late_deliveries", "ORDERS")

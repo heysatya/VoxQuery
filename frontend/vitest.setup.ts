@@ -10,7 +10,6 @@ window.scrollTo = () => {};
 // warning for the canvas element being in the DOM. Return a minimal no-op
 // context so tests remain silent.
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 (HTMLCanvasElement.prototype as any).getContext = function () {
   return {
     clearRect: () => {},

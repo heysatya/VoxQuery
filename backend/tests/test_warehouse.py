@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import snowflake.connector as sf_connector
 
-from app.models.contracts import SchemaTable, ColumnInfo
+from app.models.contracts import SchemaTable, ColumnInfo, ApiError
 from app.warehouse.sql_policy import SqlPolicyError, canonicalize_readonly_sql, build_allowlist, SchemaAllowlist
 from app.warehouse.snowflake import SnowflakeWarehouseConnector, _redact_dsn
 
@@ -42,6 +42,17 @@ def test_canonicalize_readonly_sql_applies_row_limit_policy():
     cte = canonicalize_readonly_sql("WITH t AS (SELECT * FROM a LIMIT 15000) SELECT * FROM t")
     assert cte.sql == "WITH t AS (SELECT * FROM a LIMIT 15000) SELECT * FROM t LIMIT 10000"
     assert cte.limit_added is True
+
+
+def test_canonicalize_readonly_sql_strips_markdown_and_xml():
+    wrapped_sql = """```xml
+<sql>
+SELECT * FROM test
+</sql>
+```"""
+    res = canonicalize_readonly_sql(wrapped_sql)
+    assert res.sql == "SELECT * FROM test LIMIT 10000"
+
 
 
 def test_schema_allowlist_validation_success():
@@ -101,6 +112,21 @@ def test_canonicalize_readonly_sql_rejects_explicit_cross_join():
 def test_canonicalize_readonly_sql_rejects_join_without_condition():
     with pytest.raises(SqlPolicyError, match="without an ON or USING"):
         canonicalize_readonly_sql("SELECT * FROM orders JOIN customers")
+
+
+def test_canonicalize_readonly_sql_is_idempotent():
+    queries = [
+        "SELECT a / b FROM orders",
+        "SELECT SUM(a) / COUNT(b) FROM orders",
+        "SELECT DIV0(a, b) FROM orders",
+        "SELECT DATE_TRUNC('month', created_at) FROM orders",
+    ]
+    for q in queries:
+        pass1 = canonicalize_readonly_sql(q).sql
+        pass2 = canonicalize_readonly_sql(pass1).sql
+        pass3 = canonicalize_readonly_sql(pass2).sql
+        assert pass1 == pass2, f"Failed idempotency on pass 2 for query: {q}"
+        assert pass2 == pass3, f"Failed idempotency on pass 3 for query: {q}"
 
 
 # ── Phase 5.1: DSN redaction ──────────────────────────────────────────────────
@@ -238,18 +264,14 @@ async def test_snowflake_connector_timeout_returns_structured_error():
         timeout_seconds=1
     )
 
-    # Simulate a blocking call that exceeds the timeout
-    async def slow_execute(*args, **kwargs):
-        await asyncio.sleep(10)
-
-    with patch("asyncio.to_thread", new=AsyncMock(side_effect=asyncio.TimeoutError())):
-        with pytest.raises(RuntimeError) as exc_info:
+    with patch("asyncio.to_thread", side_effect=asyncio.TimeoutError()):
+        with pytest.raises(ApiError) as exc_info:
             await connector.execute_readonly(
                 "SELECT region, revenue FROM sales LIMIT 10000",
                 snowflake_role="analyst"
             )
 
-    error_msg = str(exc_info.value)
+    error_msg = exc_info.value.detail or str(exc_info.value)
     # Error message must mention timeout
     assert "timed out" in error_msg.lower()
     # Error message must NOT contain the raw password
@@ -268,13 +290,13 @@ async def test_snowflake_connector_dsn_redacted_in_errors(mock_connect):
         dsn="snowflake://prod_user:highly_secret_pw@acme.snowflakecomputing.com/prod/analytics"
     )
 
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(ApiError) as exc_info:
         await connector.execute_readonly(
             "SELECT * FROM orders LIMIT 10000",
             snowflake_role="readonly_role"
         )
 
-    error_msg = str(exc_info.value)
+    error_msg = exc_info.value.detail or str(exc_info.value)
     assert "highly_secret_pw" not in error_msg
     assert "prod_user" in error_msg  # user prefix is preserved for debugging
 

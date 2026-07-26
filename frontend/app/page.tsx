@@ -1,6 +1,6 @@
 "use client";
 
-import { SignInButton, UserButton, useAuth } from "@clerk/nextjs";
+import { OrganizationList, OrganizationSwitcher, SignInButton, UserButton, useAuth, useOrganization } from "@clerk/nextjs";
 import React, { useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { RotateCcw } from "lucide-react";
@@ -18,7 +18,7 @@ import { getStatusLabel } from "./state/interactionState";
 
 const authMode = process.env.NEXT_PUBLIC_AUTH_MODE ?? "fake";
 
-/* ── Auth wrappers (unchanged contracts) ─────────────────────── */
+/* -- Auth wrappers (unchanged contracts) ----------------------- */
 
 export default function HomePage() {
   if (authMode === "clerk") return <ClerkHomePage />;
@@ -26,15 +26,20 @@ export default function HomePage() {
 }
 
 function ClerkHomePage() {
-  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { isLoaded: isAuthLoaded, isSignedIn, orgId, getToken } = useAuth();
+  const { isLoaded: isOrgLoaded, organization } = useOrganization();
+
+  const isLoaded = isAuthLoaded && isOrgLoaded;
+  const hasActiveOrg = Boolean(orgId || organization);
+
   const auth = useMemo<VoxQueryAuthRelay>(
     () => ({
       mode: "clerk",
-      ready: isLoaded,
-      signedIn: Boolean(isSignedIn),
+      ready: isLoaded && hasActiveOrg,
+      signedIn: Boolean(isSignedIn) && hasActiveOrg,
       getToken
     }),
-    [getToken, isLoaded, isSignedIn]
+    [getToken, isLoaded, isSignedIn, hasActiveOrg]
   );
 
   if (!isLoaded) {
@@ -61,9 +66,29 @@ function ClerkHomePage() {
     );
   }
 
+  if (!hasActiveOrg) {
+    return (
+      <main className="min-h-screen flex flex-col items-center justify-center p-4">
+        <div className="fixed top-4 right-4 z-50">
+          <div className="glass-card p-1 rounded-full"><UserButton /></div>
+        </div>
+        <section className="glass-card p-8 max-w-lg w-full text-center space-y-6">
+          <h1 className="text-2xl font-bold text-[var(--text-primary)]">Select or Create an Organization</h1>
+          <p className="text-[var(--text-secondary)] text-sm">VoxQuery requires an active Organization to isolate your company data.</p>
+          <div className="flex justify-center pt-2">
+            <OrganizationList hidePersonal={true} afterSelectOrganizationUrl="/" afterCreateOrganizationUrl="/" />
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <>
-      <div className="fixed top-4 right-4 z-50">
+      <div className="fixed top-4 right-4 z-50 flex items-center gap-3">
+        <div className="glass-card px-3 py-1 rounded-full flex items-center">
+          <OrganizationSwitcher hidePersonal={true} afterSelectOrganizationUrl="/" afterLeaveOrganizationUrl="/" />
+        </div>
         <div className="glass-card p-1 rounded-full"><UserButton /></div>
       </div>
       <VoxQueryApp auth={auth} />
@@ -286,7 +311,9 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               <InsightNarrative
                 text={engine.lastResult.resultData.tts_text}
                 isMuted={engine.isMuted}
+                isPaused={engine.isPaused}
                 onToggleMute={engine.isMuted ? engine.unmuteTTS : engine.muteTTS}
+                onTogglePause={engine.isPaused ? engine.resumeTTS : engine.pauseTTS}
               />
 
               {/* Chart card */}

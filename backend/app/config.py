@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     stt_provider: str = Field(default="fake", alias="STT_PROVIDER")
     tts_provider: str = Field(default="fake", alias="TTS_PROVIDER")
     deepgram_api_key: str | None = Field(default=None, alias="DEEPGRAM_API_KEY")
+    # Deepgram's Model Improvement Program opt-out (mip_opt_out query param).
+    # Excludes requests from Deepgram's training-data retention, at the cost of
+    # forgoing a program discount. NOT full "zero data retention" — that
+    # requires a Deepgram Enterprise Agreement. Defaults to False so enabling
+    # it (and its cost tradeoff) is always an explicit, deliberate choice.
+    deepgram_mip_opt_out: bool = Field(default=False, alias="DEEPGRAM_MIP_OPT_OUT")
     clerk_issuer: str | None = Field(default=None, alias="CLERK_ISSUER")
     clerk_jwks_url: str | None = Field(default=None, alias="CLERK_JWKS_URL")
     clerk_audience: str | None = Field(default=None, alias="CLERK_AUDIENCE")

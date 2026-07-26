@@ -179,16 +179,24 @@ To execute this plan, the environment must be configured with live keys. **Do no
 * **Agent UI Action:** Click the "Copy Permalink" (Link icon) on a successful turn. Open a new browser tab and navigate to that copied URL.
 * **Expected UI State:** The exact same analytical result, chart, and narrative load immediately from the Postgres history without a re-run of the LLM pipeline.
 
-### Category K: Authentication & Tenant Provisioning (Webhooks)
-**Test Case K1: Automated Tenant and User Provisioning via Webhook**
-* **Agent UI Action:** In an incognito window, navigate to the VoxQuery signup page. Complete the Clerk signup flow using a new test email address.
-* **Expected System State:** The backend receives a `user.created` webhook, provisions the Supabase user/tenant, and patches the Clerk user metadata.
-* **Verification:** Log into the frontend with the new account. Submit a basic query. It must pass the `authenticate_websocket` check without a 401 error.
+### Category K: Authentication & Tenant Provisioning (Clerk Organizations)
+**Test Case K1: Automated Tenant Provisioning via `organization.created` Webhook**
+* **Agent UI Action:** In Clerk Dashboard or via webhook test runner, trigger an `organization.created` event with a new `org_...` ID and name.
+* **Expected System State:** The backend receives the verified Svix webhook, inserts the new tenant into `tenants` with `id = org_...`, seeds the default `tenant_glossary`, and seeds `tenant_connections` if credentials exist. No outbound PATCH request is sent to Clerk.
 
-**Test Pass K2: Secure DSN Isolation Enforcement**
-* **Agent UI Action:** Log in with the newly provisioned test account from K1. Type: *"Show me total revenue."*
-* **Expected UI State:** The request will fail gracefully with a specific error regarding missing warehouse connectivity or schema definition (since a new tenant has no DB credentials). This proves strict architectural enforcement prevents falling back to another tenant's DSN.
+**Test Case K2: Automated Membership Management via `organizationMembership.*` Webhooks**
+* **Agent UI Action:** Trigger `organizationMembership.created` with `org_...` ID, `user_...` ID, and role `org:admin`.
+* **Expected System State:** `users` row is upserted, and a `tenant_memberships` row is created with `(tenant_id, user_id, role)`. Subsequent updates via `organizationMembership.updated` update `tenant_memberships.role`. Deletion via `organizationMembership.deleted` soft-deletes/removes the membership.
 
-**Test Case K3: Automated Glossary Provisioning (Tenant Initialization)**
-* **Agent UI Action:** Log in as the newly created user from K1. Navigate to the `/admin` Glossary tab.
-* **Expected UI State:** The new user's tenant already has the default glossary seeded. The UI must show the Kaggle E-Commerce synonyms. This proves the `/api/webhooks/clerk` logic successfully executed the `INSERT` upon user creation.
+**Test Case K3: Token Org Context Enforcement (Active Org Requirement)**
+* **Agent UI Action:** Send an API request with a Clerk JWT that lacks an active organization claim (`payload["o"]` and `payload["org_id"]` are missing).
+* **Expected UI/API State:** The request is rejected immediately with HTTP 401 `auth_invalid` ("Active organization required").
+
+**Test Case K4: Active Org Switch Across Tabs**
+* **Agent UI Action:** In the frontend, use `<OrganizationSwitcher />` to switch active organization from Org A (`org_1`) to Org B (`org_2`).
+* **Expected UI State:** The app refreshes the session context via `getToken()`, sending new requests with Org B's JWT token. API `/api/session` and query endpoints execute strictly isolated against Org B's data (`tenant_id = org_2`).
+
+**Test Case K5: Active Org Scoped Customer Admin Routes**
+* **Agent UI Action:** As an org admin of `org_1`, navigate to `/admin` and request `/api/admin/glossary` or `/api/admin/stats`.
+* **Expected UI/API State:** The returned glossary and analytics stats are strictly filtered to `claims.tenant_id = org_1`. Attempting to pass or modify another tenant's ID in the request is ignored or rejected.
+

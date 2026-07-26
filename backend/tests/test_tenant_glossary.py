@@ -15,11 +15,11 @@ def mock_db_pool():
 async def test_arch_1_tenant_glossary_override(mock_db_pool):
     """ARCH-1: Make the business glossary tenant-configurable."""
     
-    tenant_id = uuid4()
+    tenant_id = str(uuid4())
     turn = TurnRecord(
         session_id=uuid4(),
         conversation_id=uuid4(),
-        user_id=uuid4(),
+        user_id=str(uuid4()),
         tenant_id=tenant_id,
         user_input="Show me ARR by GEO",
         input_modality="text",
@@ -48,7 +48,7 @@ async def test_arch_1_tenant_glossary_override(mock_db_pool):
     result = await rewrite_query_node(state)
     
     mock_conn.fetchrow.assert_called_once_with(
-        "SELECT metric_synonyms, table_synonyms FROM tenant_glossary WHERE tenant_id = $1::uuid",
+        "SELECT metric_synonyms, table_synonyms FROM tenant_glossary WHERE tenant_id = $1",
         tenant_id
     )
     
@@ -59,11 +59,11 @@ async def test_arch_1_tenant_glossary_override(mock_db_pool):
 @pytest.mark.asyncio
 async def test_arch_1_tenant_glossary_fallback(mock_db_pool):
     """ARCH-1: Assert an unconfigured tenant still gets the current hardcoded defaults."""
-    tenant_id = uuid4()
+    tenant_id = str(uuid4())
     turn = TurnRecord(
         session_id=uuid4(),
         conversation_id=uuid4(),
-        user_id=uuid4(),
+        user_id=str(uuid4()),
         tenant_id=tenant_id,
         user_input="revenue", # A term that exists in the default/fallback glossary
         input_modality="text",

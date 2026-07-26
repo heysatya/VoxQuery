@@ -158,7 +158,7 @@ async def rewrite_query_node(state: PipelineGraphState) -> dict:
     if db_pool:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT metric_synonyms, table_synonyms FROM tenant_glossary WHERE tenant_id = $1::uuid",
+                "SELECT metric_synonyms, table_synonyms FROM tenant_glossary WHERE tenant_id = $1",
                 turn.tenant_id
             )
             if row:
@@ -179,7 +179,7 @@ async def rewrite_query_node(state: PipelineGraphState) -> dict:
                         (COALESCE(synonym_hits->$1, '0')::int + 1)::text::jsonb
                     ),
                     total_hits = total_hits + 1
-                    WHERE tenant_id = $2::uuid
+                    WHERE tenant_id = $2
                 """, metric, turn.tenant_id)
                 
     return {"rewritten_query": rewritten}
@@ -440,16 +440,24 @@ async def execution_node(state: PipelineGraphState) -> dict:
     execution_sql_hash = hashlib.sha256(sql_to_execute.encode()).hexdigest()
     final_attempt = turn.attempts[-1]
 
-    assert (
-        execution_sql_hash == final_attempt.sql_hash
-    ), "Execution SQL hash does not match confidence-assessed SQL hash!"
+    if execution_sql_hash != final_attempt.sql_hash:
+        # Deliberately not an `assert`: assertions are stripped when Python runs
+        # with -O, which would silently disable this check in some production
+        # deployments. This invariant (the SQL we execute against the warehouse
+        # is exactly the SQL that was confidence-scored) is security-relevant
+        # and must always be enforced.
+        raise ApiError(
+            ErrorCode.internal_error,
+            status_code=500,
+            detail="Execution SQL hash does not match confidence-assessed SQL hash.",
+        )
     final_attempt.executed_sql_hash = execution_sql_hash
 
     # Cache read
     orchestrator = state.get("orchestrator_ref")
     cached = None
     if orchestrator is not None:
-        cached = await orchestrator._get_cached_result(claims.tenant_id, sql_to_execute)
+        cached = await orchestrator._get_cached_result(claims.tenant_id, sql_to_execute, claims.snowflake_role)
 
     if cached is not None:
         result, shape = cached
@@ -482,7 +490,9 @@ async def execution_node(state: PipelineGraphState) -> dict:
         )
 
         if orchestrator is not None:
-            await orchestrator._store_cached_result(claims.tenant_id, sql_to_execute, result, shape)
+            await orchestrator._store_cached_result(
+                claims.tenant_id, sql_to_execute, result, shape, claims.snowflake_role
+            )
 
     turn.latency_ms += int((perf_counter() - started) * 1000)
     return {"result": result, "shape": shape}

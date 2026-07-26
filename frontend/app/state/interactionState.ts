@@ -37,7 +37,7 @@ export type TurnLifecycleState =
   | "recoverable_error"
   | "fatal_error";
 
-export type TtsLifecycleState = "idle" | "loading" | "playing" | "ended" | "failed";
+export type TtsLifecycleState = "idle" | "loading" | "playing" | "paused" | "ended" | "failed";
 
 export type NoticeSeverity = "info" | "warning" | "error";
 
