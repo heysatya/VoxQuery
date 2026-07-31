@@ -2,8 +2,9 @@
 
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sun, TrendingUp, TrendingDown, AlertTriangle, Sparkles, ChevronRight, X } from "lucide-react";
+import { Sun, TrendingUp, TrendingDown, AlertTriangle, Sparkles, ChevronRight, X, Download } from "lucide-react";
 import { ExecutiveAudioPlayer } from "../insight/ExecutiveAudioPlayer";
+import { fetchAuthenticatedBlob } from "../../../lib/api";
 
 export type BriefingKpi = {
   label: string;
@@ -38,6 +39,8 @@ export function MorningBriefingCard({ apiUrl = "http://127.0.0.1:8000", token, o
   const [briefing, setBriefing] = useState<ExecutiveBriefingData | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [audioUrl, setAudioUrl] = useState<string | undefined>();
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,6 +72,36 @@ export function MorningBriefingCard({ apiUrl = "http://127.0.0.1:8000", token, o
     };
   }, [apiUrl, token]);
 
+  useEffect(() => {
+    let objectUrl: string | undefined;
+    fetchAuthenticatedBlob("/api/briefing/audio", apiUrl, token)
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob);
+        setAudioUrl(objectUrl);
+      })
+      .catch(() => setAudioUrl(undefined));
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [apiUrl, token]);
+
+  const handleDownloadPdf = async () => {
+    try {
+      setIsDownloadingPdf(true);
+      const blob = await fetchAuthenticatedBlob("/api/briefing/pdf", apiUrl, token);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "briefing.pdf";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Failed to download briefing PDF", err);
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
+
   if (dismissed || loading || !briefing) return null;
 
   return (
@@ -93,14 +126,25 @@ export function MorningBriefingCard({ apiUrl = "http://127.0.0.1:8000", token, o
               <p className="text-xs text-[var(--text-muted)]">Logon KPI summary & anomaly report</p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setDismissed(true)}
-            aria-label="Dismiss Briefing"
-            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1.5 rounded-lg hover:bg-[var(--bg-elevated)] transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleDownloadPdf}
+              disabled={isDownloadingPdf}
+              className="text-xs px-3 py-1.5 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--accent-blue)]/15 border border-[var(--border-glass)] text-[var(--text-secondary)] hover:text-[var(--accent-blue)] transition-all flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>{isDownloadingPdf ? "Downloading..." : "Download PDF Report"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDismissed(true)}
+              aria-label="Dismiss Briefing"
+              className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1.5 rounded-lg hover:bg-[var(--bg-elevated)] transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Executive Summary Narrative */}
@@ -110,7 +154,7 @@ export function MorningBriefingCard({ apiUrl = "http://127.0.0.1:8000", token, o
 
         {/* Executive Audio Briefing Player */}
         <div className="mb-6">
-          <ExecutiveAudioPlayer textToSpeak={briefing.summary_narrative} />
+          <ExecutiveAudioPlayer textToSpeak={briefing.summary_narrative} voiceUrl={audioUrl} />
         </div>
 
         {/* KPI Grid */}

@@ -39,6 +39,41 @@ function ChartRenderer({ type, result, onDrillDown }: { type: ChartType; result:
     return map;
   }, [columnSemantics]);
 
+  const xKey = data.columns ? data.columns[0] : "";
+  const yKeys = data.columns ? data.columns.slice(1) : [];
+
+  const chartData = React.useMemo(() => {
+    if (!data.columns || !data.rows) return [];
+    return data.rows.map(row => {
+      const obj: Record<string, ResultCell> = {};
+      data.columns.forEach((col, i) => {
+        obj[col] = row[i];
+      });
+      return obj;
+    });
+  }, [data.columns, data.rows]);
+
+  // Z-score statistical outlier detection
+  const outlierIndexes = React.useMemo(() => {
+    if (!yKeys || yKeys.length === 0) return new Set<number>();
+    const values = chartData.map((row) => {
+      const v = row[yKeys[0]];
+      return typeof v === "number" ? v : parseFloat(String(v)) || 0;
+    });
+    if (values.length < 3) return new Set<number>();
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
+    const stdDev = Math.sqrt(variance);
+    if (stdDev === 0) return new Set<number>();
+    const outliers = new Set<number>();
+    values.forEach((v, idx) => {
+      if (Math.abs(v - mean) / stdDev > 1.5) {
+        outliers.add(idx);
+      }
+    });
+    return outliers;
+  }, [chartData, yKeys]);
+
   if (!data.columns || !data.rows || data.rows.length === 0) {
     return <div className="p-8 text-center text-[var(--text-muted)]">No data to display</div>;
   }
@@ -116,16 +151,6 @@ function ChartRenderer({ type, result, onDrillDown }: { type: ChartType; result:
     return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(val);
   };
 
-  const chartData = data.rows.map(row => {
-    const obj: Record<string, ResultCell> = {};
-    data.columns.forEach((col, i) => {
-      obj[col] = row[i];
-    });
-    return obj;
-  });
-
-  const xKey = data.columns[0];
-  const yKeys = data.columns.slice(1);
   const colors = ["#6366F1", "#8B5CF6", "#EC4899"];
 
   const tooltipStyle = {
@@ -141,27 +166,6 @@ function ChartRenderer({ type, result, onDrillDown }: { type: ChartType; result:
     if (!onDrillDown || !data || !data.activeLabel) return;
     onDrillDown(`Tell me more about ${data.activeLabel}`);
   };
-
-  // Z-score statistical outlier detection
-  const outlierIndexes = React.useMemo(() => {
-    if (!yKeys || yKeys.length === 0) return new Set<number>();
-    const values = chartData.map((row) => {
-      const v = row[yKeys[0]];
-      return typeof v === "number" ? v : parseFloat(String(v)) || 0;
-    });
-    if (values.length < 3) return new Set<number>();
-    const mean = values.reduce((a, b) => a + b, 0) / values.length;
-    const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
-    const stdDev = Math.sqrt(variance);
-    if (stdDev === 0) return new Set<number>();
-    const outliers = new Set<number>();
-    values.forEach((v, idx) => {
-      if (Math.abs(v - mean) / stdDev > 1.5) {
-        outliers.add(idx);
-      }
-    });
-    return outliers;
-  }, [chartData, yKeys]);
 
   if (type === "line") {
     return (

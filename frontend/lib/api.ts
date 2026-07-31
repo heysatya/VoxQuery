@@ -21,6 +21,21 @@ export class ApiRequestError extends Error {
   }
 }
 
+export async function fetchAuthenticatedBlob(
+  path: string,
+  apiUrlOverride?: string,
+  authToken?: string | null
+): Promise<Blob> {
+  const targetUrl = apiUrlOverride || apiUrl;
+  const response = await fetch(`${targetUrl}${path}`, {
+    headers: authToken ? { Authorization: `Bearer ${authToken}` } : {}
+  });
+  if (!response.ok) {
+    throw new ApiRequestError(response.status, `Request failed with status ${response.status}`, null);
+  }
+  return response.blob();
+}
+
 async function request<T>(path: string, init?: RequestInit, authToken?: string | null): Promise<T> {
   let response: Response;
   try {
@@ -168,6 +183,21 @@ export async function postTelemetry(
     method: "POST",
     body: JSON.stringify(payload)
   }, authToken);
+}
+
+export async function fetchWorkspaceWidgets(authToken?: string | null) {
+  return request<any[]>("/api/workspace/widgets", undefined, authToken);
+}
+
+export async function pinWorkspaceWidget(
+  payload: { turn_id: string; title: string; layout_x?: number; layout_y?: number; layout_w?: number; layout_h?: number },
+  authToken?: string | null
+) {
+  return request<any>("/api/workspace/widgets", { method: "POST", body: JSON.stringify(payload) }, authToken);
+}
+
+export async function deleteWorkspaceWidget(widgetId: string, authToken?: string | null) {
+  return request<any>(`/api/workspace/widgets/${widgetId}`, { method: "DELETE" }, authToken);
 }
 
 export function pipelineSocketUrl(sessionId: string): string {

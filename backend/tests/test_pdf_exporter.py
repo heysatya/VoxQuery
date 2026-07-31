@@ -30,8 +30,13 @@ async def test_generate_briefing_pdf_output():
         proactive_insights=["Investigate West Region fulfillment latency"],
     )
 
-    pdf_bytes = await generate_briefing_pdf(briefing, tenant_name="Acme Corp")
-    assert isinstance(pdf_bytes, bytes)
-    assert len(pdf_bytes) > 0
-    # PDF header signature or html string fallback
-    assert pdf_bytes.startswith(b"%PDF") or b"VoxQuery Morning Briefing" in pdf_bytes
+    try:
+        pdf_bytes = await generate_briefing_pdf(briefing, tenant_name="Acme Corp")
+        assert isinstance(pdf_bytes, bytes)
+        assert len(pdf_bytes) > 0
+        # PDF header signature
+        assert pdf_bytes.startswith(b"%PDF")
+    except RuntimeError as exc:
+        if "PDF generation unavailable" in str(exc):
+            pytest.skip("WeasyPrint system libraries (Pango/Cairo) not installed on local host")
+        raise

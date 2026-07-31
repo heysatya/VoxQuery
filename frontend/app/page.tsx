@@ -1,7 +1,7 @@
 "use client";
 
 import { OrganizationList, OrganizationSwitcher, SignInButton, UserButton, useAuth, useOrganization } from "@clerk/nextjs";
-import React, { useMemo } from "react";
+import React, { useMemo, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { RotateCcw } from "lucide-react";
 import { useVoxQuerySession, type VoxQueryAuthRelay } from "./hooks/useVoxQuerySession";
@@ -19,6 +19,7 @@ import { TranscriptReviewPanel } from "./components/transcript/TranscriptReviewP
 import { ThreadHistory } from "./components/thread/ThreadHistory";
 import { FailureNotice } from "./components/notice/FailureNotice";
 import { getStatusLabel } from "./state/interactionState";
+import { fetchWorkspaceWidgets, pinWorkspaceWidget, deleteWorkspaceWidget } from "../lib/api";
 
 const authMode = process.env.NEXT_PUBLIC_AUTH_MODE ?? "fake";
 
@@ -119,21 +120,53 @@ const STARTER_QUESTIONS = [
 
 function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
   const engine = useVoxQuerySession(auth);
-  const [drilldownTurnId, setDrilldownTurnId] = React.useState<string | null>(null);
-  const [pinnedWidgets, setPinnedWidgets] = React.useState<any[]>([]);
+  const [drilldownTurnId, setDrilldownTurnId] = useState<string | null>(null);
+  const [pinnedWidgets, setPinnedWidgets] = useState<any[]>([]);
 
-  const handlePinWidget = (result: any) => {
-    setPinnedWidgets((prev) => {
-      if (prev.some((w) => w.id === result.turnId)) return prev;
-      return [
-        ...prev,
-        {
-          id: result.turnId,
-          title: `Trend: ${result.resultData.result.columns.slice(1).join(", ")} by ${result.resultData.result.columns[0]}`,
-          result,
-        },
-      ];
+  useEffect(() => {
+    let cancelled = false;
+    auth.getToken().then((token) => {
+      fetchWorkspaceWidgets(token).then((widgets) => {
+        if (!cancelled && Array.isArray(widgets)) {
+          setPinnedWidgets(widgets);
+        }
+      }).catch((err) => {
+        console.warn("Could not fetch workspace widgets", err);
+      });
     });
+    return () => { cancelled = true; };
+  }, [auth]);
+
+  const handlePinWidget = async (result: any) => {
+    const title = result.resultData?.result?.columns
+      ? `Trend: ${result.resultData.result.columns.slice(1).join(", ")} by ${result.resultData.result.columns[0]}`
+      : (result.submittedText || "Pinned Result");
+    try {
+      const token = await auth.getToken();
+      const newWidget = await pinWorkspaceWidget(
+        {
+          turn_id: result.turnId,
+          title,
+        },
+        token
+      );
+      setPinnedWidgets((prev) => {
+        if (prev.some((w) => w.id === newWidget.id || w.id === result.turnId)) return prev;
+        return [...prev, newWidget];
+      });
+    } catch (err) {
+      console.error("Failed to pin widget", err);
+    }
+  };
+
+  const handleRemoveWidget = async (id: string) => {
+    try {
+      const token = await auth.getToken();
+      await deleteWorkspaceWidget(id, token);
+      setPinnedWidgets((prev) => prev.filter((w) => w.id !== id && w.widget_id !== id));
+    } catch (err) {
+      console.error("Failed to remove widget", err);
+    }
   };
 
   // Phase 3.2: derive visible state from explicit lifecycle dimensions
@@ -212,7 +245,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               <div className="mt-12 w-full">
                 <ExecutiveWorkspace
                   pinnedWidgets={pinnedWidgets}
-                  onRemoveWidget={(id) => setPinnedWidgets((prev) => prev.filter((w) => w.id !== id))}
+                  onRemoveWidget={handleRemoveWidget}
                 />
               </div>
 

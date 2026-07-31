@@ -16,8 +16,10 @@ export function ExecutiveAudioPlayer({
   const [playbackRate, setPlaybackRate] = useState(1.0);
   const [progress, setProgress] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
+  const [hasAudioError, setHasAudioError] = useState(false);
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -30,7 +32,11 @@ export function ExecutiveAudioPlayer({
     };
   }, []);
 
-  const handlePlayPause = () => {
+  useEffect(() => {
+    setHasAudioError(false);
+  }, [voiceUrl]);
+
+  const speakWithSpeechSynthesis = () => {
     if (!synthRef.current) return;
 
     if (isPlaying) {
@@ -60,14 +66,33 @@ export function ExecutiveAudioPlayer({
     }
   };
 
+  const handlePlayPause = () => {
+    if (voiceUrl && !hasAudioError && audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause();
+        setIsPlaying(false);
+      } else {
+        audioRef.current.playbackRate = playbackRate;
+        audioRef.current.muted = isMuted;
+        audioRef.current.play().then(() => setIsPlaying(true)).catch((err) => {
+          console.warn("Audio element play failed, falling back to SpeechSynthesis", err);
+          setHasAudioError(true);
+          speakWithSpeechSynthesis();
+        });
+      }
+      return;
+    }
+    speakWithSpeechSynthesis();
+  };
+
   const toggleMute = () => {
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
+    if (audioRef.current) {
+      audioRef.current.muted = nextMuted;
+    }
     if (synthRef.current && utteranceRef.current) {
-      const nextMuted = !isMuted;
-      setIsMuted(nextMuted);
-      // Alter volume of active speech
       utteranceRef.current.volume = nextMuted ? 0 : 1;
-    } else {
-      setIsMuted(!isMuted);
     }
   };
 
@@ -76,8 +101,10 @@ export function ExecutiveAudioPlayer({
     const nextIdx = (rates.indexOf(playbackRate) + 1) % rates.length;
     const nextRate = rates[nextIdx];
     setPlaybackRate(nextRate);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = nextRate;
+    }
     if (synthRef.current && utteranceRef.current) {
-      // Re-speak to apply rate change in standard SpeechSynthesis
       const wasPlaying = isPlaying;
       synthRef.current.cancel();
       const utterance = new SpeechSynthesisUtterance(textToSpeak);
@@ -113,6 +140,20 @@ export function ExecutiveAudioPlayer({
 
   return (
     <div className="w-full rounded-2xl bg-gradient-to-br from-indigo-950/40 to-slate-900/40 border border-indigo-500/20 shadow-2xl p-5 backdrop-blur-xl relative overflow-hidden">
+      {voiceUrl && (
+        <audio
+          ref={audioRef}
+          src={voiceUrl}
+          onEnded={() => {
+            setIsPlaying(false);
+            setProgress(100);
+          }}
+          onError={() => {
+            setHasAudioError(true);
+            setIsPlaying(false);
+          }}
+        />
+      )}
       <div className="absolute top-0 right-0 p-3 opacity-20 pointer-events-none">
         <Sparkles className="w-20 h-20 text-indigo-400" />
       </div>

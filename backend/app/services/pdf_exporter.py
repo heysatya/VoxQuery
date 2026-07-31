@@ -29,6 +29,5 @@ async def generate_briefing_pdf(briefing: ExecutiveBriefingResponse, tenant_name
         from weasyprint import HTML
         return HTML(string=html_str).write_pdf()
     except Exception as exc:
-        logger.warning("WeasyPrint conversion unavailable (%s), falling back to UTF-8 HTML byte stream", exc)
-        # Fallback raw byte stream wrapper matching PDF contract
-        return html_str.encode("utf-8")
+        logger.error("WeasyPrint PDF generation failed: %s", exc)
+        raise RuntimeError(f"PDF generation unavailable: {exc}") from exc
