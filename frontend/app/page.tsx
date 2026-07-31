@@ -216,7 +216,23 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                   engine.setSubmittedText(q);
                   engine.submitQuery(q);
                 }}
+                onAskFollowUp={engine.toggleRecording}
               />
+
+              {/* Architectural Engine Flow Chips */}
+              <div className="flex items-center justify-center gap-2 mb-10 text-[11px] font-mono text-gray-400">
+                <span className="px-3 py-1 rounded-full bg-white/5 border border-white/10">
+                  Scheduled queries nightly
+                </span>
+                <span>→</span>
+                <span className="px-3 py-1 rounded-full bg-white/5 border border-white/10">
+                  Anomaly detection (z-score, WoW drift)
+                </span>
+                <span>→</span>
+                <span className="px-3 py-1 rounded-full bg-white/5 border border-white/10">
+                  Priority-ranked alerts
+                </span>
+              </div>
 
               <VoiceVisualizer
                 state={engine.recordingState}

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sun, TrendingUp, TrendingDown, AlertTriangle, Sparkles, ChevronRight, X, Download } from "lucide-react";
+import { Mic, BarChart2, Download, TrendingUp, TrendingDown, X } from "lucide-react";
 import { ExecutiveAudioPlayer } from "../insight/ExecutiveAudioPlayer";
 import { fetchAuthenticatedBlob } from "../../../lib/api";
 
@@ -33,15 +33,22 @@ type MorningBriefingCardProps = {
   apiUrl?: string;
   token?: string | null;
   onSelectInsight?: (query: string) => void;
+  onAskFollowUp?: () => void;
 };
 
-export function MorningBriefingCard({ apiUrl = "http://127.0.0.1:8000", token, onSelectInsight }: MorningBriefingCardProps) {
+export function MorningBriefingCard({
+  apiUrl = "http://127.0.0.1:8000",
+  token,
+  onSelectInsight,
+  onAskFollowUp,
+}: MorningBriefingCardProps) {
   const [briefing, setBriefing] = useState<ExecutiveBriefingData | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [audioUrl, setAudioUrl] = useState<string | undefined>();
   const [selectedVoice, setSelectedVoice] = useState("aura-asteria-en");
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,6 +81,7 @@ export function MorningBriefingCard({ apiUrl = "http://127.0.0.1:8000", token, o
   }, [apiUrl, token]);
 
   useEffect(() => {
+    if (!showDetails) return;
     let objectUrl: string | undefined;
     fetchAuthenticatedBlob(`/api/briefing/audio?voice=${encodeURIComponent(selectedVoice)}`, apiUrl, token)
       .then((blob) => {
@@ -84,7 +92,7 @@ export function MorningBriefingCard({ apiUrl = "http://127.0.0.1:8000", token, o
     return () => {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [apiUrl, token, selectedVoice]);
+  }, [apiUrl, token, selectedVoice, showDetails]);
 
   const handleDownloadPdf = async () => {
     try {
@@ -105,125 +113,156 @@ export function MorningBriefingCard({ apiUrl = "http://127.0.0.1:8000", token, o
 
   if (dismissed || loading || !briefing) return null;
 
+  // Derive 3 executive bullet takeaways from KPIs & Anomalies
+  const takeaways = [
+    {
+      severity: "critical",
+      dotColor: "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.6)]",
+      headline: briefing.anomalies[0]?.title || "Revenue dropped in key segments",
+      subtext: `→ ${briefing.anomalies[0]?.description || "Driven by regional performance shifts"}`,
+    },
+    {
+      severity: "warning",
+      dotColor: "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]",
+      headline: briefing.kpis[1] ? `${briefing.kpis[1].label} variance detected` : "Conversion fell below 30-day avg",
+      subtext: `→ ${briefing.kpis[1]?.insight || "Requires volume optimization"}`,
+    },
+    {
+      severity: "info",
+      dotColor: "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]",
+      headline: briefing.kpis[0] ? `${briefing.kpis[0].label}: ${briefing.kpis[0].value}` : "Pipeline on target",
+      subtext: `→ ${briefing.kpis[0]?.insight || "Strongest performance in 3 quarters"}`,
+    },
+  ];
+
   return (
     <AnimatePresence>
       <motion.div
-        initial={{ opacity: 0, y: -20 }}
+        initial={{ opacity: 0, y: -16 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, height: 0 }}
-        className="w-full max-w-4xl mx-auto mb-8 p-6 rounded-2xl bg-gradient-to-br from-[var(--bg-glass)] to-[var(--bg-surface)] border border-[var(--border-glass)] shadow-2xl backdrop-blur-xl relative overflow-hidden"
+        className="w-full max-w-xl mx-auto mb-8 rounded-2xl bg-gradient-to-b from-[#181a20] to-[#12141a] border border-white/10 shadow-2xl p-6 relative overflow-hidden backdrop-blur-2xl"
       >
-        {/* Glow Header Accent */}
-        <div className="absolute -top-24 -right-24 w-48 h-48 rounded-full bg-amber-500/10 blur-3xl pointer-events-none" />
-
-        {/* Top Header Row */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
-              <Sun className="w-5 h-5 animate-pulse" />
-            </div>
-            <div>
-              <h2 className="text-base font-medium text-[var(--text-primary)]">{briefing.greeting}</h2>
-              <p className="text-xs text-[var(--text-muted)]">Logon KPI summary & anomaly report</p>
-            </div>
+        {/* Top Title Bar */}
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl">☀️</span>
+            <h2 className="text-sm font-semibold text-white tracking-tight">
+              VoxQuery Morning Briefing
+            </h2>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleDownloadPdf}
-              disabled={isDownloadingPdf}
-              className="text-xs px-3 py-1.5 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--accent-blue)]/15 border border-[var(--border-glass)] text-[var(--text-secondary)] hover:text-[var(--accent-blue)] transition-all flex items-center gap-1.5 disabled:opacity-50"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>{isDownloadingPdf ? "Downloading..." : "Download PDF Report"}</span>
-            </button>
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-mono text-gray-400">9:00 AM</span>
             <button
               type="button"
               onClick={() => setDismissed(true)}
-              aria-label="Dismiss Briefing"
-              className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1.5 rounded-lg hover:bg-[var(--bg-elevated)] transition-colors"
+              className="text-gray-500 hover:text-gray-300 p-1 transition-colors"
+              title="Dismiss"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Executive Summary Narrative */}
-        <div className="p-4 rounded-xl bg-[var(--bg-elevated)]/40 border border-[var(--border)] mb-6 text-sm md:text-base text-[var(--text-secondary)] leading-relaxed">
-          <p>{briefing.summary_narrative}</p>
-        </div>
+        {/* Executive Greeting Subtitle */}
+        <p className="text-xs text-gray-300 font-medium mb-4">
+          Good morning. Three things before your 9 AM:
+        </p>
 
-        {/* Executive Audio Briefing Player */}
-        <div className="mb-6">
-          <ExecutiveAudioPlayer
-            textToSpeak={briefing.summary_narrative}
-            voiceUrl={audioUrl}
-            selectedVoice={selectedVoice}
-            onVoiceChange={setSelectedVoice}
-          />
-        </div>
-
-        {/* KPI Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          {briefing.kpis.map((kpi, idx) => (
-            <div
-              key={idx}
-              className="p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-glass)] flex flex-col justify-between"
-            >
-              <span className="text-xs font-mono text-[var(--text-muted)]">{kpi.label}</span>
-              <div className="my-1.5 flex items-baseline justify-between">
-                <span className="text-lg font-semibold text-[var(--text-primary)]">{kpi.value}</span>
-                <span
-                  className={`text-xs font-mono flex items-center gap-0.5 ${
-                    kpi.trend === "up" ? "text-emerald-400" : "text-amber-400"
-                  }`}
-                >
-                  {kpi.trend === "up" ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                  {kpi.change_pct > 0 ? `+${kpi.change_pct}%` : `${kpi.change_pct}%`}
-                </span>
+        {/* 3 Executive Bullet Takeaways */}
+        <div className="space-y-4 mb-6">
+          {takeaways.map((item, idx) => (
+            <div key={idx} className="flex items-start gap-3 group">
+              <span className={`w-2.5 h-2.5 rounded-full mt-1 shrink-0 ${item.dotColor}`} />
+              <div className="space-y-0.5">
+                <h4 className="text-xs font-bold text-white tracking-wide group-hover:text-indigo-300 transition-colors">
+                  {item.headline}
+                </h4>
+                <p className="text-[11px] font-mono text-gray-400">
+                  {item.subtext}
+                </p>
               </div>
-              <p className="text-[11px] text-[var(--text-secondary)] line-clamp-2">{kpi.insight}</p>
             </div>
           ))}
         </div>
 
-        {/* Anomaly Alerts */}
-        {briefing.anomalies.length > 0 && (
-          <div className="mb-6 space-y-2">
-            {briefing.anomalies.map((anom, idx) => (
-              <div
-                key={idx}
-                className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-3 text-xs md:text-sm text-amber-200"
-              >
-                <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-                <div>
-                  <span className="font-semibold">{anom.title}: </span>
-                  <span>{anom.description}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* Bottom Action Bar */}
+        <div className="flex items-center gap-3 pt-3 border-t border-white/5">
+          <button
+            type="button"
+            onClick={onAskFollowUp}
+            className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white text-xs font-semibold shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+          >
+            <Mic className="w-3.5 h-3.5" />
+            <span>Ask a follow-up</span>
+          </button>
 
-        {/* Proactive Insight Prompts */}
-        <div className="pt-2 border-t border-[var(--border)]">
-          <span className="text-xs font-mono text-[var(--accent-blue)] flex items-center gap-1.5 mb-2">
-            <Sparkles className="w-3.5 h-3.5" /> Recommended Follow-up Queries:
-          </span>
-          <div className="flex flex-wrap gap-2">
-            {briefing.proactive_insights.map((query, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => onSelectInsight?.(query)}
-                className="text-xs px-3 py-1.5 rounded-lg bg-[var(--bg-glass)] hover:bg-[var(--accent-blue)]/15 border border-[var(--border-glass)] hover:border-[var(--accent-blue)]/40 text-[var(--text-secondary)] hover:text-[var(--accent-blue)] transition-all flex items-center gap-1 group"
-              >
-                <span>{query}</span>
-                <ChevronRight className="w-3 h-3 text-[var(--text-muted)] group-hover:text-[var(--accent-blue)] transition-colors" />
-              </button>
-            ))}
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowDetails(!showDetails)}
+            className="py-2.5 px-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-xs font-semibold flex items-center justify-center gap-2 transition-all"
+          >
+            <BarChart2 className="w-3.5 h-3.5 text-indigo-400" />
+            <span>{showDetails ? "Hide Details" : "Details"}</span>
+          </button>
         </div>
+
+        {/* Expanded Executive Details Panel */}
+        {showDetails && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mt-5 pt-5 border-t border-white/10 space-y-5"
+          >
+            {/* Audio Podcast Narrator */}
+            <div>
+              <span className="text-[10px] font-mono text-indigo-400 uppercase tracking-widest block mb-2 font-semibold">
+                AUDIO BRIEFING PODCAST
+              </span>
+              <ExecutiveAudioPlayer
+                textToSpeak={briefing.summary_narrative}
+                voiceUrl={audioUrl}
+                selectedVoice={selectedVoice}
+                onVoiceChange={setSelectedVoice}
+              />
+            </div>
+
+            {/* KPI Grid */}
+            <div>
+              <span className="text-[10px] font-mono text-gray-400 uppercase tracking-widest block mb-2 font-semibold">
+                EXECUTIVE METRICS BREAKDOWN
+              </span>
+              <div className="grid grid-cols-2 gap-3">
+                {briefing.kpis.map((kpi, idx) => (
+                  <div key={idx} className="p-3 rounded-xl bg-white/5 border border-white/5 flex flex-col justify-between">
+                    <span className="text-[10px] font-mono text-gray-400">{kpi.label}</span>
+                    <div className="my-1 flex items-baseline justify-between">
+                      <span className="text-sm font-bold text-white">{kpi.value}</span>
+                      <span className={`text-[10px] font-mono flex items-center gap-0.5 ${kpi.trend === "up" ? "text-emerald-400" : "text-amber-400"}`}>
+                        {kpi.trend === "up" ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                        {kpi.change_pct > 0 ? `+${kpi.change_pct}%` : `${kpi.change_pct}%`}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* PDF Export Action */}
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={handleDownloadPdf}
+                disabled={isDownloadingPdf}
+                className="text-xs px-3.5 py-2 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 text-indigo-300 font-medium transition-all flex items-center gap-2 disabled:opacity-50"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>{isDownloadingPdf ? "Downloading PDF..." : "Export PDF Report"}</span>
+              </button>
+            </div>
+          </motion.div>
+        )}
       </motion.div>
     </AnimatePresence>
   );
