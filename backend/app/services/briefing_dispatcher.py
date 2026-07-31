@@ -8,8 +8,6 @@ and deep-links directly to the dashboard, supporting SMTP, Resend, or Fake/Mock 
 from __future__ import annotations
 
 import logging
-from uuid import UUID
-
 from app.config import Settings
 from app.models.contracts import ExecutiveBriefingResponse
 
@@ -17,7 +15,7 @@ logger = logging.getLogger("voxquery.services.briefing_dispatcher")
 
 
 async def dispatch_briefing_email(
-    user_id: UUID,
+    user_id: str,
     email: str,
     briefing: ExecutiveBriefingResponse,
     settings: Settings,

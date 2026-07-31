@@ -144,6 +144,10 @@ async def lifespan(app: FastAPI):
         db_pool=app.state.db_pool,
     )
     
+    from app.services.briefing_scheduler import start_briefing_scheduler
+    if app.state.db_pool and settings.supabase_database_url:
+        start_briefing_scheduler(app.state.db_pool, settings)
+
     yield
     await audit_store.stop()
     await app.state.sessions.close()
