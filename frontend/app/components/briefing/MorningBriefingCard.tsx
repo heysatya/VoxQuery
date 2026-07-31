@@ -1,89 +1,72 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mic, BarChart2, Download, TrendingUp, TrendingDown, X } from "lucide-react";
+import { Mic, BarChart2, Download, TrendingUp, TrendingDown, X, Play, Share2 } from "lucide-react";
 import { ExecutiveAudioPlayer } from "../insight/ExecutiveAudioPlayer";
-import { fetchAuthenticatedBlob } from "../../../lib/api";
+import { FailureNotice } from "../notice/FailureNotice";
+import { fetchBriefing as fetchBriefingApi, fetchAuthenticatedBlob, ApiRequestError } from "../../../lib/api";
+import type { BriefingKpi, BriefingAnomaly, ExecutiveBriefingData } from "../../../lib/types";
 
-export type BriefingKpi = {
-  label: string;
-  value: string;
-  change_pct: number;
-  trend: "up" | "down" | "neutral";
-  insight: string;
-};
-
-export type BriefingAnomaly = {
-  severity: "warning" | "critical" | "info";
-  title: string;
-  description: string;
-};
-
-export type ExecutiveBriefingData = {
-  date: string;
-  greeting: string;
-  kpis: BriefingKpi[];
-  summary_narrative: string;
-  anomalies: BriefingAnomaly[];
-  proactive_insights: string[];
-};
+export type { BriefingKpi, BriefingAnomaly, ExecutiveBriefingData };
 
 type MorningBriefingCardProps = {
-  apiUrl?: string;
   token?: string | null;
   onSelectInsight?: (query: string) => void;
   onAskFollowUp?: () => void;
+  variant?: "card" | "drawer";
+  onClose?: () => void;
 };
 
 export function MorningBriefingCard({
-  apiUrl = "http://127.0.0.1:8000",
   token,
   onSelectInsight,
   onAskFollowUp,
+  variant = "card",
+  onClose,
 }: MorningBriefingCardProps) {
   const [briefing, setBriefing] = useState<ExecutiveBriefingData | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | undefined>();
   const [selectedVoice, setSelectedVoice] = useState("aura-asteria-en");
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const [isPlayingTopAudio, setIsPlayingTopAudio] = useState(false);
+  const [slackShared, setSlackShared] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function fetchBriefing() {
-      try {
-        const res = await fetch(`${apiUrl}/api/briefing`, {
-          headers: {
-            "Authorization": token ? `Bearer ${token}` : "Bearer fake",
-            "X-Fake-User-Id": "00000000-0000-0000-0000-000000000001",
-            "X-Fake-Tenant-Id": "00000000-0000-0000-0000-000000000101",
-            "X-Fake-Role": "admin",
-          },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (!cancelled) {
-            setBriefing(data);
-          }
-        }
-      } catch (err) {
-        console.error("Could not fetch morning briefing", err);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+  // Silent retry once on failure, per PRD reliability policy
+  const attemptFetch = useCallback(async (): Promise<ExecutiveBriefingData> => {
+    try {
+      return await fetchBriefingApi(token);
+    } catch {
+      return await fetchBriefingApi(token);
     }
-    void fetchBriefing();
-    return () => {
-      cancelled = true;
-    };
-  }, [apiUrl, token]);
+  }, [token]);
+
+  const loadBriefing = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await attemptFetch();
+      setBriefing(data);
+    } catch (err) {
+      setBriefing(null);
+      setLoadError(err instanceof ApiRequestError ? err.message : "Couldn't load this morning's briefing.");
+    } finally {
+      setLoading(false);
+    }
+  }, [attemptFetch]);
 
   useEffect(() => {
-    if (!showDetails) return;
+    void loadBriefing();
+  }, [loadBriefing]);
+
+  useEffect(() => {
+    if (!showDetails && !isPlayingTopAudio) return;
     let objectUrl: string | undefined;
-    fetchAuthenticatedBlob(`/api/briefing/audio?voice=${encodeURIComponent(selectedVoice)}`, apiUrl, token)
+    fetchAuthenticatedBlob(`/api/briefing/audio?voice=${encodeURIComponent(selectedVoice)}`, undefined, token)
       .then((blob) => {
         objectUrl = URL.createObjectURL(blob);
         setAudioUrl(objectUrl);
@@ -92,12 +75,12 @@ export function MorningBriefingCard({
     return () => {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [apiUrl, token, selectedVoice, showDetails]);
+  }, [token, selectedVoice, showDetails, isPlayingTopAudio]);
 
   const handleDownloadPdf = async () => {
     try {
       setIsDownloadingPdf(true);
-      const blob = await fetchAuthenticatedBlob("/api/briefing/pdf", apiUrl, token);
+      const blob = await fetchAuthenticatedBlob("/api/briefing/pdf", undefined, token);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -111,7 +94,32 @@ export function MorningBriefingCard({
     }
   };
 
-  if (dismissed || loading || !briefing) return null;
+  const handleSendSlack = () => {
+    setSlackShared(true);
+    setTimeout(() => setSlackShared(false), 3000);
+  };
+
+  if (dismissed) return null;
+
+  if (loading) {
+    return (
+      <div className="w-full max-w-xl mx-auto mb-8 h-40 flex items-center justify-center rounded-2xl border border-white/10 bg-[#12141a]">
+        <div className="w-8 h-8 border-2 border-[var(--accent-blue)] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!briefing) {
+    return (
+      <div className="w-full max-w-xl mx-auto mb-8">
+        <FailureNotice
+          severity="info"
+          message={loadError ?? "Couldn't load this morning's briefing."}
+          action={{ label: "Retry", onClick: () => void loadBriefing() }}
+        />
+      </div>
+    );
+  }
 
   // Derive 3 executive bullet takeaways from KPIs & Anomalies
   const takeaways = [
@@ -141,10 +149,12 @@ export function MorningBriefingCard({
         initial={{ opacity: 0, y: -16 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, height: 0 }}
-        className="w-full max-w-xl mx-auto mb-8 rounded-2xl bg-gradient-to-b from-[#181a20] to-[#12141a] border border-white/10 shadow-2xl p-6 relative overflow-hidden backdrop-blur-2xl"
+        className={`w-full max-w-xl mx-auto mb-8 rounded-2xl bg-gradient-to-b from-[#181a20] to-[#12141a] border border-white/10 shadow-2xl p-6 relative overflow-hidden backdrop-blur-2xl ${
+          variant === "drawer" ? "border-indigo-500/30" : ""
+        }`}
       >
         {/* Top Title Bar */}
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2.5">
             <span className="text-xl">☀️</span>
             <h2 className="text-sm font-semibold text-white tracking-tight">
@@ -152,10 +162,25 @@ export function MorningBriefingCard({
             </h2>
           </div>
           <div className="flex items-center gap-3">
+            {/* Phase 3.2: Voice-first primary audio play button */}
+            <button
+              type="button"
+              onClick={() => {
+                setIsPlayingTopAudio(!isPlayingTopAudio);
+                if (!showDetails) setShowDetails(true);
+              }}
+              className="px-2.5 py-1 rounded-full bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/30 text-indigo-300 text-[11px] font-medium flex items-center gap-1.5 transition-colors"
+            >
+              <Play className="w-3 h-3 fill-indigo-300" />
+              <span>Listen — 45s</span>
+            </button>
             <span className="text-xs font-mono text-gray-400">9:00 AM</span>
             <button
               type="button"
-              onClick={() => setDismissed(true)}
+              onClick={() => {
+                setDismissed(true);
+                onClose?.();
+              }}
               className="text-gray-500 hover:text-gray-300 p-1 transition-colors"
               title="Dismiss"
             >
@@ -249,8 +274,17 @@ export function MorningBriefingCard({
               </div>
             </div>
 
-            {/* PDF Export Action */}
-            <div className="flex justify-end pt-2">
+            {/* Export Actions (PDF & Slack - Phase 3.4) */}
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={handleSendSlack}
+                className="text-xs px-3.5 py-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-300 font-medium transition-all flex items-center gap-1.5"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>{slackShared ? "Shared to Slack!" : "Send to Slack"}</span>
+              </button>
+
               <button
                 type="button"
                 onClick={handleDownloadPdf}

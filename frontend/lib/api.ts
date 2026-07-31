@@ -1,5 +1,7 @@
 import type {
   ClarificationRequest,
+  ExecutiveBriefingData,
+  MemoryGraphData,
   QueryAcceptedResponse,
   QueryRequest,
   ResultResponse,
@@ -237,6 +239,28 @@ export function ttsSocketUrl(sessionId: string, turnId: string): string {
   return socketUrl(
     `/ws/tts?session_id=${encodeURIComponent(sessionId)}&turn_id=${encodeURIComponent(turnId)}`
   );
+}
+
+export async function fetchBriefing(authToken?: string | null): Promise<ExecutiveBriefingData> {
+  return request<ExecutiveBriefingData>("/api/briefing", {}, authToken);
+}
+
+export async function fetchMemoryGraph(
+  sessionId: string,
+  authToken?: string | null
+): Promise<MemoryGraphData> {
+  return request<MemoryGraphData>(`/api/memory-graph/${encodeURIComponent(sessionId)}`, {}, authToken);
+}
+
+export async function fetchDrilldown(
+  turnId: string,
+  authToken?: string | null
+): Promise<Record<string, any>[]> {
+  return request<Record<string, any>[]>(`/api/drilldown/${encodeURIComponent(turnId)}`, {}, authToken);
+}
+
+export async function fetchVersion(authToken?: string | null): Promise<{ git_sha: string; version: string }> {
+  return request<{ git_sha: string; version: string }>("/api/version", {}, authToken);
 }
 
 function socketUrl(path: string): string {

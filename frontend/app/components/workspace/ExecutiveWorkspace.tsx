@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Pin, Trash2, LayoutGrid, BarChart2, TrendingUp, Table, Zap, Sparkles } from "lucide-react";
+import { Pin, Trash2, LayoutGrid, Sparkles } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip as RechartsTooltip } from "recharts";
 import { type LastResult } from "../../../lib/types";
 
@@ -28,18 +28,12 @@ function formatCleanTitle(rawTitle: string): string {
   return rawTitle.replace(/_/g, " ");
 }
 
-/* Sample backup chart data for visual executive preview */
-const MOCK_CHART_DATA = [
-  { name: "Q1", value: 4200, growth: 12 },
-  { name: "Q2", value: 5800, growth: 18 },
-  { name: "Q3", value: 7100, growth: 24 },
-  { name: "Q4", value: 9400, growth: 31 },
-];
-
 export function ExecutiveWorkspace({
   pinnedWidgets = [],
   onRemoveWidget,
 }: ExecutiveWorkspaceProps) {
+  const currentDate = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
   return (
     <div className="w-full rounded-2xl bg-gradient-to-br from-[var(--bg-glass)] to-[var(--bg-surface)] border border-[var(--border-glass)] shadow-2xl p-6 backdrop-blur-xl relative overflow-hidden">
       <div className="flex items-center justify-between mb-6">
@@ -49,12 +43,12 @@ export function ExecutiveWorkspace({
           </div>
           <div>
             <h3 className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
-              Executive Grid Workspace
+              Saved metrics
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                {pinnedWidgets.length} Active {pinnedWidgets.length === 1 ? "Metric" : "Metrics"}
+                {pinnedWidgets.length} pinned
               </span>
             </h3>
-            <p className="text-[11px] text-[var(--text-muted)]">Custom pinned executive KPIs and side-by-side analytical widgets</p>
+            <p className="text-[11px] text-[var(--text-muted)]">Your personal dashboard of saved analytical views</p>
           </div>
         </div>
       </div>
@@ -64,9 +58,9 @@ export function ExecutiveWorkspace({
           <div className="p-3 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-glass)] mb-3">
             <Pin className="w-5 h-5 text-[var(--text-muted)]" />
           </div>
-          <p className="text-xs text-[var(--text-secondary)] font-medium">No pinned executive metrics yet.</p>
+          <p className="text-xs text-[var(--text-secondary)] font-medium">Nothing pinned yet.</p>
           <p className="text-[10px] text-[var(--text-muted)] mt-1 max-w-sm">
-            Click the pin icon on any chart or stat card to assemble your personal executive dashboard.
+            Pin any chart to build your own board.
           </p>
         </div>
       ) : (
@@ -91,8 +85,6 @@ export function ExecutiveWorkspace({
               });
             }
 
-            const chartDataToRender = formattedChartData.length > 0 ? formattedChartData : MOCK_CHART_DATA;
-
             return (
               <div
                 key={widget.id}
@@ -100,14 +92,9 @@ export function ExecutiveWorkspace({
               >
                 {/* Header Row */}
                 <div className="flex items-start justify-between gap-3 mb-3">
-                  <div>
-                    <span className="text-[10px] font-mono text-indigo-400 uppercase tracking-widest block font-semibold mb-0.5">
-                      PINNED EXECUTIVE WIDGET
-                    </span>
-                    <h4 className="text-xs font-bold text-white capitalize line-clamp-1">
-                      {cleanTitle}
-                    </h4>
-                  </div>
+                  <h4 className="text-xs font-bold text-white capitalize line-clamp-1">
+                    {cleanTitle}
+                  </h4>
 
                   {onRemoveWidget && (
                     <button
@@ -121,31 +108,37 @@ export function ExecutiveWorkspace({
                   )}
                 </div>
 
-                {/* Embedded Recharts Mini Graphic */}
+                {/* Embedded Recharts Mini Graphic or Honest Empty State */}
                 <div className="h-36 w-full my-2 pt-2 bg-black/20 rounded-xl border border-white/5 p-2 flex items-center justify-center">
-                  <ResponsiveContainer width="100%" height="100%">
-                    {chartType === "line" ? (
-                      <LineChart data={chartDataToRender}>
-                        <XAxis dataKey="name" stroke="#6b7280" fontSize={10} tickLine={false} />
-                        <YAxis stroke="#6b7280" fontSize={10} tickLine={false} width={30} />
-                        <RechartsTooltip
-                          contentStyle={{ backgroundColor: "#1f2937", borderRadius: "8px", border: "1px solid #374151" }}
-                          labelStyle={{ color: "#fff", fontSize: "11px" }}
-                        />
-                        <Line type="monotone" dataKey="value" stroke="#818cf8" strokeWidth={2} dot={{ r: 3, fill: "#818cf8" }} />
-                      </LineChart>
-                    ) : (
-                      <BarChart data={chartDataToRender}>
-                        <XAxis dataKey="name" stroke="#6b7280" fontSize={10} tickLine={false} />
-                        <YAxis stroke="#6b7280" fontSize={10} tickLine={false} width={30} />
-                        <RechartsTooltip
-                          contentStyle={{ backgroundColor: "#1f2937", borderRadius: "8px", border: "1px solid #374151" }}
-                          labelStyle={{ color: "#fff", fontSize: "11px" }}
-                        />
-                        <Bar dataKey="value" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    )}
-                  </ResponsiveContainer>
+                  {formattedChartData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      {chartType === "line" ? (
+                        <LineChart data={formattedChartData}>
+                          <XAxis dataKey="name" stroke="#6b7280" fontSize={10} tickLine={false} />
+                          <YAxis stroke="#6b7280" fontSize={10} tickLine={false} width={30} />
+                          <RechartsTooltip
+                            contentStyle={{ backgroundColor: "#1f2937", borderRadius: "8px", border: "1px solid #374151" }}
+                            labelStyle={{ color: "#fff", fontSize: "11px" }}
+                          />
+                          <Line type="monotone" dataKey="value" stroke="#818cf8" strokeWidth={2} dot={{ r: 3, fill: "#818cf8" }} />
+                        </LineChart>
+                      ) : (
+                        <BarChart data={formattedChartData}>
+                          <XAxis dataKey="name" stroke="#6b7280" fontSize={10} tickLine={false} />
+                          <YAxis stroke="#6b7280" fontSize={10} tickLine={false} width={30} />
+                          <RechartsTooltip
+                            contentStyle={{ backgroundColor: "#1f2937", borderRadius: "8px", border: "1px solid #374151" }}
+                            labelStyle={{ color: "#fff", fontSize: "11px" }}
+                          />
+                          <Bar dataKey="value" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      )}
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="text-xs text-gray-500 flex items-center justify-center h-full font-mono">
+                      No data returned for this metric
+                    </div>
+                  )}
                 </div>
 
                 {/* Footer Metadata Bar */}
@@ -154,8 +147,8 @@ export function ExecutiveWorkspace({
                     <Sparkles className="w-3 h-3 text-indigo-400" />
                     Ref: {(widget.result?.turnId || widget.result?.turn_id || widget.id).slice(0, 8)}
                   </span>
-                  <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
-                    Live Visual Dashboard
+                  <span className="px-2 py-0.5 rounded bg-white/5 text-gray-300 border border-white/10 font-mono">
+                    Snapshot from {currentDate}
                   </span>
                 </div>
               </div>

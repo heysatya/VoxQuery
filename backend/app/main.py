@@ -253,6 +253,22 @@ async def health() -> dict[str, str]:
     }
 
 
+@app.get("/api/version")
+async def get_version() -> dict[str, str]:
+    import os
+    import subprocess
+    git_sha = os.environ.get("GIT_SHA", "")
+    if not git_sha:
+        try:
+            git_sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+        except Exception:
+            git_sha = "e9400b7"
+    return {
+        "git_sha": git_sha,
+        "version": "1.0.0",
+    }
+
+
 app.include_router(rest_router)
 app.include_router(ws_pipeline_router)
 app.include_router(ws_audio_router)

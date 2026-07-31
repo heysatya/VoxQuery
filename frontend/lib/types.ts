@@ -146,3 +146,45 @@ export type AudioEvent =
       code: string;
       message: string;
     };
+
+export type BriefingKpi = {
+  label: string;
+  value: string;
+  change_pct: number;
+  trend: "up" | "down" | "neutral";
+  insight: string;
+};
+
+export type BriefingAnomaly = {
+  severity: "warning" | "critical" | "info";
+  title: string;
+  description: string;
+};
+
+export type ExecutiveBriefingData = {
+  date: string;
+  greeting: string;
+  kpis: BriefingKpi[];
+  summary_narrative: string;
+  anomalies: BriefingAnomaly[];
+  proactive_insights: string[];
+};
+
+export type GraphNode = {
+  id: string;
+  label: string;
+  type: "query" | "entity" | "metric" | "filter" | "insight";
+  turn_index: number;
+};
+
+export type GraphEdge = {
+  source: string;
+  target: string;
+  relation: string;
+};
+
+export type MemoryGraphData = {
+  session_id: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+};

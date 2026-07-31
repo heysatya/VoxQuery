@@ -17,9 +17,9 @@ import { ClarificationOverlay } from "./components/clarification/ClarificationOv
 import { QueryDock } from "./components/query/QueryDock";
 import { TranscriptReviewPanel } from "./components/transcript/TranscriptReviewPanel";
 import { ThreadHistory } from "./components/thread/ThreadHistory";
+import { InlineAnomalyNudge } from "./components/insight/InlineAnomalyNudge";
 import { FailureNotice } from "./components/notice/FailureNotice";
-import { getStatusLabel } from "./state/interactionState";
-import { fetchWorkspaceWidgets, pinWorkspaceWidget, deleteWorkspaceWidget } from "../lib/api";
+import { fetchWorkspaceWidgets, pinWorkspaceWidget, deleteWorkspaceWidget, fetchVersion } from "../lib/api";
 
 const authMode = process.env.NEXT_PUBLIC_AUTH_MODE ?? "fake";
 
@@ -123,11 +123,18 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
   const [drilldownTurnId, setDrilldownTurnId] = useState<string | null>(null);
   const [pinnedWidgets, setPinnedWidgets] = useState<any[]>([]);
   const [token, setToken] = useState<string | null>(null);
+  const [briefingDrawerOpen, setBriefingDrawerOpen] = useState(false);
+  const [gitSha, setGitSha] = useState<string>("e9400b7");
 
   useEffect(() => {
     let active = true;
     auth.getToken().then((t) => {
-      if (active) setToken(t);
+      if (active) {
+        setToken(t);
+        fetchVersion(t).then((v) => {
+          if (active && v?.git_sha) setGitSha(v.git_sha);
+        }).catch(() => {});
+      }
     });
     return () => { active = false; };
   }, [auth]);
@@ -147,9 +154,9 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
   }, [auth]);
 
   const handlePinWidget = async (result: any) => {
-    const title = result.submittedText || (result.resultData?.result?.columns
-      ? `Executive Analytics: ${result.resultData.result.columns[0].replace(/_/g, " ")}`
-      : "Pinned Executive Metric");
+    const title = result.submittedText
+      || result.resultData?.summary_narrative?.split(".")[0]
+      || "Pinned metric";
     try {
       const token = await auth.getToken();
       const newWidget = await pinWorkspaceWidget(
@@ -195,6 +202,17 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
 
   return (
     <main className="min-h-screen flex flex-col relative">
+      {/* Persistent Top Nav Briefing Button (Phase 1.3) */}
+      <div className="fixed top-4 left-4 z-40">
+        <button
+          type="button"
+          onClick={() => setBriefingDrawerOpen(true)}
+          className="px-3.5 py-1.5 rounded-full bg-[#181a20]/90 border border-white/10 text-white text-xs font-semibold shadow-lg hover:border-indigo-500/40 transition-all flex items-center gap-2 backdrop-blur-xl"
+        >
+          <span>☀️ Today's briefing — 2 flags</span>
+        </button>
+      </div>
+
       {/* Scrollable content area */}
       <div className="flex-1 flex flex-col items-center px-4 md:px-8 pb-44 overflow-y-auto scrollbar-hide">
 
@@ -422,6 +440,9 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 onPin={handlePinWidget}
               />
 
+              {/* Phase 3.1: Inline anomaly nudge */}
+              <InlineAnomalyNudge onAskBreakdown={engine.submitQuery} />
+
               {/* Follow-up suggestions */}
               <FollowUpSuggestions
                 result={engine.lastResult}
@@ -432,7 +453,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               <div className="mt-8 w-full">
                 <ExecutiveMemoryGraph
                   sessionId={engine.session.sessionId}
-                  auth={auth}
+                  authToken={token}
                 />
               </div>
 
@@ -499,13 +520,42 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
         )}
       </AnimatePresence>
 
+      {/* ── Persistent Briefing Drawer Overlay (Phase 1.3) ─── */}
+      <AnimatePresence>
+        {briefingDrawerOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
+            <div className="w-full max-w-xl">
+              <MorningBriefingCard
+                token={token}
+                variant="drawer"
+                onClose={() => setBriefingDrawerOpen(false)}
+                onSelectInsight={(q) => {
+                  setBriefingDrawerOpen(false);
+                  engine.setSubmittedText(q);
+                  engine.submitQuery(q);
+                }}
+                onAskFollowUp={() => {
+                  setBriefingDrawerOpen(false);
+                  engine.toggleRecording();
+                }}
+              />
+            </div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* ── Drilldown modal ─────────────────────────────────────── */}
       <RowDrilldownModal
         isOpen={!!drilldownTurnId}
         onClose={() => setDrilldownTurnId(null)}
         turnId={drilldownTurnId}
-        auth={auth}
+        authToken={token}
       />
+
+      {/* Version Footer (Phase 1.5) */}
+      <div className="fixed bottom-2 right-4 text-[10px] font-mono text-gray-500 z-30 pointer-events-none">
+        Build: {gitSha}
+      </div>
     </main>
   );
 }

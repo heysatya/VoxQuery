@@ -1,32 +1,15 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Brain, RefreshCw, Layers, Database, BarChart3, Filter, CheckCircle2, Compass } from "lucide-react";
-import { type VoxQueryAuthRelay } from "../../hooks/useVoxQuerySession";
+import { Brain, RefreshCw, BarChart3, Filter, CheckCircle2 } from "lucide-react";
+import { fetchMemoryGraph, ApiRequestError } from "../../../lib/api";
+import type { GraphNode, GraphEdge, MemoryGraphData } from "../../../lib/types";
 
-export type GraphNode = {
-  id: string;
-  label: string;
-  type: "query" | "entity" | "metric" | "filter" | "insight";
-  turn_index: number;
-};
-
-export type GraphEdge = {
-  source: string;
-  target: string;
-  relation: string;
-};
-
-export type MemoryGraphData = {
-  session_id: string;
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-};
+export type { GraphNode, GraphEdge, MemoryGraphData };
 
 type ExecutiveMemoryGraphProps = {
   sessionId: string | null;
-  apiUrl?: string;
-  auth: VoxQueryAuthRelay;
+  authToken?: string | null;
 };
 
 function formatNodeLabel(node: GraphNode): string {
@@ -37,30 +20,17 @@ function formatNodeLabel(node: GraphNode): string {
 
 export function ExecutiveMemoryGraph({
   sessionId,
-  apiUrl = "http://127.0.0.1:8000",
-  auth,
+  authToken,
 }: ExecutiveMemoryGraphProps) {
   const [graphData, setGraphData] = useState<MemoryGraphData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
 
   const fetchGraph = async () => {
     if (!sessionId) return;
     setLoading(true);
     try {
-      const token = await auth.getToken();
-      const res = await fetch(`${apiUrl}/api/memory-graph/${sessionId}`, {
-        headers: {
-          "Authorization": token ? `Bearer ${token}` : "Bearer fake",
-          "X-Fake-User-Id": "00000000-0000-0000-0000-000000000001",
-          "X-Fake-Tenant-Id": "00000000-0000-0000-0000-000000000101",
-          "X-Fake-Role": "admin",
-        },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setGraphData(data);
-      }
+      const data = await fetchMemoryGraph(sessionId, authToken);
+      setGraphData(data);
     } catch (err) {
       console.error("Could not fetch memory graph", err);
     } finally {
@@ -70,13 +40,13 @@ export function ExecutiveMemoryGraph({
 
   useEffect(() => {
     void fetchGraph();
-  }, [sessionId, auth]);
+  }, [sessionId, authToken]);
 
   if (!sessionId) {
     return (
       <div className="flex flex-col items-center justify-center p-8 border border-dashed border-[var(--border)] rounded-2xl bg-[var(--bg-glass)] text-center">
         <Brain className="w-8 h-8 text-[var(--text-muted)] mb-3" />
-        <p className="text-sm text-[var(--text-secondary)] font-medium">Start a query session to view context lineage.</p>
+        <p className="text-sm text-[var(--text-secondary)] font-medium">Ask a question to get started — I'll keep track of what you've covered as you go.</p>
       </div>
     );
   }
@@ -102,20 +72,19 @@ export function ExecutiveMemoryGraph({
             <Brain className="w-5 h-5 animate-pulse" />
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
-              Executive Context Lineage
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                {graphData?.nodes?.length || 0} Context Nodes
-              </span>
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+              What we've covered
             </h3>
-            <p className="text-[11px] text-[var(--text-muted)]">Multi-turn analytical decision flow & active context memory</p>
+            <p className="text-[11px] text-[var(--text-muted)]">
+              A quick recap of the questions and filters you've used in this session
+            </p>
           </div>
         </div>
         <button
           type="button"
           onClick={fetchGraph}
           className="p-2 rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] border border-[var(--border-glass)] transition-colors"
-          title="Refresh Context Lineage"
+          title="Refresh History"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
         </button>
@@ -142,10 +111,10 @@ export function ExecutiveMemoryGraph({
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-semibold uppercase">
-                      Turn {turnIdx} Context
+                      Question {turnIdx}
                     </span>
                     <span className="text-[10px] text-[var(--text-muted)] flex items-center gap-1 font-mono">
-                      <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Retained
+                      <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Active
                     </span>
                   </div>
 
@@ -153,7 +122,7 @@ export function ExecutiveMemoryGraph({
                   {queryNode && (
                     <div>
                       <span className="text-[10px] text-[var(--text-muted)] font-mono uppercase tracking-wider block mb-1">
-                        Analytical Scope
+                        You asked
                       </span>
                       <p className="text-xs font-semibold text-[var(--text-primary)] line-clamp-2">
                         {formatNodeLabel(queryNode)}
@@ -181,26 +150,10 @@ export function ExecutiveMemoryGraph({
               );
             })}
           </div>
-
-          {/* Active Context Chips */}
-          <div className="p-4 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-glass)] flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Compass className="w-4 h-4 text-purple-400" />
-              <span className="text-xs font-semibold text-[var(--text-primary)]">Active Decision Context:</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <span className="text-[10px] font-mono px-2.5 py-1 rounded-lg bg-purple-500/10 text-purple-300 border border-purple-500/20">
-                Multi-Turn Retained
-              </span>
-              <span className="text-[10px] font-mono px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
-                Zero Context Loss
-              </span>
-            </div>
-          </div>
         </div>
       ) : (
         <div className="h-44 flex items-center justify-center">
-          <p className="text-sm text-[var(--text-secondary)] font-medium">No context history recorded for this session.</p>
+          <p className="text-sm text-[var(--text-secondary)] font-medium">Ask a question to get started — I'll keep track of what you've covered as you go.</p>
         </div>
       )}
     </div>

@@ -2,43 +2,30 @@
 
 import React, { useEffect, useState } from "react";
 import { X, Table, Download, RefreshCw } from "lucide-react";
-import { type VoxQueryAuthRelay } from "../../hooks/useVoxQuerySession";
+import { fetchDrilldown as fetchDrilldownApi } from "../../../lib/api";
 
 type RowDrilldownModalProps = {
   isOpen: boolean;
   onClose: () => void;
   turnId: string | null;
-  apiUrl?: string;
-  auth: VoxQueryAuthRelay;
+  authToken?: string | null;
 };
 
 export function RowDrilldownModal({
   isOpen,
   onClose,
   turnId,
-  apiUrl = "http://127.0.0.1:8000",
-  auth,
+  authToken,
 }: RowDrilldownModalProps) {
   const [rows, setRows] = useState<Record<string, any>[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const fetchDrilldown = async () => {
+  const fetchDrilldownData = async () => {
     if (!turnId) return;
     setLoading(true);
     try {
-      const token = await auth.getToken();
-      const res = await fetch(`${apiUrl}/api/drilldown/${turnId}`, {
-        headers: {
-          "Authorization": token ? `Bearer ${token}` : "Bearer fake",
-          "X-Fake-User-Id": "00000000-0000-0000-0000-000000000001",
-          "X-Fake-Tenant-Id": "00000000-0000-0000-0000-000000000101",
-          "X-Fake-Role": "admin",
-        },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setRows(data);
-      }
+      const data = await fetchDrilldownApi(turnId, authToken);
+      setRows(data);
     } catch (err) {
       console.error("Failed to load raw drilldown", err);
     } finally {
@@ -48,9 +35,9 @@ export function RowDrilldownModal({
 
   useEffect(() => {
     if (isOpen && turnId) {
-      void fetchDrilldown();
+      void fetchDrilldownData();
     }
-  }, [isOpen, turnId]);
+  }, [isOpen, turnId, authToken]);
 
   if (!isOpen) return null;
 
