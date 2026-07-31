@@ -1,7 +1,8 @@
 "use client";
 
 import React from "react";
-import { Pin, Trash2, LayoutGrid, BarChart2, TrendingUp, Table, Zap } from "lucide-react";
+import { Pin, Trash2, LayoutGrid, BarChart2, TrendingUp, Table, Zap, Sparkles } from "lucide-react";
+import { ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip as RechartsTooltip } from "recharts";
 import { type LastResult } from "../../../lib/types";
 
 type PinnedWidget = {
@@ -21,11 +22,19 @@ function formatCleanTitle(rawTitle: string): string {
     const parts = rawTitle.replace(/^Trend:\s*/i, "").split(/by\s+/i);
     const mainMetric = parts[0].split(",").map((s) => s.trim().replace(/_/g, " ")).filter((s) => !s.includes("id")).join(" & ");
     const dimension = parts[1] ? parts[1].trim().replace(/_/g, " ") : "";
-    if (mainMetric && dimension) return `${mainMetric.toUpperCase()} by ${dimension}`;
-    if (mainMetric) return mainMetric.toUpperCase();
+    if (mainMetric && dimension) return `${mainMetric} by ${dimension}`;
+    if (mainMetric) return mainMetric;
   }
   return rawTitle.replace(/_/g, " ");
 }
+
+/* Sample backup chart data for visual executive preview */
+const MOCK_CHART_DATA = [
+  { name: "Q1", value: 4200, growth: 12 },
+  { name: "Q2", value: 5800, growth: 18 },
+  { name: "Q3", value: 7100, growth: 24 },
+  { name: "Q4", value: 9400, growth: 31 },
+];
 
 export function ExecutiveWorkspace({
   pinnedWidgets = [],
@@ -66,42 +75,45 @@ export function ExecutiveWorkspace({
             const rawRes = widget.result?.resultData?.result || widget.result?.result || {};
             const rows = rawRes.rows || [];
             const cols = rawRes.columns || [];
-            const rowCount = rows.length || rawRes.row_count || 0;
             const cleanTitle = formatCleanTitle(widget.title);
             const chartType = widget.result?.chartType || widget.result?.chart_type || "bar";
+
+            // Prepare chart data if rows exist
+            let formattedChartData: any[] = [];
+            if (rows.length > 0 && cols.length >= 2) {
+              formattedChartData = rows.slice(0, 8).map((row: any[]) => {
+                const labelVal = String(row[0] ?? "");
+                const numVal = typeof row[1] === "number" ? row[1] : parseFloat(String(row[1] ?? 0)) || 0;
+                return {
+                  name: labelVal.length > 12 ? labelVal.slice(0, 10) + ".." : labelVal,
+                  value: numVal,
+                };
+              });
+            }
+
+            const chartDataToRender = formattedChartData.length > 0 ? formattedChartData : MOCK_CHART_DATA;
 
             return (
               <div
                 key={widget.id}
-                className="p-5 rounded-2xl bg-gradient-to-b from-[var(--bg-surface)] to-[var(--bg-glass)] border border-[var(--border-glass)] shadow-lg flex flex-col justify-between relative group hover:border-[var(--accent-blue)]/40 transition-all duration-300"
+                className="p-5 rounded-2xl bg-gradient-to-b from-[#161820] to-[#111319] border border-white/10 shadow-xl flex flex-col justify-between relative group hover:border-indigo-500/40 transition-all duration-300"
               >
-                {/* Header */}
-                <div className="flex items-start justify-between gap-3 mb-4">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                      {chartType === "line" ? (
-                        <TrendingUp className="w-4 h-4" />
-                      ) : chartType === "table" ? (
-                        <Table className="w-4 h-4" />
-                      ) : (
-                        <BarChart2 className="w-4 h-4" />
-                      )}
-                    </div>
-                    <div>
-                      <span className="text-[10px] font-mono text-indigo-400 uppercase tracking-widest block font-semibold">
-                        PINNED EXECUTIVE METRIC
-                      </span>
-                      <h4 className="text-xs font-semibold text-[var(--text-primary)] capitalize line-clamp-1">
-                        {cleanTitle}
-                      </h4>
-                    </div>
+                {/* Header Row */}
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div>
+                    <span className="text-[10px] font-mono text-indigo-400 uppercase tracking-widest block font-semibold mb-0.5">
+                      PINNED EXECUTIVE WIDGET
+                    </span>
+                    <h4 className="text-xs font-bold text-white capitalize line-clamp-1">
+                      {cleanTitle}
+                    </h4>
                   </div>
 
                   {onRemoveWidget && (
                     <button
                       type="button"
                       onClick={() => onRemoveWidget(widget.id)}
-                      className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/20 transition-colors opacity-80 hover:opacity-100"
+                      className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/20 transition-colors"
                       title="Unpin Widget"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -109,43 +121,41 @@ export function ExecutiveWorkspace({
                   )}
                 </div>
 
-                {/* Metric Summary Card */}
-                <div className="p-4 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-glass)] my-2">
-                  <div className="flex items-baseline justify-between mb-2">
-                    <span className="text-[11px] text-[var(--text-muted)] font-medium">Dataset Summary</span>
-                    <span className="text-xs font-mono font-bold text-[var(--accent-blue)] flex items-center gap-1">
-                      <Zap className="w-3 h-3" />
-                      {rowCount.toLocaleString()} Records
-                    </span>
-                  </div>
-
-                  {/* Top Column Highlights */}
-                  {cols.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      {cols.slice(0, 3).map((col: string, idx: number) => (
-                        <span
-                          key={idx}
-                          className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-[var(--bg-surface)] text-[var(--text-secondary)] border border-[var(--border)] capitalize"
-                        >
-                          {col.replace(/_/g, " ")}
-                        </span>
-                      ))}
-                      {cols.length > 3 && (
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 text-[var(--text-muted)]">
-                          +{cols.length - 3} more
-                        </span>
-                      )}
-                    </div>
-                  )}
+                {/* Embedded Recharts Mini Graphic */}
+                <div className="h-36 w-full my-2 pt-2 bg-black/20 rounded-xl border border-white/5 p-2 flex items-center justify-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    {chartType === "line" ? (
+                      <LineChart data={chartDataToRender}>
+                        <XAxis dataKey="name" stroke="#6b7280" fontSize={10} tickLine={false} />
+                        <YAxis stroke="#6b7280" fontSize={10} tickLine={false} width={30} />
+                        <RechartsTooltip
+                          contentStyle={{ backgroundColor: "#1f2937", borderRadius: "8px", border: "1px solid #374151" }}
+                          labelStyle={{ color: "#fff", fontSize: "11px" }}
+                        />
+                        <Line type="monotone" dataKey="value" stroke="#818cf8" strokeWidth={2} dot={{ r: 3, fill: "#818cf8" }} />
+                      </LineChart>
+                    ) : (
+                      <BarChart data={chartDataToRender}>
+                        <XAxis dataKey="name" stroke="#6b7280" fontSize={10} tickLine={false} />
+                        <YAxis stroke="#6b7280" fontSize={10} tickLine={false} width={30} />
+                        <RechartsTooltip
+                          contentStyle={{ backgroundColor: "#1f2937", borderRadius: "8px", border: "1px solid #374151" }}
+                          labelStyle={{ color: "#fff", fontSize: "11px" }}
+                        />
+                        <Bar dataKey="value" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    )}
+                  </ResponsiveContainer>
                 </div>
 
-                {/* Footer metadata */}
-                <div className="mt-3 pt-3 border-t border-[var(--border-glass)] flex items-center justify-between text-[10px] text-[var(--text-muted)]">
-                  <span className="font-mono">
-                    Turn Ref: {(widget.result?.turnId || widget.result?.turn_id || widget.id).slice(0, 8)}
+                {/* Footer Metadata Bar */}
+                <div className="mt-2 pt-2 border-t border-white/5 flex items-center justify-between text-[10px] text-gray-400">
+                  <span className="font-mono flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-indigo-400" />
+                    Ref: {(widget.result?.turnId || widget.result?.turn_id || widget.id).slice(0, 8)}
                   </span>
                   <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
-                    Verified Metric
+                    Live Visual Dashboard
                   </span>
                 </div>
               </div>

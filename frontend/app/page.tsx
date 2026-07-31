@@ -147,9 +147,9 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
   }, [auth]);
 
   const handlePinWidget = async (result: any) => {
-    const title = result.resultData?.result?.columns
-      ? `Trend: ${result.resultData.result.columns.slice(1).join(", ")} by ${result.resultData.result.columns[0]}`
-      : (result.submittedText || "Pinned Result");
+    const title = result.submittedText || (result.resultData?.result?.columns
+      ? `Executive Analytics: ${result.resultData.result.columns[0].replace(/_/g, " ")}`
+      : "Pinned Executive Metric");
     try {
       const token = await auth.getToken();
       const newWidget = await pinWorkspaceWidget(
