@@ -30,7 +30,6 @@ export function MorningBriefingCard({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | undefined>();
-  const [selectedVoice, setSelectedVoice] = useState("aura-asteria-en");
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [isPlayingTopAudio, setIsPlayingTopAudio] = useState(false);
@@ -66,7 +65,7 @@ export function MorningBriefingCard({
   useEffect(() => {
     if (!showDetails && !isPlayingTopAudio) return;
     let objectUrl: string | undefined;
-    fetchAuthenticatedBlob(`/api/briefing/audio?voice=${encodeURIComponent(selectedVoice)}`, undefined, token)
+    fetchAuthenticatedBlob("/api/briefing/audio?voice=aura-asteria-en", undefined, token)
       .then((blob) => {
         objectUrl = URL.createObjectURL(blob);
         setAudioUrl(objectUrl);
@@ -75,7 +74,7 @@ export function MorningBriefingCard({
     return () => {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [token, selectedVoice, showDetails, isPlayingTopAudio]);
+  }, [token, showDetails, isPlayingTopAudio]);
 
   const handleDownloadPdf = async () => {
     try {
@@ -248,8 +247,6 @@ export function MorningBriefingCard({
               <ExecutiveAudioPlayer
                 textToSpeak={briefing.summary_narrative}
                 voiceUrl={audioUrl}
-                selectedVoice={selectedVoice}
-                onVoiceChange={setSelectedVoice}
               />
             </div>
 

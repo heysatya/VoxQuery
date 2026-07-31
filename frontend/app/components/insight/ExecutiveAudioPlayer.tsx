@@ -60,6 +60,22 @@ export function ExecutiveAudioPlayer({
         const utterance = new SpeechSynthesisUtterance(cleanSpeechText);
         utterance.rate = playbackRate;
         utterance.volume = isMuted ? 0 : 1;
+
+        // Auto-select smooth natural female voice for browser fallback
+        const voices = synthRef.current.getVoices();
+        const femaleVoice = voices.find(
+          (v) =>
+            v.name.includes("Asteria") ||
+            v.name.includes("Google US English") ||
+            v.name.includes("Samantha") ||
+            v.name.includes("Zira") ||
+            v.name.includes("Natural") ||
+            v.name.toLowerCase().includes("female")
+        );
+        if (femaleVoice) {
+          utterance.voice = femaleVoice;
+        }
+
         utterance.onend = () => {
           setIsPlaying(false);
           setProgress(100);
@@ -190,18 +206,10 @@ export function ExecutiveAudioPlayer({
 
         {/* Controls */}
         <div className="flex items-center gap-3">
-          {onVoiceChange && (
-            <select
-              value={selectedVoice}
-              onChange={(e) => onVoiceChange(e.target.value)}
-              className="px-2 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 font-mono text-xs border border-indigo-500/20 focus:outline-none cursor-pointer"
-            >
-              <option value="aura-asteria-en" className="bg-slate-900 text-slate-200">Asteria (Female)</option>
-              <option value="aura-zeus-en" className="bg-slate-900 text-slate-200">Zeus (Male)</option>
-              <option value="aura-stella-en" className="bg-slate-900 text-slate-200">Stella (Female)</option>
-              <option value="aura-orion-en" className="bg-slate-900 text-slate-200">Orion (Male)</option>
-            </select>
-          )}
+          <span className="px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 font-mono text-xs border border-indigo-500/20 flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            VoxQuery Voice (Asteria)
+          </span>
 
           {/* Playback speed */}
           <button
