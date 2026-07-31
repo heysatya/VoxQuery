@@ -188,7 +188,8 @@ async def live_warehouse():
     env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env"))
     env_vals = dotenv_values(env_path)
     dsn = env_vals.get("SNOWFLAKE_DSN") or os.getenv("SNOWFLAKE_DSN")
-    assert dsn, f"SNOWFLAKE_DSN must be set at {env_path} for live integration benchmark"
+    if not dsn:
+        pytest.skip("SNOWFLAKE_DSN not provided in environment for live benchmark")
     connector = SnowflakeWarehouseConnector(dsn=dsn)
     # Pre-warm connection to eliminate TLS/auth handshake overhead on first query
     await connector.execute_readonly(canonicalize_readonly_sql("SELECT 1").sql, snowflake_role="")
