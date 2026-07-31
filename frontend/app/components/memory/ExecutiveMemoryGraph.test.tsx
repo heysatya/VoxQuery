@@ -14,7 +14,9 @@ describe("ExecutiveMemoryGraph", () => {
   it("renders empty state when sessionId is null", () => {
     render(<ExecutiveMemoryGraph sessionId={null} auth={mockAuth} />);
     expect(
-      screen.getByText("Start a query session to view memory connections.")
+      screen.getByText(
+        "Ask a question to get started — I'll keep track of what you've covered as you go."
+      )
     ).toBeInTheDocument();
   });
 
@@ -34,6 +36,6 @@ describe("ExecutiveMemoryGraph", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<ExecutiveMemoryGraph sessionId="test-session" auth={mockAuth} />);
-    expect(screen.getByText("Multi-Turn Memory Graph")).toBeInTheDocument();
+    expect(screen.getByText("What we've covered")).toBeInTheDocument();
   });
 });

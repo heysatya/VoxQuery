@@ -6,7 +6,7 @@ import { ExecutiveWorkspace } from "./ExecutiveWorkspace";
 describe("ExecutiveWorkspace", () => {
   it("renders empty state", () => {
     render(<ExecutiveWorkspace pinnedWidgets={[]} />);
-    expect(screen.getByText("No pinned widgets yet.")).toBeInTheDocument();
+    expect(screen.getByText("Nothing pinned yet.")).toBeInTheDocument();
   });
 
   it("renders pinned widgets side by side", () => {
@@ -17,7 +17,7 @@ describe("ExecutiveWorkspace", () => {
         result: {
           turnId: "t1",
           resultData: {
-            result: { columns: ["Sales"], rows: [[1000]] },
+            result: { columns: ["Month", "Sales"], rows: [["Jan", 1000]] },
             warnings: [],
             tts_text: "",
           },
@@ -27,6 +27,6 @@ describe("ExecutiveWorkspace", () => {
 
     render(<ExecutiveWorkspace pinnedWidgets={mockWidgets} />);
     expect(screen.getByText("Total Sales")).toBeInTheDocument();
-    expect(screen.getByText("1 rows retrieved")).toBeInTheDocument();
+    expect(screen.getByText(/Snapshot from/i)).toBeInTheDocument();
   });
 });
