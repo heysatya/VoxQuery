@@ -19,6 +19,7 @@ import { TranscriptReviewPanel } from "./components/transcript/TranscriptReviewP
 import { ThreadHistory } from "./components/thread/ThreadHistory";
 import { InlineAnomalyNudge } from "./components/insight/InlineAnomalyNudge";
 import { FailureNotice } from "./components/notice/FailureNotice";
+import { getStatusLabel } from "./state/interactionState";
 import { fetchWorkspaceWidgets, pinWorkspaceWidget, deleteWorkspaceWidget, fetchVersion } from "../lib/api";
 
 const authMode = process.env.NEXT_PUBLIC_AUTH_MODE ?? "fake";
