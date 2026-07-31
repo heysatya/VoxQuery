@@ -1,7 +1,7 @@
 "use client";
 
 import React, { FormEvent, useId } from "react";
-import { Send, Bot } from "lucide-react";
+import { Send, Bot, Mic } from "lucide-react";
 import { cn } from "../../../lib/utils";
 import type { RecordingState } from "../../../lib/types";
 import type { UserNotice } from "../../state/interactionState";
@@ -15,6 +15,7 @@ type QueryDockProps = {
   onChange: (value: string) => void;
   onSubmit: () => void | Promise<void>;
   onFakeVoice: () => void | Promise<void>;
+  onToggleRecording?: () => void | Promise<void>;
   onResetConversation: () => void | Promise<void>;
 };
 
@@ -27,6 +28,7 @@ export function QueryDock({
   onChange,
   onSubmit,
   onFakeVoice,
+  onToggleRecording,
   onResetConversation
 }: QueryDockProps) {
   const id = useId();
@@ -75,6 +77,22 @@ export function QueryDock({
           >
             <Bot className="h-4 w-4" />
           </button>
+          {onToggleRecording && (
+            <button
+              type="button"
+              onClick={onToggleRecording}
+              disabled={disabled && recordingState !== "recording"}
+              className={cn(
+                "p-2 rounded-lg transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] disabled:opacity-50",
+                recordingState === "recording"
+                  ? "bg-rose-500 text-white animate-pulse"
+                  : "text-[var(--text-muted)] hover:text-[var(--accent-blue)]"
+              )}
+              title={recordingState === "recording" ? "Stop voice input" : "Voice input"}
+            >
+              <Mic className="h-4 w-4" />
+            </button>
+          )}
           <button
             type="submit"
             disabled={disabled || !value.trim()}

@@ -122,6 +122,15 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
   const engine = useVoxQuerySession(auth);
   const [drilldownTurnId, setDrilldownTurnId] = useState<string | null>(null);
   const [pinnedWidgets, setPinnedWidgets] = useState<any[]>([]);
+  const [token, setToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    auth.getToken().then((t) => {
+      if (active) setToken(t);
+    });
+    return () => { active = false; };
+  }, [auth]);
 
   useEffect(() => {
     let cancelled = false;
@@ -202,6 +211,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               className="flex-1 flex flex-col items-center justify-center min-h-[80vh] max-w-2xl w-full pt-6"
             >
               <MorningBriefingCard
+                token={token}
                 onSelectInsight={(q) => {
                   engine.setSubmittedText(q);
                   engine.submitQuery(q);
@@ -457,6 +467,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
             onChange={engine.setSubmittedText}
             onSubmit={engine.submitCurrentQuery}
             onFakeVoice={engine.startFakeVoice}
+            onToggleRecording={engine.toggleRecording}
             onResetConversation={engine.resetConversation}
           />
         </div>

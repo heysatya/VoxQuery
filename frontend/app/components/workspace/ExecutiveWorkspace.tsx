@@ -62,12 +62,12 @@ export function ExecutiveWorkspace({
                 </span>
                 <h4 className="text-xs font-semibold text-[var(--text-primary)] mb-3">{widget.title}</h4>
                 <div className="text-sm font-semibold text-[var(--accent-blue)]">
-                  {widget.result.resultData.result.rows?.length || 0} rows retrieved
+                  {widget.result?.resultData?.result?.rows?.length ?? widget.result?.result?.rows?.length ?? widget.result?.result?.row_count ?? 0} rows retrieved
                 </div>
               </div>
 
               <div className="mt-4 pt-3 border-t border-[var(--border)] text-[10px] text-[var(--text-muted)] font-mono">
-                Source turn ID: {widget.result.turnId.slice(0, 8)}...
+                Source turn ID: {(widget.result?.turnId || widget.result?.turn_id || widget.id).slice(0, 8)}...
               </div>
             </div>
           ))}
