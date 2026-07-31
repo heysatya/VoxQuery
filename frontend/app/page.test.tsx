@@ -281,6 +281,23 @@ describe("HomePage", () => {
         if (url.includes("/api/session/") && init?.method === "DELETE") {
           return jsonResponse({ status: "deleted" });
         }
+        if (url.includes("/api/version")) {
+          return jsonResponse({ git_sha: "e9400b7", version: "1.0.0" });
+        }
+        if (url.includes("/api/briefing")) {
+          return jsonResponse({
+            summary_narrative: "Morning briefing overview.",
+            kpis: [],
+            anomalies: [],
+            recommended_queries: []
+          });
+        }
+        if (url.includes("/api/workspace/widgets")) {
+          return jsonResponse([]);
+        }
+        if (url.includes("/api/memory-graph")) {
+          return jsonResponse({ session_id: "s1", nodes: [], edges: [] });
+        }
         return jsonResponse({}, 404);
       })
     );
