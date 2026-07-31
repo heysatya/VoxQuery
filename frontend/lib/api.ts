@@ -185,8 +185,8 @@ export async function postTelemetry(
   }, authToken);
 }
 
-export async function fetchWorkspaceWidgets(authToken?: string | null) {
-  return request<any[]>("/api/workspace/widgets", undefined, authToken);
+export async function fetchWorkspaceWidgets(authToken?: string | null): Promise<any[]> {
+  return request<any[]>("/api/workspace/widgets", { method: "GET" }, authToken);
 }
 
 export async function pinWorkspaceWidget(
@@ -196,8 +196,29 @@ export async function pinWorkspaceWidget(
   return request<any>("/api/workspace/widgets", { method: "POST", body: JSON.stringify(payload) }, authToken);
 }
 
-export async function deleteWorkspaceWidget(widgetId: string, authToken?: string | null) {
+export async function deleteWorkspaceWidget(widgetId: string, authToken?: string | null): Promise<any> {
   return request<any>(`/api/workspace/widgets/${widgetId}`, { method: "DELETE" }, authToken);
+}
+
+export async function updateWorkspaceWidgetLayout(
+  widgetId: string,
+  layout: { x: number; y: number; w: number; h: number },
+  authToken?: string | null
+): Promise<any> {
+  return request<any>(
+    `/api/workspace/widgets/${widgetId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        layout_x: layout.x,
+        layout_y: layout.y,
+        layout_w: layout.w,
+        layout_h: layout.h,
+      }),
+    },
+    authToken
+  );
 }
 
 export function pipelineSocketUrl(sessionId: string): string {

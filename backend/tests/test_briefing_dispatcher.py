@@ -38,6 +38,16 @@ async def test_dispatch_briefing_email_service():
     )
     assert success is True
 
+    # Test with pool mock
+    mock_pool = MagicMock()
+    mock_conn = AsyncMock()
+    mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+    success_with_pool = await dispatch_briefing_email(
+        user_id, "exec@test.com", briefing, settings, pool=mock_pool, tenant_id="tenant-123"
+    )
+    assert success_with_pool is True
+    mock_conn.execute.assert_called_once()
+
 
 def test_user_preferences_api_endpoints():
     mock_pool = MagicMock()

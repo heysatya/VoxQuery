@@ -6,11 +6,15 @@ import { Play, Pause, Volume2, VolumeX, Sparkles } from "lucide-react";
 type ExecutiveAudioPlayerProps = {
   textToSpeak?: string;
   voiceUrl?: string;
+  selectedVoice?: string;
+  onVoiceChange?: (voice: string) => void;
 };
 
 export function ExecutiveAudioPlayer({
   textToSpeak = "Welcome back. Here is your morning briefing...",
   voiceUrl,
+  selectedVoice = "aura-asteria-en",
+  onVoiceChange,
 }: ExecutiveAudioPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1.0);
@@ -20,6 +24,10 @@ export function ExecutiveAudioPlayer({
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const cleanSpeechText = React.useMemo(() => {
+    return textToSpeak.replace(/[\*\_\`\#]/g, "").replace(/^\s*[\-\+]\s+/gm, "").trim();
+  }, [textToSpeak]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -34,6 +42,7 @@ export function ExecutiveAudioPlayer({
 
   useEffect(() => {
     setHasAudioError(false);
+    setProgress(0);
   }, [voiceUrl]);
 
   const speakWithSpeechSynthesis = () => {
@@ -48,7 +57,7 @@ export function ExecutiveAudioPlayer({
         setIsPlaying(true);
       } else {
         synthRef.current.cancel();
-        const utterance = new SpeechSynthesisUtterance(textToSpeak);
+        const utterance = new SpeechSynthesisUtterance(cleanSpeechText);
         utterance.rate = playbackRate;
         utterance.volume = isMuted ? 0 : 1;
         utterance.onend = () => {
@@ -107,7 +116,7 @@ export function ExecutiveAudioPlayer({
     if (synthRef.current && utteranceRef.current) {
       const wasPlaying = isPlaying;
       synthRef.current.cancel();
-      const utterance = new SpeechSynthesisUtterance(textToSpeak);
+      const utterance = new SpeechSynthesisUtterance(cleanSpeechText);
       utterance.rate = nextRate;
       utterance.volume = isMuted ? 0 : 1;
       utterance.onend = () => {
@@ -121,22 +130,12 @@ export function ExecutiveAudioPlayer({
     }
   };
 
-  // Simulate progress when playing
-  useEffect(() => {
-    let interval: any;
-    if (isPlaying) {
-      interval = setInterval(() => {
-        setProgress((prev) => {
-          if (prev >= 100) {
-            clearInterval(interval);
-            return 100;
-          }
-          return prev + 1.5;
-        });
-      }, 500);
+  const handleTimeUpdate = () => {
+    if (audioRef.current && audioRef.current.duration) {
+      const currentProgress = (audioRef.current.currentTime / audioRef.current.duration) * 100;
+      setProgress(currentProgress);
     }
-    return () => clearInterval(interval);
-  }, [isPlaying]);
+  };
 
   return (
     <div className="w-full rounded-2xl bg-gradient-to-br from-indigo-950/40 to-slate-900/40 border border-indigo-500/20 shadow-2xl p-5 backdrop-blur-xl relative overflow-hidden">
@@ -144,6 +143,7 @@ export function ExecutiveAudioPlayer({
         <audio
           ref={audioRef}
           src={voiceUrl}
+          onTimeUpdate={handleTimeUpdate}
           onEnded={() => {
             setIsPlaying(false);
             setProgress(100);
@@ -174,7 +174,7 @@ export function ExecutiveAudioPlayer({
           </div>
         </div>
 
-        {/* Dynamic Waveform Visualizer (Simulated) */}
+        {/* Dynamic Waveform Visualizer */}
         <div className="flex-1 max-w-[200px] md:max-w-md h-8 flex items-center justify-center gap-1">
           {Array.from({ length: 24 }).map((_, idx) => {
             const h = isPlaying ? 10 + Math.sin(idx + progress) * 20 : 6;
@@ -189,7 +189,20 @@ export function ExecutiveAudioPlayer({
         </div>
 
         {/* Controls */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          {onVoiceChange && (
+            <select
+              value={selectedVoice}
+              onChange={(e) => onVoiceChange(e.target.value)}
+              className="px-2 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 font-mono text-xs border border-indigo-500/20 focus:outline-none cursor-pointer"
+            >
+              <option value="aura-asteria-en" className="bg-slate-900 text-slate-200">Asteria (Female)</option>
+              <option value="aura-zeus-en" className="bg-slate-900 text-slate-200">Zeus (Male)</option>
+              <option value="aura-stella-en" className="bg-slate-900 text-slate-200">Stella (Female)</option>
+              <option value="aura-orion-en" className="bg-slate-900 text-slate-200">Orion (Male)</option>
+            </select>
+          )}
+
           {/* Playback speed */}
           <button
             type="button"

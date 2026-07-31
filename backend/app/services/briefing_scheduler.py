@@ -69,9 +69,9 @@ async def check_and_dispatch_due_briefings(pool: asyncpg.Pool, settings: Setting
 
     dispatched_count = 0
     for row in due_users:
-        user_id: UUID = row["user_id"]
+        user_id = str(row["user_id"])
         email: str = row["email"]
-        tenant_id: UUID = row["tenant_id"]
+        tenant_id = str(row["tenant_id"])
         tz_name: str = row["timezone"] or "UTC"
         delivery_time: str = row["delivery_time"] or "08:00"
 

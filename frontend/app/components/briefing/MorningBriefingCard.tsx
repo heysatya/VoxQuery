@@ -40,6 +40,7 @@ export function MorningBriefingCard({ apiUrl = "http://127.0.0.1:8000", token, o
   const [dismissed, setDismissed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [audioUrl, setAudioUrl] = useState<string | undefined>();
+  const [selectedVoice, setSelectedVoice] = useState("aura-asteria-en");
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
   useEffect(() => {
@@ -74,7 +75,7 @@ export function MorningBriefingCard({ apiUrl = "http://127.0.0.1:8000", token, o
 
   useEffect(() => {
     let objectUrl: string | undefined;
-    fetchAuthenticatedBlob("/api/briefing/audio", apiUrl, token)
+    fetchAuthenticatedBlob(`/api/briefing/audio?voice=${encodeURIComponent(selectedVoice)}`, apiUrl, token)
       .then((blob) => {
         objectUrl = URL.createObjectURL(blob);
         setAudioUrl(objectUrl);
@@ -83,7 +84,7 @@ export function MorningBriefingCard({ apiUrl = "http://127.0.0.1:8000", token, o
     return () => {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [apiUrl, token]);
+  }, [apiUrl, token, selectedVoice]);
 
   const handleDownloadPdf = async () => {
     try {
@@ -154,7 +155,12 @@ export function MorningBriefingCard({ apiUrl = "http://127.0.0.1:8000", token, o
 
         {/* Executive Audio Briefing Player */}
         <div className="mb-6">
-          <ExecutiveAudioPlayer textToSpeak={briefing.summary_narrative} voiceUrl={audioUrl} />
+          <ExecutiveAudioPlayer
+            textToSpeak={briefing.summary_narrative}
+            voiceUrl={audioUrl}
+            selectedVoice={selectedVoice}
+            onVoiceChange={setSelectedVoice}
+          />
         </div>
 
         {/* KPI Grid */}

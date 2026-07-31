@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import datetime, UTC
 from pathlib import Path
 import logging
+import asyncio
 from jinja2 import Environment, FileSystemLoader
 
 from app.models.contracts import ExecutiveBriefingResponse
@@ -27,7 +28,7 @@ async def generate_briefing_pdf(briefing: ExecutiveBriefingResponse, tenant_name
 
     try:
         from weasyprint import HTML
-        return HTML(string=html_str).write_pdf()
+        return await asyncio.to_thread(lambda: HTML(string=html_str).write_pdf())
     except Exception as exc:
         logger.error("WeasyPrint PDF generation failed: %s", exc)
         raise RuntimeError(f"PDF generation unavailable: {exc}") from exc
