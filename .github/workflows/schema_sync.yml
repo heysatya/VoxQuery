@@ -32,5 +32,11 @@ jobs:
           SUPABASE_DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           FERNET_KEY: ${{ secrets.FERNET_KEY }}
+          VOXQUERY_TENANT_ID: ${{ secrets.VOXQUERY_TENANT_ID }}
         run: |
-          python scripts/sync_schema.py
+          if [ -z "$VOXQUERY_TENANT_ID" ]; then
+            echo "VOXQUERY_TENANT_ID must be set to the Clerk Organization ID to sync."
+            exit 1
+          fi
+          python scripts/sync_schema.py --tenant-id "$VOXQUERY_TENANT_ID"
+          python scripts/check_tenant_provisioning.py --tenant-id "$VOXQUERY_TENANT_ID"
