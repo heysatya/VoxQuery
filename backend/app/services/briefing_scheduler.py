@@ -28,6 +28,7 @@ def get_scheduler(settings: Settings | None = None) -> AsyncIOScheduler:
         jobstores = {}
         if settings and settings.upstash_redis_url:
             try:
+                import ssl
                 from urllib.parse import urlparse
                 parsed = urlparse(settings.upstash_redis_url)
                 if parsed.hostname:
@@ -37,6 +38,7 @@ def get_scheduler(settings: Settings | None = None) -> AsyncIOScheduler:
                         port=parsed.port or 6379,
                         password=parsed.password,
                         ssl=(parsed.scheme == "rediss"),
+                        ssl_cert_reqs=ssl.CERT_NONE,
                     )
             except Exception as exc:
                 logger.warning("Redis jobstore initialization failed, falling back to memory: %s", exc)
