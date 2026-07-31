@@ -36,11 +36,22 @@ class RateLimiter:
         else:
             if not settings.upstash_redis_url:
                 raise RuntimeError("UPSTASH_REDIS_URL is required for RateLimiter.")
+            import certifi
+            import ssl
+
+            ssl_kwargs = {}
+            if settings.upstash_redis_url.startswith("rediss://"):
+                ssl_kwargs = {
+                    "ssl_ca_certs": certifi.where(),
+                    "ssl_cert_reqs": ssl.CERT_REQUIRED,
+                }
+
             self.client = redis.Redis.from_url(
                 settings.upstash_redis_url,
                 decode_responses=True,
                 socket_connect_timeout=2,
                 socket_timeout=2,
+                **ssl_kwargs,
             )
 
     def _key(self, user_id: str) -> str:

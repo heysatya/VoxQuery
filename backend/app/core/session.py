@@ -301,14 +301,23 @@ class RedisSessionStore(InMemorySessionStore):
             raise RuntimeError("UPSTASH_REDIS_URL is required when SESSION_STORE=redis.")
         import redis.asyncio as redis
 
+        import certifi
         import ssl
+
+        ssl_kwargs = {}
+        if settings.upstash_redis_url.startswith("rediss://"):
+            ssl_kwargs = {
+                "ssl_ca_certs": certifi.where(),
+                "ssl_cert_reqs": ssl.CERT_REQUIRED,
+            }
+
         try:
             return redis.Redis.from_url(
                 settings.upstash_redis_url,
                 decode_responses=True,
                 socket_connect_timeout=10,
                 socket_timeout=10,
-                ssl_cert_reqs=ssl.CERT_NONE,
+                **ssl_kwargs,
             )
         except Exception as exc:
             raise RuntimeError(f"Failed to initialize Redis client: {type(exc).__name__}") from None
