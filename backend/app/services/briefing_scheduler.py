@@ -30,16 +30,23 @@ def get_scheduler(settings: Settings | None = None) -> AsyncIOScheduler:
             try:
                 import ssl
                 from urllib.parse import urlparse
+                import certifi
+
                 parsed = urlparse(settings.upstash_redis_url)
                 if parsed.hostname:
-                    jobstores["default"] = RedisJobStore(
-                        jobs_key="voxquery:briefing_jobs",
-                        host=parsed.hostname,
-                        port=parsed.port or 6379,
-                        password=parsed.password,
-                        ssl=(parsed.scheme == "rediss"),
-                        ssl_cert_reqs=ssl.CERT_NONE,
-                    )
+                    is_ssl = (parsed.scheme == "rediss")
+                    redis_kwargs = {
+                        "jobs_key": "voxquery:briefing_jobs",
+                        "host": parsed.hostname,
+                        "port": parsed.port or 6379,
+                        "password": parsed.password,
+                        "ssl": is_ssl,
+                    }
+                    if is_ssl:
+                        redis_kwargs["ssl_ca_certs"] = certifi.where()
+                        redis_kwargs["ssl_cert_reqs"] = ssl.CERT_REQUIRED
+
+                    jobstores["default"] = RedisJobStore(**redis_kwargs)
             except Exception as exc:
                 logger.warning("Redis jobstore initialization failed, falling back to memory: %s", exc)
 
