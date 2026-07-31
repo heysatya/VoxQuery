@@ -12,7 +12,7 @@ import asyncpg
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.redis import RedisJobStore
 
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.services.briefing import generate_morning_briefing
 from app.services.briefing_dispatcher import dispatch_briefing_email
 
@@ -28,12 +28,16 @@ def get_scheduler(settings: Settings | None = None) -> AsyncIOScheduler:
         jobstores = {}
         if settings and settings.upstash_redis_url:
             try:
-                import ssl
-                from redis import Redis
-                r_client = Redis.from_url(settings.upstash_redis_url, ssl_cert_reqs=ssl.CERT_NONE)
-                js = RedisJobStore(jobs_key="voxquery:briefing_jobs")
-                js.redis = r_client
-                jobstores["default"] = js
+                from urllib.parse import urlparse
+                parsed = urlparse(settings.upstash_redis_url)
+                if parsed.hostname:
+                    jobstores["default"] = RedisJobStore(
+                        jobs_key="voxquery:briefing_jobs",
+                        host=parsed.hostname,
+                        port=parsed.port or 6379,
+                        password=parsed.password,
+                        ssl=(parsed.scheme == "rediss"),
+                    )
             except Exception as exc:
                 logger.warning("Redis jobstore initialization failed, falling back to memory: %s", exc)
 
