@@ -19,6 +19,7 @@ from app.services.briefing_dispatcher import dispatch_briefing_email
 logger = logging.getLogger("voxquery.services.briefing_scheduler")
 
 _scheduler: AsyncIOScheduler | None = None
+_db_pool: asyncpg.Pool | None = None
 
 
 def get_scheduler(settings: Settings | None = None) -> AsyncIOScheduler:
@@ -27,7 +28,12 @@ def get_scheduler(settings: Settings | None = None) -> AsyncIOScheduler:
         jobstores = {}
         if settings and settings.upstash_redis_url:
             try:
-                jobstores["default"] = RedisJobStore(jobs_key="voxquery:briefing_jobs", host=settings.upstash_redis_url)
+                import ssl
+                from redis import Redis
+                r_client = Redis.from_url(settings.upstash_redis_url, ssl_cert_reqs=ssl.CERT_NONE)
+                js = RedisJobStore(jobs_key="voxquery:briefing_jobs")
+                js.redis = r_client
+                jobstores["default"] = js
             except Exception as exc:
                 logger.warning("Redis jobstore initialization failed, falling back to memory: %s", exc)
 
@@ -36,13 +42,14 @@ def get_scheduler(settings: Settings | None = None) -> AsyncIOScheduler:
 
 
 def start_briefing_scheduler(pool: asyncpg.Pool, settings: Settings) -> None:
+    global _db_pool
+    _db_pool = pool
     scheduler = get_scheduler(settings)
     if not scheduler.running:
         scheduler.add_job(
             check_and_dispatch_due_briefings,
             "interval",
             minutes=1,
-            args=[pool, settings],
             id="briefing_minute_check",
             replace_existing=True,
         )
@@ -50,9 +57,15 @@ def start_briefing_scheduler(pool: asyncpg.Pool, settings: Settings) -> None:
         logger.info("Morning briefing scheduler started.")
 
 
-async def check_and_dispatch_due_briefings(pool: asyncpg.Pool, settings: Settings) -> int:
+async def check_and_dispatch_due_briefings(pool: asyncpg.Pool | None = None, settings: Settings | None = None) -> int:
     """Checks for users whose configured delivery_time matches current local time in their timezone."""
-    async with pool.acquire() as conn:
+    target_pool = pool or _db_pool
+    target_settings = settings or get_settings()
+    if not target_pool:
+        logger.warning("No DB pool available for check_and_dispatch_due_briefings")
+        return 0
+
+    async with target_pool.acquire() as conn:
         due_users = await conn.fetch(
             """
             SELECT up.user_id, up.email, up.delivery_time, up.timezone, u.tenant_id
@@ -88,8 +101,8 @@ async def check_and_dispatch_due_briefings(pool: asyncpg.Pool, settings: Setting
 
         if local_now.hour == target_hour and local_now.minute == target_minute:
             try:
-                briefing = await generate_morning_briefing(tenant_id, settings, user_name="Executive")
-                await dispatch_briefing_email(user_id, email, briefing, settings, pool=pool, tenant_id=tenant_id)
+                briefing = await generate_morning_briefing(tenant_id, target_settings, user_name="Executive")
+                await dispatch_briefing_email(user_id, email, briefing, target_settings, pool=target_pool, tenant_id=tenant_id)
                 dispatched_count += 1
             except Exception as exc:
                 logger.error("Failed to dispatch scheduled briefing for user %s: %s", user_id, exc)

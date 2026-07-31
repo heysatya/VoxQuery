@@ -68,3 +68,9 @@ test_import.py
 db/demo_warehouse/
 backend/db/demo_warehouse/
 *.zip
+
+# Playwright test artifacts
+playwright-report/
+test-results/
+frontend/playwright-report/
+frontend/test-results/
