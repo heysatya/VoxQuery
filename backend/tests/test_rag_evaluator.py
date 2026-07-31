@@ -125,7 +125,7 @@ async def test_rag_quantitative_recall():
             print(f"[{rec*100:3.0f}%] {q} ({h}/{t})")
             if missed:
                 print(f"        Missed: {', '.join(missed)}")
-        print(f"==============================")
+        print("==============================")
         print(f"Overall Recall@10: {overall_recall_at_10*100:.1f}%\n")
         
         # We enforce a strictly lower bound right now so it doesn't fail CI if it's imperfect initially,
