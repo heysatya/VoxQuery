@@ -19,6 +19,7 @@ from app.models.contracts import (
     SessionCreateRequest,
     SessionCreateResponse,
     StatusResponse,
+    UserPreferences,
     valid_visualizations_for_result,
 )
 from app.services.pipeline import PipelineOrchestrator
@@ -392,3 +393,51 @@ async def update_glossary(
         
     return StatusResponse(status="recorded")
 
+@router.get("/api/preferences", response_model=UserPreferences)
+async def get_preferences(
+    claims: AuthClaims = Depends(get_current_user),
+    db_pool = Depends(get_db_pool),
+) -> UserPreferences:
+    """
+    Get user preferences.
+    """
+    from app.services.preferences import get_user_preferences
+    if db_pool is None:
+        raise ApiError(ErrorCode.service_unavailable, status_code=501, detail="Database pool unavailable")
+    return await get_user_preferences(claims.user_id, db_pool)
+
+
+@router.patch("/api/preferences", response_model=UserPreferences)
+async def patch_preferences(
+    request: Request,
+    claims: AuthClaims = Depends(get_current_user),
+    db_pool = Depends(get_db_pool),
+) -> UserPreferences:
+    """
+    Update user preferences.
+    """
+    from app.services.preferences import update_user_preferences
+    if db_pool is None:
+        raise ApiError(ErrorCode.service_unavailable, status_code=501, detail="Database pool unavailable")
+    data = await request.json()
+    return await update_user_preferences(
+        claims.user_id,
+        db_pool,
+        email_briefing_enabled=data.get("email_briefing_enabled", False),
+        email=data.get("email"),
+        delivery_time=data.get("delivery_time", "09:00"),
+        timezone=data.get("timezone", "UTC"),
+    )
+
+
+@router.get("/api/drilldown/{turn_id}")
+async def get_drilldown(
+    turn_id: UUID,
+    claims: AuthClaims = Depends(get_current_user),
+    settings = Depends(get_settings),
+) -> list[dict]:
+    """
+    Fetch top 10 raw transaction rows for a given turn.
+    """
+    from app.services.drilldown import get_row_drilldown
+    return await get_row_drilldown(turn_id, settings)

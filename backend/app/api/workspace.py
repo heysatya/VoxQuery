@@ -58,7 +58,7 @@ async def create_widget(
 ) -> dict[str, Any]:
     """Pin a widget to current user's workspace."""
     if repo is None:
-        raise ApiError(ErrorCode.invalid_request, status_code=501, detail="Database pool unavailable")
+        raise ApiError(ErrorCode.service_unavailable, status_code=501, detail="Database pool unavailable")
     return await repo.create_widget(
         claims,
         turn_id=request_data.turn_id,
@@ -78,7 +78,7 @@ async def delete_widget(
 ) -> StatusResponse:
     """Delete a pinned widget."""
     if repo is None:
-        raise ApiError(ErrorCode.invalid_request, status_code=501, detail="Database pool unavailable")
+        raise ApiError(ErrorCode.service_unavailable, status_code=501, detail="Database pool unavailable")
     success = await repo.delete_widget(widget_id, claims)
     if not success:
         raise ApiError(ErrorCode.turn_not_found, status_code=404, detail="Widget not found or forbidden")
@@ -94,7 +94,7 @@ async def update_widget_layout(
 ) -> StatusResponse:
     """Update widget grid layout position and size."""
     if repo is None:
-        raise ApiError(ErrorCode.invalid_request, status_code=501, detail="Database pool unavailable")
+        raise ApiError(ErrorCode.service_unavailable, status_code=501, detail="Database pool unavailable")
     success = await repo.update_widget_layout(
         widget_id,
         claims,

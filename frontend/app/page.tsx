@@ -6,7 +6,11 @@ import { motion, AnimatePresence } from "framer-motion";
 import { RotateCcw } from "lucide-react";
 import { useVoxQuerySession, type VoxQueryAuthRelay } from "./hooks/useVoxQuerySession";
 import { VoiceVisualizer } from "./components/hero/VoiceVisualizer";
+import { MorningBriefingCard } from "./components/briefing/MorningBriefingCard";
+import { ExecutiveMemoryGraph } from "./components/memory/ExecutiveMemoryGraph";
 import { DataGlassPanel } from "./components/data/DataGlassPanel";
+import { ExecutiveWorkspace } from "./components/workspace/ExecutiveWorkspace";
+import { RowDrilldownModal } from "./components/data/RowDrilldownModal";
 import { InsightNarrative } from "./components/insight/InsightNarrative";
 import { FollowUpSuggestions } from "./components/insight/FollowUpSuggestions";
 import { ClarificationOverlay } from "./components/clarification/ClarificationOverlay";
@@ -115,6 +119,22 @@ const STARTER_QUESTIONS = [
 
 function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
   const engine = useVoxQuerySession(auth);
+  const [drilldownTurnId, setDrilldownTurnId] = React.useState<string | null>(null);
+  const [pinnedWidgets, setPinnedWidgets] = React.useState<any[]>([]);
+
+  const handlePinWidget = (result: any) => {
+    setPinnedWidgets((prev) => {
+      if (prev.some((w) => w.id === result.turnId)) return prev;
+      return [
+        ...prev,
+        {
+          id: result.turnId,
+          title: `Trend: ${result.resultData.result.columns.slice(1).join(", ")} by ${result.resultData.result.columns[0]}`,
+          result,
+        },
+      ];
+    });
+  };
 
   // Phase 3.2: derive visible state from explicit lifecycle dimensions
   const isReviewing = engine.voiceState === "reviewing";
@@ -146,8 +166,15 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0, y: -20 }}
               transition={{ duration: 0.4 }}
-              className="flex-1 flex flex-col items-center justify-center min-h-[80vh] max-w-2xl w-full"
+              className="flex-1 flex flex-col items-center justify-center min-h-[80vh] max-w-2xl w-full pt-6"
             >
+              <MorningBriefingCard
+                onSelectInsight={(q) => {
+                  engine.setSubmittedText(q);
+                  engine.submitQuery(q);
+                }}
+              />
+
               <VoiceVisualizer
                 state={engine.recordingState}
                 analyser={engine.audioAnalyserNode}
@@ -180,6 +207,13 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                     {q}
                   </button>
                 ))}
+              </div>
+
+              <div className="mt-12 w-full">
+                <ExecutiveWorkspace
+                  pinnedWidgets={pinnedWidgets}
+                  onRemoveWidget={(id) => setPinnedWidgets((prev) => prev.filter((w) => w.id !== id))}
+                />
               </div>
 
               {/* Phase 3.3: show error notice in ready state if a prior query failed */}
@@ -325,6 +359,8 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 onMute={engine.muteTTS}
                 onUnmute={engine.unmuteTTS}
                 onDrillDown={engine.submitQuery}
+                onDrilldownOpen={setDrilldownTurnId}
+                onPin={handlePinWidget}
               />
 
               {/* Follow-up suggestions */}
@@ -333,6 +369,13 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 onSelect={engine.submitQuery}
                 disabled={engine.pipelineInFlight}
               />
+
+              <div className="mt-8 w-full">
+                <ExecutiveMemoryGraph
+                  sessionId={engine.session.sessionId}
+                  auth={auth}
+                />
+              </div>
 
               {/* New conversation button */}
               <div className="mt-10 mb-4 flex justify-center">
@@ -395,6 +438,14 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
           />
         )}
       </AnimatePresence>
+
+      {/* ── Drilldown modal ─────────────────────────────────────── */}
+      <RowDrilldownModal
+        isOpen={!!drilldownTurnId}
+        onClose={() => setDrilldownTurnId(null)}
+        turnId={drilldownTurnId}
+        auth={auth}
+      />
     </main>
   );
 }

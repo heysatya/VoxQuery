@@ -80,6 +80,7 @@ class ErrorCode(StrEnum):
     llm_unavailable = "llm_unavailable"
     rate_limit_exceeded = "rate_limit_exceeded"
     internal_error = "internal_error"
+    service_unavailable = "service_unavailable"
 
 
 ERROR_MESSAGES: dict[ErrorCode, str] = {
@@ -116,6 +117,7 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.llm_unavailable: "The AI reasoning service is temporarily unavailable due to high demand. Please try again shortly.",
     ErrorCode.rate_limit_exceeded: "Too many requests. Please try again later.",
     ErrorCode.internal_error: "An unexpected internal server error occurred. Our engineers have been notified. Please try again later.",
+    ErrorCode.service_unavailable: "This feature is temporarily unavailable. Please try again later.",
 }
 
 
@@ -636,12 +638,12 @@ class BriefingKpi(BaseModel):
     label: str
     value: str
     change_pct: float
-    trend: str
+    trend: Literal["up", "down", "neutral"]
     insight: str
 
 
 class BriefingAnomaly(BaseModel):
-    severity: str
+    severity: Literal["warning", "critical", "info"]
     title: str
     description: str
 
@@ -655,9 +657,29 @@ class ExecutiveBriefingResponse(BaseModel):
     proactive_insights: list[str] = Field(default_factory=list)
 
 
+class GraphNode(BaseModel):
+    id: str
+    label: str
+    type: Literal["query", "entity", "metric", "filter", "insight"]
+    turn_index: int
+
+
+class GraphEdge(BaseModel):
+    source: str
+    target: str
+    relation: str
+
+
+class MemoryGraphResponse(BaseModel):
+    session_id: UUID
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+
+
 class UserPreferences(BaseModel):
     user_id: str | None = None
     email_briefing_enabled: bool = False
     email: str | None = None
     delivery_time: str = "09:00"
     timezone: str = "UTC"
+

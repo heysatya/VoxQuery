@@ -9,19 +9,6 @@ from app.models.contracts import UserPreferences
 async def get_user_preferences(user_id: Any, db_pool: asyncpg.Pool) -> UserPreferences:
     user_id_str = str(user_id)
     async with db_pool.acquire() as conn:
-        # Create table if missing
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS user_preferences (
-                user_id TEXT PRIMARY KEY,
-                email_briefing_enabled BOOLEAN DEFAULT FALSE,
-                email TEXT,
-                delivery_time TEXT DEFAULT '09:00',
-                timezone TEXT DEFAULT 'UTC',
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            )
-            """
-        )
         row = await conn.fetchrow(
             "SELECT email_briefing_enabled, email, delivery_time, timezone FROM user_preferences WHERE user_id = $1",
             user_id_str,
@@ -47,18 +34,6 @@ async def update_user_preferences(
 ) -> UserPreferences:
     user_id_str = str(user_id)
     async with db_pool.acquire() as conn:
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS user_preferences (
-                user_id TEXT PRIMARY KEY,
-                email_briefing_enabled BOOLEAN DEFAULT FALSE,
-                email TEXT,
-                delivery_time TEXT DEFAULT '09:00',
-                timezone TEXT DEFAULT 'UTC',
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            )
-            """
-        )
         await conn.execute(
             """
             INSERT INTO user_preferences (user_id, email_briefing_enabled, email, delivery_time, timezone, updated_at)

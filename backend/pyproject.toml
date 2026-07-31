@@ -59,3 +59,9 @@ ignore = [
   "F841", # Unused local variables
   "F811", # Redefinition of unused imports
 ]
+
+[tool.pyrefly]
+project-includes = [
+    "**/*.py*",
+    "**/*.ipynb",
+]
