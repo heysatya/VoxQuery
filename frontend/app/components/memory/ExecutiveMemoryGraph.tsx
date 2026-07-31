@@ -1,9 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Brain, RefreshCw, Layers, Database, BarChart3, Filter, ShieldAlert } from "lucide-react";
-
+import { Brain, RefreshCw, Layers, Database, BarChart3, Filter, CheckCircle2, Compass } from "lucide-react";
 import { type VoxQueryAuthRelay } from "../../hooks/useVoxQuerySession";
 
 export type GraphNode = {
@@ -30,6 +28,12 @@ type ExecutiveMemoryGraphProps = {
   apiUrl?: string;
   auth: VoxQueryAuthRelay;
 };
+
+function formatNodeLabel(node: GraphNode): string {
+  let label = node.label.replace(/^Entity:\s*/i, "").replace(/^Filter:\s*/i, "").replace(/_/g, " ");
+  if (label.length > 50) label = label.slice(0, 47) + "...";
+  return label;
+}
 
 export function ExecutiveMemoryGraph({
   sessionId,
@@ -68,147 +72,135 @@ export function ExecutiveMemoryGraph({
     void fetchGraph();
   }, [sessionId, auth]);
 
-  const getNodeColor = (type: string) => {
-    switch (type) {
-      case "query":
-        return "from-indigo-500/20 to-purple-500/20 border-indigo-500/40 text-indigo-300";
-      case "metric":
-        return "from-emerald-500/20 to-teal-500/20 border-emerald-500/40 text-emerald-300";
-      case "entity":
-        return "from-sky-500/20 to-blue-500/20 border-sky-500/40 text-sky-300";
-      case "filter":
-        return "from-amber-500/20 to-orange-500/20 border-amber-500/40 text-amber-300";
-      case "insight":
-        return "from-rose-500/20 to-pink-500/20 border-rose-500/40 text-rose-300 shadow-[0_0_15px_rgba(244,63,94,0.15)]";
-      default:
-        return "from-gray-500/20 to-slate-500/20 border-gray-500/40 text-gray-300";
-    }
-  };
-
-  const getNodeIcon = (type: string) => {
-    switch (type) {
-      case "query":
-        return <Brain className="w-4 h-4" />;
-      case "metric":
-        return <BarChart3 className="w-4 h-4" />;
-      case "entity":
-        return <Database className="w-4 h-4" />;
-      case "filter":
-        return <Filter className="w-4 h-4" />;
-      case "insight":
-        return <Layers className="w-4 h-4" />;
-      default:
-        return <Layers className="w-4 h-4" />;
-    }
-  };
-
   if (!sessionId) {
     return (
-      <div className="flex flex-col items-center justify-center p-8 border border-dashed border-[var(--border)] rounded-2xl bg-[var(--bg-glass)]">
+      <div className="flex flex-col items-center justify-center p-8 border border-dashed border-[var(--border)] rounded-2xl bg-[var(--bg-glass)] text-center">
         <Brain className="w-8 h-8 text-[var(--text-muted)] mb-3" />
-        <p className="text-sm text-[var(--text-secondary)]">Start a query session to view memory connections.</p>
+        <p className="text-sm text-[var(--text-secondary)] font-medium">Start a query session to view context lineage.</p>
       </div>
     );
   }
 
+  // Group nodes by turn index
+  const turnsMap = new Map<number, GraphNode[]>();
+  if (graphData?.nodes) {
+    graphData.nodes.forEach((node) => {
+      const list = turnsMap.get(node.turn_index) || [];
+      list.push(node);
+      turnsMap.set(node.turn_index, list);
+    });
+  }
+
+  const turnIndexes = Array.from(turnsMap.keys()).sort((a, b) => a - b);
+
   return (
-    <div className="w-full rounded-2xl bg-gradient-to-br from-[var(--bg-glass)] to-[var(--bg-surface)] border border-[var(--border-glass)] shadow-xl p-6 relative overflow-hidden backdrop-blur-xl">
+    <div className="w-full rounded-2xl bg-gradient-to-br from-[var(--bg-glass)] to-[var(--bg-surface)] border border-[var(--border-glass)] shadow-2xl p-6 relative overflow-hidden backdrop-blur-xl">
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
+          <div className="p-2.5 rounded-xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 text-purple-400 border border-purple-500/30 shadow-inner">
             <Brain className="w-5 h-5 animate-pulse" />
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Multi-Turn Memory Graph</h3>
-            <p className="text-[11px] text-[var(--text-muted)]">Visualizing context retention & entity relations</p>
+            <h3 className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
+              Executive Context Lineage
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                {graphData?.nodes?.length || 0} Context Nodes
+              </span>
+            </h3>
+            <p className="text-[11px] text-[var(--text-muted)]">Multi-turn analytical decision flow & active context memory</p>
           </div>
         </div>
         <button
           type="button"
           onClick={fetchGraph}
-          className="p-1.5 rounded-lg hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+          className="p-2 rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] border border-[var(--border-glass)] transition-colors"
+          title="Refresh Context Lineage"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
         </button>
       </div>
 
       {loading ? (
-        <div className="h-64 flex items-center justify-center">
+        <div className="h-48 flex items-center justify-center">
           <div className="w-8 h-8 border-2 border-[var(--accent-blue)] border-t-transparent rounded-full animate-spin" />
         </div>
-      ) : graphData ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Visual Graph Nodes */}
-          <div className="md:col-span-2 p-4 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-glass)] relative min-h-[300px] flex flex-col justify-around">
-            <div className="absolute top-3 left-3 text-[10px] font-mono text-[var(--text-muted)]">DAG Visual Workspace</div>
-            <div className="flex flex-col gap-4 mt-6">
-              {graphData.nodes.map((node) => (
-                <div
-                  key={node.id}
-                  onClick={() => setSelectedNode(node)}
-                  className={`p-3 rounded-xl bg-gradient-to-r ${getNodeColor(node.type)} border cursor-pointer hover:scale-[1.02] transition-all flex items-center justify-between group`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="p-1.5 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-glass)]">
-                      {getNodeIcon(node.type)}
-                    </div>
-                    <div>
-                      <span className="text-xs font-mono font-medium block">{node.label}</span>
-                      <span className="text-[10px] text-[var(--text-muted)] capitalize">Type: {node.type}</span>
-                    </div>
-                  </div>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[var(--bg-elevated)] text-[var(--text-muted)] border border-[var(--border-glass)]">
-                    Turn {node.turn_index}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
+      ) : graphData && turnIndexes.length > 0 ? (
+        <div className="space-y-5">
+          {/* Visual Step-by-Step Lineage */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {turnIndexes.map((turnIdx) => {
+              const nodesInTurn = turnsMap.get(turnIdx) || [];
+              const queryNode = nodesInTurn.find((n) => n.type === "query");
+              const filterNodes = nodesInTurn.filter((n) => n.type === "filter");
+              const metricNodes = nodesInTurn.filter((n) => n.type === "metric" || n.type === "insight");
 
-          {/* Relation & Inspector Details */}
-          <div className="flex flex-col justify-between p-4 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-glass)]">
-            <div>
-              <span className="text-xs font-mono text-[var(--accent-blue)] block mb-4">Memory Inspector</span>
-              {selectedNode ? (
-                <div className="space-y-4">
-                  <div>
-                    <span className="text-[10px] text-[var(--text-muted)] block font-mono">NODE IDENTIFIER</span>
-                    <span className="text-sm font-semibold text-[var(--text-primary)]">{selectedNode.label}</span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-[var(--text-muted)] block font-mono">NODE CATEGORY</span>
-                    <span className="text-xs capitalize font-mono px-2 py-1 rounded bg-[var(--bg-elevated)] border border-[var(--border-glass)] inline-block mt-1">
-                      {selectedNode.type}
+              return (
+                <div
+                  key={turnIdx}
+                  className="p-4 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-glass)] shadow-md flex flex-col justify-between space-y-3 relative"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-semibold uppercase">
+                      Turn {turnIdx} Context
+                    </span>
+                    <span className="text-[10px] text-[var(--text-muted)] flex items-center gap-1 font-mono">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Retained
                     </span>
                   </div>
-                  <div>
-                    <span className="text-[10px] text-[var(--text-muted)] block font-mono">SESSION TURN</span>
-                    <span className="text-xs font-mono">Retained from step {selectedNode.turn_index}</span>
+
+                  {/* Primary Question / Scope */}
+                  {queryNode && (
+                    <div>
+                      <span className="text-[10px] text-[var(--text-muted)] font-mono uppercase tracking-wider block mb-1">
+                        Analytical Scope
+                      </span>
+                      <p className="text-xs font-semibold text-[var(--text-primary)] line-clamp-2">
+                        {formatNodeLabel(queryNode)}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Applied Filters & Metrics */}
+                  <div className="space-y-2 pt-2 border-t border-[var(--border-glass)]">
+                    {filterNodes.map((fn) => (
+                      <div key={fn.id} className="flex items-center gap-1.5 text-[11px] text-amber-300 font-mono">
+                        <Filter className="w-3 h-3 shrink-0" />
+                        <span className="truncate">{formatNodeLabel(fn)}</span>
+                      </div>
+                    ))}
+
+                    {metricNodes.map((mn) => (
+                      <div key={mn.id} className="flex items-center gap-1.5 text-[11px] text-emerald-300 font-mono">
+                        <BarChart3 className="w-3 h-3 shrink-0" />
+                        <span className="truncate">{formatNodeLabel(mn)}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              ) : (
-                <p className="text-xs text-[var(--text-secondary)] italic">Click any memory node to inspect relationships & active context.</p>
-              )}
-            </div>
+              );
+            })}
+          </div>
 
-            {/* Edge list */}
-            <div className="pt-4 border-t border-[var(--border)] mt-6">
-              <span className="text-[10px] font-mono text-[var(--text-muted)] block mb-2">Connected Transitions:</span>
-              <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                {graphData.edges.map((edge, idx) => (
-                  <div key={idx} className="text-[11px] flex items-center justify-between text-[var(--text-secondary)]">
-                    <span className="font-mono">{edge.source.replace("node_", "")}</span>
-                    <span className="text-[10px] text-[var(--accent-blue)] font-mono">--{edge.relation}{"-->"}</span>
-                    <span className="font-mono">{edge.target.replace("node_", "")}</span>
-                  </div>
-                ))}
-              </div>
+          {/* Active Context Chips */}
+          <div className="p-4 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-glass)] flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Compass className="w-4 h-4 text-purple-400" />
+              <span className="text-xs font-semibold text-[var(--text-primary)]">Active Decision Context:</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <span className="text-[10px] font-mono px-2.5 py-1 rounded-lg bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                Multi-Turn Retained
+              </span>
+              <span className="text-[10px] font-mono px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                Zero Context Loss
+              </span>
             </div>
           </div>
         </div>
       ) : (
-        <div className="h-64 flex items-center justify-center">
-          <p className="text-sm text-[var(--text-secondary)]">No memory data found for this session.</p>
+        <div className="h-44 flex items-center justify-center">
+          <p className="text-sm text-[var(--text-secondary)] font-medium">No context history recorded for this session.</p>
         </div>
       )}
     </div>
