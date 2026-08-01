@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { X, Table, Download, RefreshCw } from "lucide-react";
-import { fetchDrilldown as fetchDrilldownApi } from "../../../lib/api";
+import { fetchDrilldown as fetchDrilldownApi, ApiRequestError } from "../../../lib/api";
+import { FailureNotice } from "../notice/FailureNotice";
 
 type RowDrilldownModalProps = {
   isOpen: boolean;
@@ -19,25 +20,36 @@ export function RowDrilldownModal({
 }: RowDrilldownModalProps) {
   const [rows, setRows] = useState<Record<string, any>[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const fetchDrilldownData = async () => {
+  const attemptFetch = useCallback(async (tid: string): Promise<Record<string, any>[]> => {
+    try {
+      return await fetchDrilldownApi(tid, authToken);
+    } catch {
+      return await fetchDrilldownApi(tid, authToken);
+    }
+  }, [authToken]);
+
+  const fetchDrilldownData = useCallback(async () => {
     if (!turnId) return;
     setLoading(true);
+    setLoadError(null);
     try {
-      const data = await fetchDrilldownApi(turnId, authToken);
+      const data = await attemptFetch(turnId);
       setRows(data);
     } catch (err) {
-      console.error("Failed to load raw drilldown", err);
+      setRows([]);
+      setLoadError(err instanceof ApiRequestError ? err.message : "Couldn't load drilldown data.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [turnId, attemptFetch]);
 
   useEffect(() => {
     if (isOpen && turnId) {
       void fetchDrilldownData();
     }
-  }, [isOpen, turnId, authToken]);
+  }, [isOpen, turnId, fetchDrilldownData]);
 
   if (!isOpen) return null;
 
@@ -100,6 +112,14 @@ export function RowDrilldownModal({
             <div className="h-64 flex flex-col items-center justify-center gap-3">
               <RefreshCw className="w-8 h-8 text-[var(--accent-blue)] animate-spin" />
               <p className="text-xs text-[var(--text-muted)]">Querying transaction log...</p>
+            </div>
+          ) : loadError ? (
+            <div className="p-4">
+              <FailureNotice
+                severity="info"
+                message={loadError}
+                action={{ label: "Retry", onClick: () => void fetchDrilldownData() }}
+              />
             </div>
           ) : rows.length > 0 ? (
             <div className="overflow-x-auto rounded-xl border border-[var(--border-glass)] bg-[var(--bg-surface)]">

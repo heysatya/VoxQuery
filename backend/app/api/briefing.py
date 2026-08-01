@@ -5,7 +5,7 @@ Morning Executive Briefing API Router (PRD V2.1 Feature 1).
 from __future__ import annotations
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.config import Settings, get_settings
 from app.core.rate_limit import RateLimiter
@@ -15,6 +15,11 @@ from app.services.briefing import generate_morning_briefing
 
 router = APIRouter()
 logger = logging.getLogger("voxquery.api.briefing")
+
+
+def get_warehouse(request: Request):
+    pipeline = getattr(request.app.state, "pipeline", None)
+    return getattr(pipeline, "warehouse", None)
 
 
 async def _enforce_rate_limit(user_id: str, settings: Settings) -> None:
@@ -27,28 +32,44 @@ async def _enforce_rate_limit(user_id: str, settings: Settings) -> None:
         )
 
 
+def _get_user_name(claims: AuthClaims) -> str:
+    if claims.email and "@" in claims.email:
+        name_part = claims.email.split("@")[0]
+        if name_part and name_part != "user":
+            return name_part.replace(".", " ").replace("_", " ").title()
+    return "Executive"
+
+
 @router.get("/api/briefing", response_model=ExecutiveBriefingResponse)
 async def get_briefing(
     claims: AuthClaims = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
+    warehouse = Depends(get_warehouse),
 ) -> ExecutiveBriefingResponse:
     """
     Fetch the morning executive briefing for the authenticated tenant.
     """
     await _enforce_rate_limit(claims.user_id, settings)
     logger.info("Generating morning briefing for tenant_id=%s user_id=%s", claims.tenant_id, claims.user_id)
-    return await generate_morning_briefing(claims.tenant_id, settings, user_name="Executive")
+    user_name = _get_user_name(claims)
+    return await generate_morning_briefing(
+        claims.tenant_id, settings, user_name=user_name, warehouse=warehouse, snowflake_role=claims.snowflake_role
+    )
 
 
 @router.get("/api/briefing/pdf")
 async def get_briefing_pdf(
     claims: AuthClaims = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
+    warehouse = Depends(get_warehouse),
 ):
     from fastapi.responses import Response
     from app.services.pdf_exporter import generate_briefing_pdf
     await _enforce_rate_limit(claims.user_id, settings)
-    briefing = await generate_morning_briefing(claims.tenant_id, settings, user_name="Executive")
+    user_name = _get_user_name(claims)
+    briefing = await generate_morning_briefing(
+        claims.tenant_id, settings, user_name=user_name, warehouse=warehouse, snowflake_role=claims.snowflake_role
+    )
     pdf_bytes = await generate_briefing_pdf(briefing, tenant_name=claims.tenant_id)
     return Response(
         content=pdf_bytes,

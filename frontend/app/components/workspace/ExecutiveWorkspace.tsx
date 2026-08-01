@@ -8,6 +8,7 @@ import { type LastResult } from "../../../lib/types";
 type PinnedWidget = {
   id: string;
   title: string;
+  created_at?: string;
   result: LastResult | any;
 };
 
@@ -32,7 +33,6 @@ export function ExecutiveWorkspace({
   pinnedWidgets = [],
   onRemoveWidget,
 }: ExecutiveWorkspaceProps) {
-  const currentDate = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
   return (
     <div className="w-full rounded-2xl bg-gradient-to-br from-[var(--bg-glass)] to-[var(--bg-surface)] border border-[var(--border-glass)] shadow-2xl p-6 backdrop-blur-xl relative overflow-hidden">
@@ -42,24 +42,24 @@ export function ExecutiveWorkspace({
             <LayoutGrid className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
               Saved metrics
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-400/30 font-semibold">
                 {pinnedWidgets.length} pinned
               </span>
             </h3>
-            <p className="text-[11px] text-[var(--text-muted)]">Your personal dashboard of saved analytical views</p>
+            <p className="text-[11px] text-slate-300 font-medium">Your personal dashboard of saved analytical views</p>
           </div>
         </div>
       </div>
 
       {pinnedWidgets.length === 0 ? (
-        <div className="h-44 flex flex-col items-center justify-center border border-dashed border-[var(--border)] rounded-2xl bg-[var(--bg-glass)] p-6 text-center">
-          <div className="p-3 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-glass)] mb-3">
-            <Pin className="w-5 h-5 text-[var(--text-muted)]" />
+        <div className="h-44 flex flex-col items-center justify-center border border-dashed border-slate-700/60 rounded-2xl bg-slate-900/60 p-6 text-center">
+          <div className="p-3 rounded-full bg-slate-800 border border-slate-700 mb-3">
+            <Pin className="w-5 h-5 text-cyan-400" />
           </div>
-          <p className="text-xs text-[var(--text-secondary)] font-medium">Nothing pinned yet.</p>
-          <p className="text-[10px] text-[var(--text-muted)] mt-1 max-w-sm">
+          <p className="text-xs text-slate-200 font-semibold">Nothing pinned yet.</p>
+          <p className="text-[11px] text-slate-300 mt-1 max-w-sm">
             Pin any chart to build your own board.
           </p>
         </div>
@@ -88,7 +88,7 @@ export function ExecutiveWorkspace({
             return (
               <div
                 key={widget.id}
-                className="p-5 rounded-2xl bg-gradient-to-b from-[#161820] to-[#111319] border border-white/10 shadow-xl flex flex-col justify-between relative group hover:border-indigo-500/40 transition-all duration-300"
+                className="p-5 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 border border-slate-700/60 shadow-xl flex flex-col justify-between relative group hover:border-cyan-400/50 transition-all duration-300"
               >
                 {/* Header Row */}
                 <div className="flex items-start justify-between gap-3 mb-3">
@@ -102,6 +102,7 @@ export function ExecutiveWorkspace({
                       onClick={() => onRemoveWidget(widget.id)}
                       className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/20 transition-colors"
                       title="Unpin Widget"
+                      aria-label="Unpin widget"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -109,48 +110,55 @@ export function ExecutiveWorkspace({
                 </div>
 
                 {/* Embedded Recharts Mini Graphic or Honest Empty State */}
-                <div className="h-36 w-full my-2 pt-2 bg-black/20 rounded-xl border border-white/5 p-2 flex items-center justify-center">
+                <div className="h-36 w-full my-2 pt-2 bg-slate-950/70 rounded-xl border border-slate-800 p-2 flex items-center justify-center">
                   {formattedChartData.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
                       {chartType === "line" ? (
                         <LineChart data={formattedChartData}>
-                          <XAxis dataKey="name" stroke="#6b7280" fontSize={10} tickLine={false} />
-                          <YAxis stroke="#6b7280" fontSize={10} tickLine={false} width={30} />
+                          <XAxis dataKey="name" stroke="#94a3b8" fontSize={10} tickLine={false} />
+                          <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} width={30} />
                           <RechartsTooltip
-                            contentStyle={{ backgroundColor: "#1f2937", borderRadius: "8px", border: "1px solid #374151" }}
+                            contentStyle={{ backgroundColor: "#0f172a", borderRadius: "8px", border: "1px solid #334155" }}
                             labelStyle={{ color: "#fff", fontSize: "11px" }}
                           />
-                          <Line type="monotone" dataKey="value" stroke="#818cf8" strokeWidth={2} dot={{ r: 3, fill: "#818cf8" }} />
+                          <Line type="monotone" dataKey="value" stroke="#38bdf8" strokeWidth={2} dot={{ r: 3, fill: "#38bdf8" }} />
                         </LineChart>
                       ) : (
                         <BarChart data={formattedChartData}>
-                          <XAxis dataKey="name" stroke="#6b7280" fontSize={10} tickLine={false} />
-                          <YAxis stroke="#6b7280" fontSize={10} tickLine={false} width={30} />
+                          <XAxis dataKey="name" stroke="#94a3b8" fontSize={10} tickLine={false} />
+                          <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} width={30} />
                           <RechartsTooltip
-                            contentStyle={{ backgroundColor: "#1f2937", borderRadius: "8px", border: "1px solid #374151" }}
+                            contentStyle={{ backgroundColor: "#0f172a", borderRadius: "8px", border: "1px solid #334155" }}
                             labelStyle={{ color: "#fff", fontSize: "11px" }}
                           />
-                          <Bar dataKey="value" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="value" fill="#38bdf8" radius={[4, 4, 0, 0]} />
                         </BarChart>
                       )}
                     </ResponsiveContainer>
                   ) : (
-                    <div className="text-xs text-gray-500 flex items-center justify-center h-full font-mono">
+                    <div className="text-xs text-slate-400 flex items-center justify-center h-full font-mono font-medium">
                       No data returned for this metric
                     </div>
                   )}
                 </div>
 
                 {/* Footer Metadata Bar */}
-                <div className="mt-2 pt-2 border-t border-white/5 flex items-center justify-between text-[10px] text-gray-400">
-                  <span className="font-mono flex items-center gap-1">
-                    <Sparkles className="w-3 h-3 text-indigo-400" />
-                    Ref: {(widget.result?.turnId || widget.result?.turn_id || widget.id).slice(0, 8)}
-                  </span>
-                  <span className="px-2 py-0.5 rounded bg-white/5 text-gray-300 border border-white/10 font-mono">
-                    Snapshot from {currentDate}
-                  </span>
-                </div>
+                {(() => {
+                  const pinDate = widget.created_at
+                    ? new Date(widget.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                    : new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                  return (
+                    <div className="mt-2 pt-2 border-t border-slate-800/60 flex items-center justify-between text-[10px] text-slate-300">
+                      <span className="font-mono flex items-center gap-1 text-slate-300 font-medium">
+                        <Sparkles className="w-3 h-3 text-cyan-400" />
+                        Ref: {(widget.result?.turnId || widget.result?.turn_id || widget.id).slice(0, 8)}
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-200 border border-slate-700 font-mono font-medium">
+                        Snapshot from {pinDate}
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}

@@ -5,18 +5,16 @@ import { AlertTriangle, Sparkles } from "lucide-react";
 import type { BriefingAnomaly } from "../../../lib/types";
 
 type InlineAnomalyNudgeProps = {
-  anomaly?: BriefingAnomaly;
+  anomaly?: BriefingAnomaly | null;
   onAskBreakdown?: (query: string) => void;
 };
 
 export function InlineAnomalyNudge({
-  anomaly = {
-    severity: "warning",
-    title: "Variance detected",
-    description: "Metric is 23% below last week's 30-day average.",
-  },
+  anomaly,
   onAskBreakdown,
 }: InlineAnomalyNudgeProps) {
+  if (!anomaly) return null;
+
   const queryText = `Give me the breakdown for ${anomaly.title}`;
 
   return (

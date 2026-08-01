@@ -142,6 +142,53 @@ class TurnRepository:
                 turn_id, json.dumps(anomalies),
             )
 
+    async def get_prior_session_questions(
+        self,
+        claims: AuthClaims,
+        current_session_id: UUID | None = None,
+        limit: int = 3,
+    ) -> list[str]:
+        """
+        Retrieves the 2-3 most recent distinct user questions from the authenticated user's
+        most recent prior session.
+        """
+        async with self._pool.acquire() as conn:
+            prior_session_row = await conn.fetchrow(
+                """
+                SELECT session_id
+                FROM sessions
+                WHERE tenant_id = $1 AND user_id = $2
+                  AND ($3::uuid IS NULL OR session_id != $3)
+                ORDER BY last_active_at DESC
+                LIMIT 1
+                """,
+                claims.tenant_id, claims.user_id, current_session_id,
+            )
+            if not prior_session_row:
+                return []
+
+            prior_sid = prior_session_row["session_id"]
+            rows = await conn.fetch(
+                """
+                SELECT user_input
+                FROM turns
+                WHERE session_id = $1 AND tenant_id = $2
+                ORDER BY created_at DESC
+                """,
+                prior_sid, claims.tenant_id,
+            )
+
+        seen: set[str] = set()
+        distinct_questions: list[str] = []
+        for r in rows:
+            q = str(r["user_input"]).strip()
+            if q and q not in seen:
+                seen.add(q)
+                distinct_questions.append(q)
+                if len(distinct_questions) >= limit:
+                    break
+        return distinct_questions
+
     def _parse_row(self, row: asyncpg.Record | None) -> dict[str, Any] | None:
         if row is None:
             return None

@@ -45,6 +45,7 @@ docs/archive/
 
 # Exclude pitch deck directory
 pitch-deck/
+mvp-deck/
 
 # Exclude gate implementation and execution documents
 docs/voice-subsystem/gate-*.md

@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { Brain, RefreshCw, BarChart3, Filter, CheckCircle2 } from "lucide-react";
 import { fetchMemoryGraph, ApiRequestError } from "../../../lib/api";
 import type { GraphNode, GraphEdge, MemoryGraphData } from "../../../lib/types";
+import { FailureNotice } from "../notice/FailureNotice";
 
 export type { GraphNode, GraphEdge, MemoryGraphData };
 
@@ -24,23 +25,34 @@ export function ExecutiveMemoryGraph({
 }: ExecutiveMemoryGraphProps) {
   const [graphData, setGraphData] = useState<MemoryGraphData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const fetchGraph = async () => {
+  const attemptFetch = useCallback(async (sid: string): Promise<MemoryGraphData> => {
+    try {
+      return await fetchMemoryGraph(sid, authToken);
+    } catch {
+      return await fetchMemoryGraph(sid, authToken);
+    }
+  }, [authToken]);
+
+  const loadGraph = useCallback(async () => {
     if (!sessionId) return;
     setLoading(true);
+    setLoadError(null);
     try {
-      const data = await fetchMemoryGraph(sessionId, authToken);
+      const data = await attemptFetch(sessionId);
       setGraphData(data);
     } catch (err) {
-      console.error("Could not fetch memory graph", err);
+      setGraphData(null);
+      setLoadError(err instanceof ApiRequestError ? err.message : "Couldn't load memory graph.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [sessionId, attemptFetch]);
 
   useEffect(() => {
-    void fetchGraph();
-  }, [sessionId, authToken]);
+    void loadGraph();
+  }, [loadGraph]);
 
   if (!sessionId) {
     return (
@@ -72,27 +84,37 @@ export function ExecutiveMemoryGraph({
             <Brain className="w-5 h-5 animate-pulse" />
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+            <h3 className="text-sm font-bold text-white">
               What we've covered
             </h3>
-            <p className="text-[11px] text-[var(--text-muted)]">
+            <p className="text-[11px] text-slate-300 font-medium">
               A quick recap of the questions and filters you've used in this session
             </p>
           </div>
         </div>
         <button
           type="button"
-          onClick={fetchGraph}
-          className="p-2 rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] border border-[var(--border-glass)] transition-colors"
+          onClick={() => void loadGraph()}
+          className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700/60 transition-colors"
           title="Refresh History"
+          aria-label="Refresh memory graph history"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
         </button>
       </div>
 
       {loading ? (
-        <div className="h-48 flex items-center justify-center">
+        <div role="status" aria-live="polite" aria-label="Loading memory graph" className="h-48 flex items-center justify-center">
           <div className="w-8 h-8 border-2 border-[var(--accent-blue)] border-t-transparent rounded-full animate-spin" />
+          <span className="sr-only">Loading memory graph...</span>
+        </div>
+      ) : loadError ? (
+        <div role="status" aria-live="polite" className="my-4">
+          <FailureNotice
+            severity="info"
+            message={loadError}
+            action={{ label: "Retry", onClick: () => void loadGraph() }}
+          />
         </div>
       ) : graphData && turnIndexes.length > 0 ? (
         <div className="space-y-5">

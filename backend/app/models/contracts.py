@@ -157,6 +157,10 @@ class SessionCreateResponse(BaseModel):
     expires_at: datetime
 
 
+class PriorSessionSummaryResponse(BaseModel):
+    questions: list[str] = Field(default_factory=list)
+
+
 class QueryRequest(BaseModel):
     session_id: UUID
     parent_turn_id: UUID | None = None
@@ -374,6 +378,8 @@ class ResultResponse(BaseModel):
     warnings: list[ResultWarning] = Field(default_factory=list)
     valid_visualizations: list[ChartType] = Field(default_factory=list)
     trust: ResultTrust | None = None
+    anomaly: BriefingAnomaly | None = None
+    anomalies: list[BriefingAnomaly] = Field(default_factory=list)
     from_cache: bool = False
 
 

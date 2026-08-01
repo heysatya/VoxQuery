@@ -20,6 +20,7 @@ from app.models.contracts import (
     SessionCreateResponse,
     StatusResponse,
     UserPreferences,
+    PriorSessionSummaryResponse,
     valid_visualizations_for_result,
 )
 from app.services.pipeline import PipelineOrchestrator
@@ -38,6 +39,10 @@ def get_pipeline(request: Request) -> PipelineOrchestrator:
 
 def get_rate_limiter(request: Request) -> RateLimiter:
     return request.app.state.rate_limiter
+
+
+def get_db_pool(request: Request):
+    return getattr(request.app.state, "db_pool", None)
 
 
 @router.post("/api/session", response_model=SessionCreateResponse, status_code=201)
@@ -79,6 +84,23 @@ async def delete_session(
         raise ApiError(ErrorCode.session_not_found, status_code=404)
     await sessions.delete(claims.tenant_id, session_id)
     return StatusResponse(status="ok")
+
+
+@router.get("/api/memory/prior-session-summary", response_model=PriorSessionSummaryResponse)
+async def get_prior_session_summary(
+    current_session_id: UUID | None = None,
+    claims: AuthClaims = Depends(get_current_user),
+    db_pool = Depends(get_db_pool),
+) -> PriorSessionSummaryResponse:
+    """
+    Retrieve 2-3 most recent distinct questions from the user's prior session.
+    """
+    if not db_pool:
+        return PriorSessionSummaryResponse(questions=[])
+    from app.repositories.turn_repository import TurnRepository
+    repo = TurnRepository(db_pool)
+    questions = await repo.get_prior_session_questions(claims, current_session_id=current_session_id, limit=3)
+    return PriorSessionSummaryResponse(questions=questions)
 
 
 @router.post("/api/query", response_model=QueryAcceptedResponse, status_code=202)
@@ -140,6 +162,8 @@ async def get_result(
     if not turn.full_result or not turn.chart_type or not turn.confidence_tier:
         raise ApiError(ErrorCode.turn_processing, status_code=202)
     confidence_reasons = confidence_reasons_for_turn(turn)
+    from app.services.anomaly_detector import check_turn_anomaly
+    anomaly = check_turn_anomaly(turn.full_result)
     return ResultResponse(
         turn_id=turn.turn_id,
         chart_type=turn.chart_type,
@@ -153,6 +177,7 @@ async def get_result(
         warnings=turn.result_warnings,
         valid_visualizations=valid_visualizations_for_result(turn.full_result),
         trust=build_result_trust(turn, turn.full_result),
+        anomaly=anomaly,
         from_cache=turn.from_cache,
     )
 
@@ -435,9 +460,20 @@ async def get_drilldown(
     turn_id: UUID,
     claims: AuthClaims = Depends(get_current_user),
     settings = Depends(get_settings),
+    pipeline: PipelineOrchestrator = Depends(get_pipeline),
+    db_pool = Depends(get_db_pool),
 ) -> list[dict]:
     """
-    Fetch top 10 raw transaction rows for a given turn.
+    Fetch top 10 raw transaction rows for a given turn scoped to tenant claims.
     """
     from app.services.drilldown import get_row_drilldown
-    return await get_row_drilldown(turn_id, settings)
+    from app.repositories.turn_repository import TurnRepository
+    turn_repo = TurnRepository(db_pool) if db_pool else None
+    return await get_row_drilldown(
+        turn_id,
+        claims=claims,
+        settings=settings,
+        turn_repo=turn_repo,
+        warehouse=pipeline.warehouse,
+        pipeline_turns=pipeline.turns,
+    )

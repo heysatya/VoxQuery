@@ -19,9 +19,9 @@ async def test_get_row_drilldown_service():
     turn_id = uuid4()
     rows = await get_row_drilldown(turn_id, settings)
     
-    assert len(rows) > 0
-    assert "order_id" in rows[0]
-    assert "amount" in rows[0]
+    # Requirement 2.3: Never fall back to fabricated rows if turn SQL/record is missing
+    assert isinstance(rows, list)
+    assert len(rows) == 0
 
 
 def test_drilldown_api_endpoint():
@@ -36,5 +36,5 @@ def test_drilldown_api_endpoint():
     )
     assert response.status_code == 200
     data = response.json()
-    assert len(data) > 0
-    assert data[0]["order_id"].startswith("ORD-2026-")
+    assert isinstance(data, list)
+    assert len(data) == 0

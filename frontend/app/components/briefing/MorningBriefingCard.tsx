@@ -102,15 +102,21 @@ export function MorningBriefingCard({
 
   if (loading) {
     return (
-      <div className="w-full max-w-xl mx-auto mb-8 h-40 flex items-center justify-center rounded-2xl border border-white/10 bg-[#12141a]">
+      <div
+        role="status"
+        aria-live="polite"
+        aria-label="Loading morning briefing"
+        className="w-full max-w-xl mx-auto mb-8 h-40 flex items-center justify-center rounded-2xl border border-white/10 bg-[#12141a]"
+      >
         <div className="w-8 h-8 border-2 border-[var(--accent-blue)] border-t-transparent rounded-full animate-spin" />
+        <span className="sr-only">Loading morning briefing...</span>
       </div>
     );
   }
 
   if (!briefing) {
     return (
-      <div className="w-full max-w-xl mx-auto mb-8">
+      <div role="status" aria-live="polite" className="w-full max-w-xl mx-auto mb-8">
         <FailureNotice
           severity="info"
           message={loadError ?? "Couldn't load this morning's briefing."}
@@ -148,15 +154,15 @@ export function MorningBriefingCard({
         initial={{ opacity: 0, y: -16 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, height: 0 }}
-        className={`w-full max-w-xl mx-auto mb-8 rounded-2xl bg-gradient-to-b from-[#181a20] to-[#12141a] border border-white/10 shadow-2xl p-6 relative overflow-hidden backdrop-blur-2xl ${
-          variant === "drawer" ? "border-indigo-500/30" : ""
+        className={`w-full max-w-xl mx-auto mb-8 rounded-2xl bg-gradient-to-b from-slate-900/95 to-slate-950/95 border border-slate-700/60 shadow-[0_0_30px_rgba(56,189,248,0.12)] p-6 relative overflow-hidden backdrop-blur-2xl ${
+          variant === "drawer" ? "border-cyan-500/40" : ""
         }`}
       >
         {/* Top Title Bar */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2.5">
             <span className="text-xl">☀️</span>
-            <h2 className="text-sm font-semibold text-white tracking-tight">
+            <h2 className="text-sm font-bold text-white tracking-tight">
               VoxQuery Morning Briefing
             </h2>
           </div>
@@ -168,20 +174,21 @@ export function MorningBriefingCard({
                 setIsPlayingTopAudio(!isPlayingTopAudio);
                 if (!showDetails) setShowDetails(true);
               }}
-              className="px-2.5 py-1 rounded-full bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/30 text-indigo-300 text-[11px] font-medium flex items-center gap-1.5 transition-colors"
+              className="px-2.5 py-1 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/30 text-cyan-200 text-[11px] font-semibold flex items-center gap-1.5 transition-colors"
             >
-              <Play className="w-3 h-3 fill-indigo-300" />
+              <Play className="w-3 h-3 fill-cyan-200" />
               <span>Listen — 45s</span>
             </button>
-            <span className="text-xs font-mono text-gray-400">9:00 AM</span>
+            <span className="text-xs font-mono text-slate-300">9:00 AM</span>
             <button
               type="button"
               onClick={() => {
                 setDismissed(true);
                 onClose?.();
               }}
-              className="text-gray-500 hover:text-gray-300 p-1 transition-colors"
+              className="text-slate-400 hover:text-white p-1 transition-colors"
               title="Dismiss"
+              aria-label="Dismiss morning briefing"
             >
               <X className="w-4 h-4" />
             </button>
@@ -189,7 +196,7 @@ export function MorningBriefingCard({
         </div>
 
         {/* Executive Greeting Subtitle */}
-        <p className="text-xs text-gray-300 font-medium mb-4">
+        <p className="text-xs text-slate-200 font-semibold mb-4">
           Good morning. Three things before your 9 AM:
         </p>
 
@@ -199,10 +206,10 @@ export function MorningBriefingCard({
             <div key={idx} className="flex items-start gap-3 group">
               <span className={`w-2.5 h-2.5 rounded-full mt-1 shrink-0 ${item.dotColor}`} />
               <div className="space-y-0.5">
-                <h4 className="text-xs font-bold text-white tracking-wide group-hover:text-indigo-300 transition-colors">
+                <h4 className="text-xs font-bold text-white tracking-wide group-hover:text-cyan-300 transition-colors">
                   {item.headline}
                 </h4>
-                <p className="text-[11px] font-mono text-gray-400">
+                <p className="text-[11px] font-mono text-slate-300 font-medium">
                   {item.subtext}
                 </p>
               </div>
@@ -211,11 +218,11 @@ export function MorningBriefingCard({
         </div>
 
         {/* Bottom Action Bar */}
-        <div className="flex items-center gap-3 pt-3 border-t border-white/5">
+        <div className="flex items-center gap-3 pt-3 border-t border-slate-800/80">
           <button
             type="button"
             onClick={onAskFollowUp}
-            className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white text-xs font-semibold shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+            className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 text-white text-xs font-semibold shadow-lg shadow-sky-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
           >
             <Mic className="w-3.5 h-3.5" />
             <span>Ask a follow-up</span>
@@ -224,9 +231,9 @@ export function MorningBriefingCard({
           <button
             type="button"
             onClick={() => setShowDetails(!showDetails)}
-            className="py-2.5 px-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-xs font-semibold flex items-center justify-center gap-2 transition-all"
+            className="py-2.5 px-4 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 text-slate-100 text-xs font-semibold flex items-center justify-center gap-2 transition-all"
           >
-            <BarChart2 className="w-3.5 h-3.5 text-indigo-400" />
+            <BarChart2 className="w-3.5 h-3.5 text-cyan-400" />
             <span>{showDetails ? "Hide Details" : "Details"}</span>
           </button>
         </div>
@@ -237,11 +244,11 @@ export function MorningBriefingCard({
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
-            className="mt-5 pt-5 border-t border-white/10 space-y-5"
+            className="mt-5 pt-5 border-t border-slate-800/80 space-y-5"
           >
             {/* Audio Podcast Narrator */}
             <div>
-              <span className="text-[10px] font-mono text-indigo-400 uppercase tracking-widest block mb-2 font-semibold">
+              <span className="text-[10px] font-mono text-cyan-400 uppercase tracking-widest block mb-2 font-bold">
                 AUDIO BRIEFING PODCAST
               </span>
               <ExecutiveAudioPlayer
@@ -252,16 +259,16 @@ export function MorningBriefingCard({
 
             {/* KPI Grid */}
             <div>
-              <span className="text-[10px] font-mono text-gray-400 uppercase tracking-widest block mb-2 font-semibold">
+              <span className="text-[10px] font-mono text-slate-300 uppercase tracking-widest block mb-2 font-bold">
                 EXECUTIVE METRICS BREAKDOWN
               </span>
               <div className="grid grid-cols-2 gap-3">
                 {briefing.kpis.map((kpi, idx) => (
-                  <div key={idx} className="p-3 rounded-xl bg-white/5 border border-white/5 flex flex-col justify-between">
-                    <span className="text-[10px] font-mono text-gray-400">{kpi.label}</span>
+                  <div key={idx} className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/50 flex flex-col justify-between">
+                    <span className="text-[10px] font-mono text-slate-300 font-medium">{kpi.label}</span>
                     <div className="my-1 flex items-baseline justify-between">
                       <span className="text-sm font-bold text-white">{kpi.value}</span>
-                      <span className={`text-[10px] font-mono flex items-center gap-0.5 ${kpi.trend === "up" ? "text-emerald-400" : "text-amber-400"}`}>
+                      <span className={`text-[10px] font-mono font-semibold flex items-center gap-0.5 ${kpi.trend === "up" ? "text-emerald-400" : "text-amber-400"}`}>
                         {kpi.trend === "up" ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                         {kpi.change_pct > 0 ? `+${kpi.change_pct}%` : `${kpi.change_pct}%`}
                       </span>

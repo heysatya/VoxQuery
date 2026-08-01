@@ -262,7 +262,7 @@ async def get_version() -> dict[str, str]:
         try:
             git_sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
         except Exception:
-            git_sha = "e9400b7"
+            git_sha = "unknown"
     return {
         "git_sha": git_sha,
         "version": "1.0.0",

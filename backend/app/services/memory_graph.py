@@ -31,25 +31,7 @@ async def generate_memory_graph(
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
 
-    if not turns or len(turns) == 0:
-        # Default session initialization nodes
-        nodes = [
-            GraphNode(id="node_q1", label="Total Revenue 2025", type="query", turn_index=1),
-            GraphNode(id="node_m1", label="Metric: total_revenue ($246.7M)", type="metric", turn_index=1),
-            GraphNode(id="node_e1", label="Entity: orders_table", type="entity", turn_index=1),
-            GraphNode(id="node_q2", label="Filter California", type="query", turn_index=2),
-            GraphNode(id="node_f1", label="Filter: state = 'CA'", type="filter", turn_index=2),
-            GraphNode(id="node_i1", label="Insight: West Coast Surge", type="insight", turn_index=2),
-        ]
-        edges = [
-            GraphEdge(source="node_q1", target="node_m1", relation="computes"),
-            GraphEdge(source="node_q1", target="node_e1", relation="queries"),
-            GraphEdge(source="node_q1", target="node_q2", relation="followed_by"),
-            GraphEdge(source="node_q2", target="node_f1", relation="applies"),
-            GraphEdge(source="node_f1", target="node_i1", relation="yields"),
-            GraphEdge(source="node_m1", target="node_i1", relation="supports"),
-        ]
-    else:
+    if turns:
         # Build dynamic DAG from session turns
         prev_q_id = None
         seen_entities: set[str] = set()

@@ -17,11 +17,19 @@ client = TestClient(app)
 async def test_generate_memory_graph_service():
     settings = get_settings()
     session_id = uuid4()
-    graph = await generate_memory_graph(session_id, settings)
+    sample_turns = [
+        {
+            "user_input": "Total Revenue 2025",
+            "chart_type": "bar",
+            "source_tables": ["orders"],
+            "filter_predicates": ["state = 'CA'"],
+        }
+    ]
+    graph = await generate_memory_graph(session_id, settings, turns=sample_turns)
     
     assert graph.session_id == session_id
-    assert len(graph.nodes) >= 4
-    assert len(graph.edges) >= 4
+    assert len(graph.nodes) >= 2
+    assert len(graph.edges) >= 1
     types = {node.type for node in graph.nodes}
     assert "query" in types
     assert "metric" in types
@@ -41,4 +49,4 @@ def test_memory_graph_api_endpoint():
     data = response.json()
     assert "nodes" in data
     assert "edges" in data
-    assert len(data["nodes"]) > 0
+    assert isinstance(data["nodes"], list)

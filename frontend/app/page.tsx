@@ -19,8 +19,11 @@ import { TranscriptReviewPanel } from "./components/transcript/TranscriptReviewP
 import { ThreadHistory } from "./components/thread/ThreadHistory";
 import { InlineAnomalyNudge } from "./components/insight/InlineAnomalyNudge";
 import { FailureNotice } from "./components/notice/FailureNotice";
+import { PriorSessionMemoryCard } from "./components/memory/PriorSessionMemoryCard";
+import { VoxQueryLogo } from "./components/brand/VoxQueryLogo";
 import { getStatusLabel } from "./state/interactionState";
-import { fetchWorkspaceWidgets, pinWorkspaceWidget, deleteWorkspaceWidget, fetchVersion } from "../lib/api";
+import { fetchWorkspaceWidgets, pinWorkspaceWidget, deleteWorkspaceWidget, fetchVersion, fetchBriefing, fetchPriorSessionSummary } from "../lib/api";
+import type { LastResult } from "../lib/types";
 
 const authMode = process.env.NEXT_PUBLIC_AUTH_MODE ?? "fake";
 
@@ -125,7 +128,9 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
   const [pinnedWidgets, setPinnedWidgets] = useState<any[]>([]);
   const [token, setToken] = useState<string | null>(null);
   const [briefingDrawerOpen, setBriefingDrawerOpen] = useState(false);
-  const [gitSha, setGitSha] = useState<string>("e9400b7");
+  const [gitSha, setGitSha] = useState<string>("unknown");
+  const [anomalyCount, setAnomalyCount] = useState<number | null>(null);
+  const [priorQuestions, setPriorQuestions] = useState<string[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -135,10 +140,22 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
         fetchVersion(t).then((v) => {
           if (active && v?.git_sha) setGitSha(v.git_sha);
         }).catch(() => {});
+        if (t) {
+          fetchBriefing(t).then((b) => {
+            if (active && b?.anomalies) {
+              setAnomalyCount(b.anomalies.length);
+            }
+          }).catch(() => {});
+          fetchPriorSessionSummary(engine.sessionId, t).then((res) => {
+            if (active && res?.questions) {
+              setPriorQuestions(res.questions);
+            }
+          }).catch(() => {});
+        }
       }
     });
     return () => { active = false; };
-  }, [auth]);
+  }, [auth, engine.sessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -154,9 +171,9 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
     return () => { cancelled = true; };
   }, [auth]);
 
-  const handlePinWidget = async (result: any) => {
+  const handlePinWidget = async (result: LastResult) => {
     const title = result.submittedText
-      || result.resultData?.summary_narrative?.split(".")[0]
+      || result.resultData?.tts_text?.split(".")[0]
       || "Pinned metric";
     try {
       const token = await auth.getToken();
@@ -203,16 +220,34 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
 
   return (
     <main className="min-h-screen flex flex-col relative">
-      {/* Persistent Top Nav Briefing Button (Phase 1.3) */}
-      <div className="fixed top-4 left-4 z-40">
-        <button
-          type="button"
-          onClick={() => setBriefingDrawerOpen(true)}
-          className="px-3.5 py-1.5 rounded-full bg-[#181a20]/90 border border-white/10 text-white text-xs font-semibold shadow-lg hover:border-indigo-500/40 transition-all flex items-center gap-2 backdrop-blur-xl"
-        >
-          <span>☀️ Today's briefing — 2 flags</span>
-        </button>
-      </div>
+      {/* Persistent Top Header Bar */}
+      <header className="w-full px-6 py-4 flex items-center justify-between z-40 relative border-b border-slate-800/40 bg-slate-950/60 backdrop-blur-xl">
+        <div className="flex items-center gap-3">
+          <VoxQueryLogo variant="header" />
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setBriefingDrawerOpen(true)}
+            className="px-3.5 py-1.5 rounded-full bg-slate-900/90 border border-slate-700/60 text-slate-100 text-xs font-semibold shadow-lg hover:border-cyan-400/50 hover:bg-slate-800 transition-all flex items-center gap-2 backdrop-blur-xl"
+            aria-label="Open morning briefing drawer"
+          >
+            <span>
+              {anomalyCount === null
+                ? "☀️ Today's briefing"
+                : anomalyCount === 0
+                ? "☀️ Today's briefing — No flags"
+                : anomalyCount === 1
+                ? "☀️ Today's briefing — 1 flag"
+                : `☀️ Today's briefing — ${anomalyCount} flags`}
+            </span>
+          </button>
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800/80 text-slate-300 border border-slate-700/50 hidden sm:inline-block">
+            SHA: {gitSha.slice(0, 7)}
+          </span>
+        </div>
+      </header>
 
       {/* Scrollable content area */}
       <div className="flex-1 flex flex-col items-center px-4 md:px-8 pb-44 overflow-y-auto scrollbar-hide">
@@ -229,6 +264,15 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               transition={{ duration: 0.4 }}
               className="flex-1 flex flex-col items-center justify-center min-h-[80vh] max-w-2xl w-full pt-6"
             >
+              <VoxQueryLogo variant="hero" className="mb-6" />
+
+              <PriorSessionMemoryCard
+                questions={priorQuestions}
+                onSelectQuestion={(q) => {
+                  engine.setSubmittedText(q);
+                  engine.submitQuery(q);
+                }}
+              />
               <MorningBriefingCard
                 token={token}
                 onSelectInsight={(q) => {
@@ -239,16 +283,16 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               />
 
               {/* Architectural Engine Flow Chips */}
-              <div className="flex items-center justify-center gap-2 mb-10 text-[11px] font-mono text-gray-400">
-                <span className="px-3 py-1 rounded-full bg-white/5 border border-white/10">
+              <div className="flex items-center justify-center gap-2 mb-10 text-[11px] font-mono text-slate-300">
+                <span className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700/60 shadow-sm text-slate-200">
                   Scheduled queries nightly
                 </span>
-                <span>→</span>
-                <span className="px-3 py-1 rounded-full bg-white/5 border border-white/10">
+                <span className="text-cyan-400">→</span>
+                <span className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700/60 shadow-sm text-slate-200">
                   Anomaly detection (z-score, WoW drift)
                 </span>
-                <span>→</span>
-                <span className="px-3 py-1 rounded-full bg-white/5 border border-white/10">
+                <span className="text-cyan-400">→</span>
+                <span className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700/60 shadow-sm text-slate-200">
                   Priority-ranked alerts
                 </span>
               </div>
@@ -263,10 +307,10 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 onStop={engine.stopRecording}
               />
 
-              <h2 className="mt-10 text-2xl md:text-3xl font-light text-[var(--text-primary)] text-center tracking-tight">
+              <h2 className="mt-10 text-2xl md:text-3xl font-bold text-white text-center tracking-tight">
                 What would you like to know?
               </h2>
-              <p className="mt-3 text-sm text-[var(--text-muted)] text-center">
+              <p className="mt-3 text-sm text-slate-300 font-medium text-center">
                 Tap the orb to speak, or try one of these:
               </p>
 
@@ -442,7 +486,12 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               />
 
               {/* Phase 3.1: Inline anomaly nudge */}
-              <InlineAnomalyNudge onAskBreakdown={engine.submitQuery} />
+              {engine.lastResult?.resultData?.anomaly && (
+                <InlineAnomalyNudge
+                  anomaly={engine.lastResult.resultData.anomaly}
+                  onAskBreakdown={engine.submitQuery}
+                />
+              )}
 
               {/* Follow-up suggestions */}
               <FollowUpSuggestions

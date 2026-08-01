@@ -15,5 +15,16 @@ describe("ExecutiveAudioPlayer", () => {
 
     render(<ExecutiveAudioPlayer textToSpeak="Test briefing" />);
     expect(screen.getByText("Morning Voice Podcast Summary")).toBeInTheDocument();
+    expect(screen.getByText("Native Speech Synthesis (Fallback)")).toBeInTheDocument();
+  });
+
+  it("renders VoxQuery Voice (Asteria) when voiceUrl is provided", () => {
+    vi.stubGlobal("speechSynthesis", {
+      cancel: vi.fn(),
+      speak: vi.fn(),
+    });
+
+    render(<ExecutiveAudioPlayer textToSpeak="Test briefing" voiceUrl="http://localhost/audio.mp3" />);
+    expect(screen.getByText("VoxQuery Voice (Asteria)")).toBeInTheDocument();
   });
 });

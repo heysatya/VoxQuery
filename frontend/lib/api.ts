@@ -263,6 +263,16 @@ export async function fetchVersion(authToken?: string | null): Promise<{ git_sha
   return request<{ git_sha: string; version: string }>("/api/version", {}, authToken);
 }
 
+export async function fetchPriorSessionSummary(
+  currentSessionId?: string,
+  authToken?: string | null
+): Promise<{ questions: string[] }> {
+  const path = currentSessionId
+    ? `/api/memory/prior-session-summary?current_session_id=${encodeURIComponent(currentSessionId)}`
+    : "/api/memory/prior-session-summary";
+  return request<{ questions: string[] }>(path, {}, authToken);
+}
+
 function socketUrl(path: string): string {
   const url = new URL(apiUrl);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";

@@ -85,6 +85,8 @@ export type ResultResponse = {
     sql_hash?: string | null;
     data_freshness_note?: string | null;
   } | null;
+  anomaly?: BriefingAnomaly | null;
+  anomalies?: BriefingAnomaly[];
   from_cache: boolean;
 };
 
