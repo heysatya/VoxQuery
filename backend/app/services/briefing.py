@@ -100,7 +100,7 @@ async def generate_morning_briefing(
             # Query 2: Weekly trend series for outlier anomaly detection
             trend_sql = canonicalize_readonly_sql(
                 "SELECT "
-                "DATE_TRUNC('week', orders.order_purchase_timestamp) AS order_week, "
+                "DATE_TRUNC('week', TRY_TO_TIMESTAMP(orders.order_purchase_timestamp)) AS order_week, "
                 "SUM(order_items.price) AS weekly_revenue "
                 "FROM order_items "
                 "JOIN orders ON order_items.order_id = orders.order_id "

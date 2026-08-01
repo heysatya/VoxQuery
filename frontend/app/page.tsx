@@ -313,7 +313,19 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 <span>Connected to your workspace</span>
               </div>
 
-              <div className="mt-10 w-full">
+              {/* Home Screen Briefing Summary Card */}
+              <div className="mt-8 w-full max-w-xl">
+                <MorningBriefingCard
+                  token={token}
+                  onSelectInsight={(q) => {
+                    engine.setSubmittedText(q);
+                    engine.submitQuery(q);
+                  }}
+                  onAskFollowUp={engine.toggleRecording}
+                />
+              </div>
+
+              <div className="mt-6 w-full">
                 <PriorSessionMemoryCard
                   questions={priorQuestions}
                   onSelectQuestion={(q) => {

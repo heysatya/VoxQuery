@@ -125,9 +125,9 @@ export function VoiceVisualizer({
 
       <button
         type="button"
-        aria-label={isRecording ? "Stop recording" : "Start recording"}
-        disabled={disabled || isConnecting || isProcessing}
-        onClick={isRecording ? onStop : onPrimaryAction}
+        aria-label={isRecording || isConnecting ? "Stop recording" : "Start recording"}
+        disabled={disabled || isProcessing}
+        onClick={isRecording || isConnecting ? onStop : onPrimaryAction}
         className={cn(
           "z-10 flex items-center justify-center rounded-full text-white transition-all duration-300 touch-target",
           outerDimensions.btnSize,
