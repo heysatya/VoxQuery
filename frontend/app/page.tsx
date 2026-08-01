@@ -3,7 +3,7 @@
 import { OrganizationList, OrganizationSwitcher, SignInButton, UserButton, useAuth, useOrganization } from "@clerk/nextjs";
 import React, { useMemo, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, CheckCircle2 } from "lucide-react";
 import { useVoxQuerySession, type VoxQueryAuthRelay } from "./hooks/useVoxQuerySession";
 import { VoiceVisualizer } from "./components/hero/VoiceVisualizer";
 import { MorningBriefingCard } from "./components/briefing/MorningBriefingCard";
@@ -27,7 +27,7 @@ import type { LastResult } from "../lib/types";
 
 const authMode = process.env.NEXT_PUBLIC_AUTH_MODE ?? "fake";
 
-/* -- Auth wrappers (unchanged contracts) ----------------------- */
+/* ── Auth wrappers ────────────────────────────────────────────── */
 
 export default function HomePage() {
   if (authMode === "clerk") return <ClerkHomePage />;
@@ -53,20 +53,20 @@ function ClerkHomePage() {
 
   if (!isLoaded) {
     return (
-      <main className="min-h-screen flex items-center justify-center">
-        <div className="text-[var(--text-muted)] animate-pulse">Loading authentication...</div>
+      <main className="min-h-screen bg-[#090B10] flex items-center justify-center">
+        <div className="text-[var(--text-muted)] text-sm font-medium animate-pulse">Loading workspace...</div>
       </main>
     );
   }
 
   if (!isSignedIn) {
     return (
-      <main className="min-h-screen flex flex-col items-center justify-center p-4">
+      <main className="min-h-screen bg-[#090B10] flex flex-col items-center justify-center p-4">
         <section className="glass-card p-8 max-w-md w-full text-center space-y-6">
-          <h1 className="text-3xl font-bold text-[var(--text-primary)]">VoxQuery</h1>
-          <p className="text-[var(--text-secondary)]">Sign in to start a secure voice analytics session.</p>
+          <VoxQueryLogo variant="auth" />
+          <p className="text-sm text-[var(--text-secondary)]">Sign in to start your secure voice analytics session.</p>
           <SignInButton mode="modal">
-            <button className="w-full py-3 px-4 bg-[var(--accent-blue)] hover:bg-[var(--accent-blue)]/80 text-white font-medium rounded-xl transition-colors">
+            <button className="w-full py-3 px-4 bg-[var(--accent-blue)] hover:bg-[var(--accent-blue)]/80 text-white font-semibold rounded-xl transition-colors touch-target">
               Sign in
             </button>
           </SignInButton>
@@ -77,12 +77,13 @@ function ClerkHomePage() {
 
   if (!hasActiveOrg) {
     return (
-      <main className="min-h-screen flex flex-col items-center justify-center p-4">
+      <main className="min-h-screen bg-[#090B10] flex flex-col items-center justify-center p-4">
         <div className="fixed top-4 right-4 z-50">
           <div className="glass-card p-1 rounded-full"><UserButton /></div>
         </div>
         <section className="glass-card p-8 max-w-lg w-full text-center space-y-6">
-          <h1 className="text-2xl font-bold text-[var(--text-primary)]">Select or Create an Organization</h1>
+          <VoxQueryLogo variant="auth" />
+          <h1 className="text-xl font-bold text-white">Select or Create an Organization</h1>
           <p className="text-[var(--text-secondary)] text-sm">VoxQuery requires an active Organization to isolate your company data.</p>
           <div className="flex justify-center pt-2">
             <OrganizationList hidePersonal={true} afterSelectOrganizationUrl="/" afterCreateOrganizationUrl="/" />
@@ -203,25 +204,29 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
     }
   };
 
-  // Phase 3.2: derive visible state from explicit lifecycle dimensions
   const isReviewing = engine.voiceState === "reviewing";
   const isActive = engine.recordingState !== "idle" || engine.pipelineInFlight;
   const hasResult = !!engine.lastResult;
   const isError = engine.turnState === "recoverable_error" || engine.turnState === "fatal_error";
 
-  // Deterministic UI state
   const uiState: "ready" | "reviewing" | "active" | "insight" =
     isReviewing ? "reviewing" :
     isActive ? "active" :
     hasResult ? "insight" : "ready";
 
-  // Phase 3.2: status label derived from explicit state
-  const statusLabel = getStatusLabel(engine.voiceState, engine.turnState, engine.ttsState);
+  const rawStatusLabel = getStatusLabel(engine.voiceState, engine.turnState, engine.ttsState);
+
+  // Executive human-readable status mapping
+  const humanStatusLabel =
+    engine.recordingState === "recording" ? "Listening..." :
+    engine.pipelineInFlight ? "Analyzing your data..." :
+    engine.ttsState === "playing" ? "Speaking..." :
+    rawStatusLabel;
 
   return (
-    <main className="min-h-screen flex flex-col relative">
-      {/* Persistent Top Header Bar */}
-      <header className="w-full px-6 py-4 flex items-center justify-between z-40 relative border-b border-slate-800/40 bg-slate-950/60 backdrop-blur-xl">
+    <main className="min-h-screen flex flex-col relative bg-[#090B10]">
+      {/* Restrained Top Header Bar */}
+      <header className="w-full px-6 py-3.5 flex items-center justify-between z-40 relative border-b border-white/5 bg-[#090B10]/80 backdrop-blur-xl">
         <div className="flex items-center gap-3">
           <VoxQueryLogo variant="header" />
         </div>
@@ -230,27 +235,24 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
           <button
             type="button"
             onClick={() => setBriefingDrawerOpen(true)}
-            className="px-3.5 py-1.5 rounded-full bg-slate-900/90 border border-slate-700/60 text-slate-100 text-xs font-semibold shadow-lg hover:border-cyan-400/50 hover:bg-slate-800 transition-all flex items-center gap-2 backdrop-blur-xl"
-            aria-label="Open morning briefing drawer"
+            className="px-3.5 py-1.5 rounded-full glass-card text-white text-xs font-semibold hover:border-[var(--accent-blue)]/50 transition-all flex items-center gap-2 touch-target"
+            aria-label="Open today's briefing drawer"
           >
             <span>
               {anomalyCount === null
                 ? "☀️ Today's briefing"
                 : anomalyCount === 0
-                ? "☀️ Today's briefing — No flags"
+                ? "☀️ Today's briefing — Clear"
                 : anomalyCount === 1
                 ? "☀️ Today's briefing — 1 flag"
                 : `☀️ Today's briefing — ${anomalyCount} flags`}
             </span>
           </button>
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800/80 text-slate-300 border border-slate-700/50 hidden sm:inline-block">
-            SHA: {gitSha.slice(0, 7)}
-          </span>
         </div>
       </header>
 
-      {/* Scrollable content area */}
-      <div className="flex-1 flex flex-col items-center px-4 md:px-8 pb-44 overflow-y-auto scrollbar-hide">
+      {/* Scrollable content area with sufficient bottom padding for fixed query dock */}
+      <div className="flex-1 flex flex-col items-center px-4 md:px-8 pb-48 overflow-y-auto scrollbar-hide">
 
         <AnimatePresence mode="wait">
 
@@ -262,59 +264,33 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0, y: -20 }}
               transition={{ duration: 0.4 }}
-              className="flex-1 flex flex-col items-center justify-center min-h-[80vh] max-w-2xl w-full pt-6"
+              className="flex-1 flex flex-col items-center justify-center min-h-[75vh] max-w-2xl w-full pt-8"
             >
-              <VoxQueryLogo variant="hero" className="mb-6" />
+              <VoxQueryLogo variant="hero" className="mb-8" />
 
-              <PriorSessionMemoryCard
-                questions={priorQuestions}
-                onSelectQuestion={(q) => {
-                  engine.setSubmittedText(q);
-                  engine.submitQuery(q);
-                }}
-              />
-              <MorningBriefingCard
-                token={token}
-                onSelectInsight={(q) => {
-                  engine.setSubmittedText(q);
-                  engine.submitQuery(q);
-                }}
-                onAskFollowUp={engine.toggleRecording}
-              />
-
-              {/* Architectural Engine Flow Chips */}
-              <div className="flex items-center justify-center gap-2 mb-10 text-[11px] font-mono text-slate-300">
-                <span className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700/60 shadow-sm text-slate-200">
-                  Scheduled queries nightly
-                </span>
-                <span className="text-cyan-400">→</span>
-                <span className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700/60 shadow-sm text-slate-200">
-                  Anomaly detection (z-score, WoW drift)
-                </span>
-                <span className="text-cyan-400">→</span>
-                <span className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700/60 shadow-sm text-slate-200">
-                  Priority-ranked alerts
-                </span>
+              {/* Voice Visualizer Orb - Primary Interaction */}
+              <div className="my-4 flex flex-col items-center">
+                <VoiceVisualizer
+                  state={engine.recordingState}
+                  analyser={engine.audioAnalyserNode}
+                  disabled={!engine.isReady || engine.pipelineInFlight}
+                  pipelineStage={engine.pipelineStage}
+                  partialTranscript={engine.partialTranscript}
+                  onPrimaryAction={engine.startRecording}
+                  onStop={engine.stopRecording}
+                  size="hero"
+                />
               </div>
 
-              <VoiceVisualizer
-                state={engine.recordingState}
-                analyser={engine.audioAnalyserNode}
-                disabled={!engine.isReady || engine.pipelineInFlight}
-                pipelineStage={engine.pipelineStage}
-                partialTranscript={engine.partialTranscript}
-                onPrimaryAction={engine.startRecording}
-                onStop={engine.stopRecording}
-              />
-
-              <h2 className="mt-10 text-2xl md:text-3xl font-bold text-white text-center tracking-tight">
+              <h2 className="mt-8 text-2xl md:text-3xl font-extrabold text-white text-center tracking-tight">
                 What would you like to know?
               </h2>
-              <p className="mt-3 text-sm text-slate-300 font-medium text-center">
+              <p className="mt-2 text-xs md:text-sm text-[var(--text-secondary)] font-medium text-center">
                 Tap the orb to speak, or try one of these:
               </p>
 
-              <div className="mt-6 flex flex-wrap justify-center gap-2">
+              {/* Starter questions */}
+              <div className="mt-5 flex flex-wrap justify-center gap-2.5 max-w-lg">
                 {STARTER_QUESTIONS.map((q) => (
                   <button
                     key={q}
@@ -324,21 +300,37 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                       engine.submitQuery(q);
                     }}
                     disabled={!engine.isReady}
-                    className="px-4 py-2.5 rounded-full border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--accent-blue)]/30 hover:bg-[var(--bg-elevated)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] transition-all disabled:opacity-50"
+                    className="px-4 py-2 rounded-full border border-white/10 bg-[var(--bg-surface)] text-xs font-medium text-[var(--text-secondary)] hover:text-white hover:border-[var(--accent-blue)]/40 hover:bg-[var(--bg-elevated)] transition-all disabled:opacity-50 touch-target flex items-center"
                   >
                     {q}
                   </button>
                 ))}
               </div>
 
-              <div className="mt-12 w-full">
+              {/* Quiet workspace connection status indicator */}
+              <div className="mt-8 flex items-center justify-center gap-2 text-xs text-[var(--text-muted)] font-medium">
+                <CheckCircle2 className="w-3.5 h-3.5 text-[var(--accent-green)]" />
+                <span>Connected to your workspace</span>
+              </div>
+
+              <div className="mt-10 w-full">
+                <PriorSessionMemoryCard
+                  questions={priorQuestions}
+                  onSelectQuestion={(q) => {
+                    engine.setSubmittedText(q);
+                    engine.submitQuery(q);
+                  }}
+                />
+              </div>
+
+              {/* Saved metrics workspace */}
+              <div className="mt-6 w-full">
                 <ExecutiveWorkspace
                   pinnedWidgets={pinnedWidgets}
                   onRemoveWidget={handleRemoveWidget}
                 />
               </div>
 
-              {/* Phase 3.3: show error notice in ready state if a prior query failed */}
               {isError && (
                 <div className="mt-6 w-full max-w-xl">
                   <FailureNotice
@@ -351,7 +343,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
             </motion.div>
           )}
 
-          {/* ── STATE 2: REVIEWING (transcript review) ──────────── */}
+          {/* ── STATE 2: REVIEWING ──────────────────────────────── */}
           {uiState === "reviewing" && (
             <motion.div
               key="reviewing"
@@ -361,7 +353,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               transition={{ duration: 0.3 }}
               className="flex-1 flex flex-col items-center justify-center min-h-[60vh] max-w-2xl w-full pt-10"
             >
-              <h2 className="text-xl font-light text-[var(--text-primary)] text-center mb-6">
+              <h2 className="text-xl font-normal text-white text-center mb-6 tracking-tight">
                 Review before sending
               </h2>
               <TranscriptReviewPanel
@@ -378,7 +370,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
             </motion.div>
           )}
 
-          {/* ── STATE 3: ACTIVE (recording / processing) ────────── */}
+          {/* ── STATE 3: ACTIVE ─────────────────────────────────── */}
           {uiState === "active" && (
             <motion.div
               key="active"
@@ -386,7 +378,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0, y: -20 }}
               transition={{ duration: 0.4 }}
-              className="flex-1 flex flex-col items-center justify-center min-h-[80vh] max-w-2xl w-full"
+              className="flex-1 flex flex-col items-center justify-center min-h-[75vh] max-w-2xl w-full"
             >
               <VoiceVisualizer
                 state={engine.recordingState}
@@ -396,18 +388,17 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 partialTranscript={engine.partialTranscript}
                 onPrimaryAction={engine.startRecording}
                 onStop={engine.stopRecording}
+                size="hero"
               />
 
-              {/* User's question */}
               <motion.p
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mt-10 text-xl md:text-2xl text-[var(--text-primary)] text-center font-light max-w-lg"
+                className="mt-8 text-xl md:text-2xl text-white text-center font-light max-w-lg"
               >
                 {engine.partialTranscript || engine.submittedText || "Listening..."}
               </motion.p>
 
-              {/* Phase 3.2: status label derived from explicit state */}
               {engine.pipelineInFlight && (
                 <motion.div
                   initial={{ opacity: 0 }}
@@ -421,8 +412,8 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                       className="w-full h-full bg-[var(--accent-amber)]"
                     />
                   </div>
-                  <span className="text-sm text-[var(--accent-amber)]">
-                    {statusLabel}
+                  <span className="text-sm font-medium text-[var(--accent-amber)]">
+                    {humanStatusLabel}
                   </span>
                 </motion.div>
               )}
@@ -437,23 +428,16 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.5, ease: [0.23, 1, 0.32, 1] }}
-              className="w-full max-w-3xl pt-10 md:pt-16"
+              className="w-full max-w-3xl pt-8 md:pt-12"
             >
-              {/* Phase 3.4: expandable thread history */}
-              <ThreadHistory
-                turns={engine.turnHistory}
-                activeTurnId={engine.lastResult.turnId}
-              />
-
-              {/* Question echo */}
+              {/* Question Echo */}
               <div className="flex items-start gap-3 mb-6">
                 <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[var(--accent-blue)] to-indigo-600 flex-shrink-0 mt-0.5" />
-                <p className="text-base md:text-lg text-[var(--text-secondary)] font-light leading-snug">
+                <p className="text-base md:text-lg text-white font-medium leading-snug">
                   {engine.lastResult.submittedText}
                 </p>
               </div>
 
-              {/* Phase 3.3: TTS failure notice */}
               {engine.ttsState === "failed" && (
                 <div className="mb-4">
                   <FailureNotice
@@ -463,7 +447,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 </div>
               )}
 
-              {/* Narrative */}
+              {/* Insight Narrative - Visual Focal Point */}
               <InsightNarrative
                 text={engine.lastResult.resultData.tts_text}
                 isMuted={engine.isMuted}
@@ -472,7 +456,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 onTogglePause={engine.isPaused ? engine.resumeTTS : engine.pauseTTS}
               />
 
-              {/* Chart card */}
+              {/* Data & Trust Glass Panel */}
               <DataGlassPanel
                 result={engine.lastResult}
                 feedbackRating={engine.feedbackRating}
@@ -485,7 +469,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 onPin={handlePinWidget}
               />
 
-              {/* Phase 3.1: Inline anomaly nudge */}
+              {/* Inline anomaly nudge */}
               {engine.lastResult?.resultData?.anomaly && (
                 <InlineAnomalyNudge
                   anomaly={engine.lastResult.resultData.anomaly}
@@ -500,20 +484,32 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 disabled={engine.pipelineInFlight}
               />
 
-              <div className="mt-8 w-full">
+              {/* Expandable thread history */}
+              <div className="mt-8">
+                <ThreadHistory
+                  turns={engine.turnHistory}
+                  activeTurnId={engine.lastResult.turnId}
+                />
+              </div>
+
+              {/* Conversation context graph */}
+              <div className="mt-6 w-full">
+                <h4 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
+                  Conversation context
+                </h4>
                 <ExecutiveMemoryGraph
                   sessionId={engine.session.sessionId}
                   authToken={token}
                 />
               </div>
 
-              {/* New conversation button */}
-              <div className="mt-10 mb-4 flex justify-center">
+              {/* New conversation control */}
+              <div className="mt-8 mb-4 flex justify-center">
                 <button
                   type="button"
                   onClick={engine.resetConversation}
                   aria-label="New conversation"
-                  className="flex items-center gap-2 px-4 py-2 rounded-full text-sm text-[var(--text-muted)] hover:text-[var(--text-secondary)] border border-[var(--border)] hover:bg-[var(--bg-surface)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] transition-all"
+                  className="flex items-center gap-2 px-4 py-2 rounded-full text-xs font-medium text-[var(--text-muted)] hover:text-white border border-white/10 hover:bg-[var(--bg-surface)] transition-all touch-target"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   <span>New conversation</span>
@@ -525,10 +521,9 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
         </AnimatePresence>
       </div>
 
-      {/* ── Fixed bottom dock ─────────────────────────────────── */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 md:p-6 bg-gradient-to-t from-[var(--bg-base)] via-[var(--bg-base)]/95 to-transparent pointer-events-none z-20">
+      {/* Fixed bottom query dock */}
+      <div className="fixed bottom-0 left-0 right-0 p-4 md:p-6 bg-gradient-to-t from-[#090B10] via-[#090B10]/95 to-transparent pointer-events-none z-20">
         <div className="pointer-events-auto max-w-2xl mx-auto space-y-2">
-          {/* Phase 3.3: error/warning notices rendered above the dock */}
           <AnimatePresence>
             {(engine.notice.severity === "error" || engine.notice.severity === "warning") &&
               uiState !== "ready" && (
@@ -560,7 +555,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
         </div>
       </div>
 
-      {/* ── Clarification overlay ─────────────────────────────── */}
+      {/* Clarification overlay */}
       <AnimatePresence>
         {engine.clarification.pending && (
           <ClarificationOverlay
@@ -570,10 +565,10 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
         )}
       </AnimatePresence>
 
-      {/* ── Persistent Briefing Drawer Overlay (Phase 1.3) ─── */}
+      {/* Briefing Drawer Overlay */}
       <AnimatePresence>
         {briefingDrawerOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
             <div className="w-full max-w-xl">
               <MorningBriefingCard
                 token={token}
@@ -594,7 +589,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
         )}
       </AnimatePresence>
 
-      {/* ── Drilldown modal ─────────────────────────────────────── */}
+      {/* Drilldown modal */}
       <RowDrilldownModal
         isOpen={!!drilldownTurnId}
         onClose={() => setDrilldownTurnId(null)}
@@ -602,9 +597,9 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
         authToken={token}
       />
 
-      {/* Version Footer (Phase 1.5) */}
-      <div className="fixed bottom-2 right-4 text-[10px] font-mono text-gray-500 z-30 pointer-events-none">
-        Build: {gitSha}
+      {/* Quiet Version Footer */}
+      <div className="fixed bottom-2 right-4 text-[10px] font-mono text-[var(--text-muted)] z-10 pointer-events-none opacity-60">
+        Build: {gitSha.slice(0, 7)}
       </div>
     </main>
   );

@@ -1,0 +1,26 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="vq-mark-grad-primary" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="50%" stop-color="#0284C7" />
+      <stop offset="100%" stop-color="#34D399" />
+    </linearGradient>
+    <linearGradient id="vq-mark-grad-glow" x1="12" y1="8" x2="52" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#34D399" stop-opacity="0.6" />
+    </linearGradient>
+  </defs>
+
+  <!-- Ambient Outer Glow Ring -->
+  <circle cx="32" cy="32" r="28" fill="url(#vq-mark-grad-primary)" fill-opacity="0.08" stroke="url(#vq-mark-grad-primary)" stroke-opacity="0.2" stroke-width="1.5" />
+
+  <!-- Dynamic Waveform Pillars forming an isometric/cubic audio voice structure -->
+  <rect x="18" y="26" width="4" height="12" rx="2" fill="url(#vq-mark-grad-primary)" />
+  <rect x="25" y="18" width="4" height="28" rx="2" fill="url(#vq-mark-grad-primary)" />
+  <rect x="32" y="12" width="4" height="40" rx="2" fill="url(#vq-mark-grad-primary)" />
+  <rect x="39" y="20" width="4" height="24" rx="2" fill="url(#vq-mark-grad-primary)" />
+  <rect x="46" y="28" width="4" height="8" rx="2" fill="url(#vq-mark-grad-primary)" opacity="0.85" />
+
+  <!-- Subtle Horizontal Soundwave Horizon Line -->
+  <path d="M12 32H52" stroke="#38BDF8" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="2 3" opacity="0.4" />
+</svg>

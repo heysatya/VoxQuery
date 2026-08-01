@@ -3,36 +3,32 @@
 import React from "react";
 import Image from "next/image";
 
-type VoxQueryLogoProps = {
-  variant?: "header" | "hero" | "compact";
+export type VoxQueryLogoVariant = "header" | "hero" | "compact" | "auth" | "admin";
+
+export type VoxQueryLogoProps = {
+  variant?: VoxQueryLogoVariant;
   className?: string;
 };
 
 export function VoxQueryLogo({ variant = "header", className = "" }: VoxQueryLogoProps) {
   if (variant === "hero") {
     return (
-      <div className={`flex flex-col items-center justify-center text-center group ${className}`}>
-        {/* Glow ambient background halo */}
-        <div className="relative flex items-center justify-center mb-4">
-          <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-sky-500 via-cyan-400 to-emerald-400 opacity-60 blur-xl group-hover:opacity-80 transition duration-500" />
-          <div className="relative rounded-2xl overflow-hidden border border-cyan-400/40 bg-slate-950 p-1.5 shadow-[0_0_30px_rgba(56,189,248,0.3)]">
-            <Image
-              src="/logo.png"
-              alt="VoxQuery Logo"
-              width={260}
-              height={160}
-              priority
-              className="h-28 w-auto object-contain rounded-xl transition-transform duration-500 group-hover:scale-105"
-            />
-          </div>
+      <div className={`flex flex-col items-center justify-center text-center ${className}`}>
+        <div className="flex items-center gap-3.5 mb-2">
+          <Image
+            src="/brand/voxquery-mark.svg"
+            alt="VoxQuery Icon Mark"
+            width={64}
+            height={64}
+            priority
+            className="h-14 md:h-16 w-auto object-contain"
+          />
+          <span className="text-4xl md:text-5xl font-extrabold tracking-tight text-white">
+            Vox<span className="text-[var(--accent-blue)]">Query</span>
+          </span>
         </div>
-
-        {/* Crisp Gradient Typography */}
-        <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-100 to-cyan-200">
-          VoxQuery
-        </h1>
-        <p className="mt-1 text-xs md:text-sm font-medium tracking-wide text-emerald-400 uppercase font-mono flex items-center gap-2">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        <p className="text-xs md:text-sm font-medium tracking-wide text-[var(--accent-blue)] uppercase font-mono flex items-center gap-2 mt-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-green)] animate-pulse" />
           Voice-Driven Data Analysis
         </p>
       </div>
@@ -42,41 +38,80 @@ export function VoxQueryLogo({ variant = "header", className = "" }: VoxQueryLog
   if (variant === "compact") {
     return (
       <div className={`flex items-center gap-2 ${className}`}>
-        <div className="relative rounded-lg overflow-hidden border border-cyan-500/30 bg-slate-950 p-0.5 shadow-[0_0_12px_rgba(56,189,248,0.25)]">
+        <Image
+          src="/brand/voxquery-mark.svg"
+          alt="VoxQuery Icon Mark"
+          width={28}
+          height={28}
+          className="h-6 w-6 object-contain"
+        />
+        <span className="text-sm font-bold tracking-tight text-white">
+          Vox<span className="text-[var(--accent-blue)]">Query</span>
+        </span>
+      </div>
+    );
+  }
+
+  if (variant === "auth") {
+    return (
+      <div className={`flex flex-col items-center justify-center text-center ${className}`}>
+        <div className="flex items-center gap-3 mb-2">
           <Image
-            src="/logo.png"
-            alt="VoxQuery Logo"
-            width={32}
-            height={32}
-            className="h-6 w-6 object-contain rounded"
+            src="/brand/voxquery-mark.svg"
+            alt="VoxQuery Icon Mark"
+            width={52}
+            height={52}
+            priority
+            className="h-12 w-auto object-contain"
           />
+          <span className="text-3xl font-extrabold tracking-tight text-white">
+            Vox<span className="text-[var(--accent-blue)]">Query</span>
+          </span>
         </div>
-        <span className="text-sm font-bold tracking-tight text-white">VoxQuery</span>
+        <span className="text-xs text-[var(--text-muted)] font-medium">
+          Ambient Voice Analytics
+        </span>
+      </div>
+    );
+  }
+
+  if (variant === "admin") {
+    return (
+      <div className={`flex items-center gap-2.5 ${className}`}>
+        <Image
+          src="/brand/voxquery-mark.svg"
+          alt="VoxQuery Icon Mark"
+          width={28}
+          height={28}
+          priority
+          className="h-7 w-auto object-contain"
+        />
+        <div className="flex items-center gap-2 leading-none">
+          <span className="text-base font-extrabold tracking-tight text-white">
+            Vox<span className="text-[var(--accent-blue)]">Query</span>
+          </span>
+          <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--accent-blue)]/15 text-[var(--accent-blue)] border border-[var(--accent-blue)]/30">
+            Admin
+          </span>
+        </div>
       </div>
     );
   }
 
   // Default: "header"
   return (
-    <div className={`flex items-center gap-3 px-3 py-1.5 rounded-full bg-slate-900/90 border border-cyan-500/30 shadow-[0_0_20px_rgba(56,189,248,0.2)] backdrop-blur-xl transition-all hover:border-cyan-400/50 ${className}`}>
-      <div className="relative rounded-lg overflow-hidden border border-cyan-400/30 bg-slate-950 p-0.5">
-        <Image
-          src="/logo.png"
-          alt="VoxQuery Logo"
-          width={40}
-          height={24}
-          priority
-          className="h-6 w-auto object-contain rounded"
-        />
-      </div>
-      <div className="flex flex-col leading-none">
-        <span className="text-xs font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-sky-100 to-cyan-300">
-          VoxQuery
-        </span>
-        <span className="text-[9px] font-semibold text-emerald-400 font-mono tracking-wider mt-0.5">
-          Voice Analyst
-        </span>
-      </div>
+    <div className={`flex items-center gap-2.5 ${className}`}>
+      <Image
+        src="/brand/voxquery-mark.svg"
+        alt="VoxQuery Icon Mark"
+        width={28}
+        height={28}
+        priority
+        className="h-7 w-auto object-contain"
+      />
+      <span className="text-base font-extrabold tracking-tight text-white leading-none">
+        Vox<span className="text-[var(--accent-blue)]">Query</span>
+      </span>
     </div>
   );
 }

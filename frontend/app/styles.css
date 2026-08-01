@@ -6,20 +6,21 @@
 
 @layer base {
   :root {
-    --bg-base: #060913;
-    --bg-surface: #0f172a;
-    --bg-elevated: #1e293b;
-    --border: rgba(255, 255, 255, 0.12);
-    --text-primary: #FFFFFF;
-    --text-secondary: #E2E8F0;
-    --text-muted: #94A3B8;
+    --bg-base: #090B10;
+    --bg-surface: #10141C;
+    --bg-elevated: #171D28;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-hover: rgba(56, 189, 248, 0.25);
+    --text-primary: #F8FAFC;
+    --text-secondary: #CBD5E1;
+    --text-muted: #64748B;
     --accent-blue: #38BDF8;
-    --accent-green: #34D399;
-    --accent-amber: #FBBF24;
+    --accent-green: #10B981;
+    --accent-amber: #F59E0B;
     --accent-rose: #F43F5E;
     --chart-1: #38BDF8;
     --chart-2: #818CF8;
-    --chart-3: #34D399;
+    --chart-3: #10B981;
   }
 
   * {
@@ -29,9 +30,9 @@
   body {
     background-color: var(--bg-base);
     background-image: 
-      radial-gradient(at 0% 0%, rgba(14, 165, 233, 0.10) 0px, transparent 50%),
-      radial-gradient(at 100% 0%, rgba(52, 211, 153, 0.10) 0px, transparent 50%),
-      radial-gradient(at 50% 100%, rgba(99, 102, 241, 0.08) 0px, transparent 50%);
+      radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.04) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, rgba(16, 185, 129, 0.04) 0px, transparent 50%),
+      radial-gradient(at 50% 100%, rgba(99, 102, 241, 0.03) 0px, transparent 50%);
     background-attachment: fixed;
     color: var(--text-primary);
     -webkit-font-smoothing: antialiased;
@@ -41,28 +42,25 @@
 
 @layer utilities {
   .glass-card {
-    background: rgba(15, 23, 42, 0.85);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    border-radius: 20px;
+    background: rgba(16, 20, 28, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
   }
 
-  .glass-card-neon {
-    background: rgba(15, 23, 42, 0.85);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid rgba(56, 189, 248, 0.3);
-    box-shadow: 0 0 25px rgba(56, 189, 248, 0.15), 0 8px 32px rgba(0, 0, 0, 0.5);
+  .glass-card-subtle {
+    background: rgba(16, 20, 28, 0.6);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 16px;
   }
 
-  .glow-border-cyan {
-    box-shadow: 0 0 15px rgba(56, 189, 248, 0.3);
-  }
-
-  .glow-border-emerald {
-    box-shadow: 0 0 15px rgba(52, 211, 153, 0.3);
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
   }
 
   .scrollbar-hide {

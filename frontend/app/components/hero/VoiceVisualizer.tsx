@@ -14,6 +14,7 @@ type VoiceVisualizerProps = {
   partialTranscript: string;
   onPrimaryAction: () => void | Promise<void>;
   onStop: () => void;
+  size?: "hero" | "compact";
 };
 
 export function VoiceVisualizer({
@@ -23,11 +24,14 @@ export function VoiceVisualizer({
   pipelineStage,
   partialTranscript,
   onPrimaryAction,
-  onStop
+  onStop,
+  size = "hero"
 }: VoiceVisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number>();
   const prefersReducedMotion = useReducedMotion();
+
+  const outerDimensions = size === "hero" ? { w: 260, h: 260, btnSize: "h-24 w-24", iconSize: "h-9 w-9" } : { w: 140, h: 140, btnSize: "h-16 w-16", iconSize: "h-6 w-6" };
 
   useEffect(() => {
     if (prefersReducedMotion || !analyser || state !== "recording" || !canvasRef.current) {
@@ -53,17 +57,17 @@ export function VoiceVisualizer({
       let sum = 0;
       for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
       const avg = sum / dataArray.length;
-      const pulse = 1 + (avg / 255) * 0.4;
+      const pulse = 1 + (avg / 255) * 0.35;
 
       ctx.save();
       ctx.translate(w / 2, h / 2);
       ctx.scale(pulse, pulse);
       ctx.beginPath();
-      ctx.arc(0, 0, radius - 12, 0, 2 * Math.PI);
+      ctx.arc(0, 0, radius - 10, 0, 2 * Math.PI);
       const g = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
-      g.addColorStop(0, "rgba(79, 142, 247, 0.6)");
-      g.addColorStop(0.6, "rgba(99, 102, 241, 0.3)");
-      g.addColorStop(1, "rgba(79, 142, 247, 0)");
+      g.addColorStop(0, "rgba(56, 189, 248, 0.5)");
+      g.addColorStop(0.6, "rgba(14, 165, 233, 0.2)");
+      g.addColorStop(1, "rgba(56, 189, 248, 0)");
       ctx.fillStyle = g;
       ctx.fill();
       ctx.restore();
@@ -78,48 +82,44 @@ export function VoiceVisualizer({
   const isProcessing = state === "processing" || pipelineStage !== null;
 
   const orbGlow = isRecording
-    ? "shadow-[0_0_80px_rgba(79,142,247,0.5),0_0_140px_rgba(99,102,241,0.2)]"
+    ? "shadow-[0_0_60px_rgba(56,189,248,0.4),0_0_100px_rgba(14,165,233,0.2)]"
     : isProcessing
-    ? "shadow-[0_0_60px_rgba(251,191,36,0.3),0_0_100px_rgba(251,191,36,0.1)]"
-    : "shadow-[0_0_40px_rgba(79,142,247,0.15)] hover:shadow-[0_0_60px_rgba(79,142,247,0.3)]";
+    ? "shadow-[0_0_50px_rgba(245,158,11,0.3),0_0_80px_rgba(245,158,11,0.15)]"
+    : "shadow-[0_0_30px_rgba(56,189,248,0.12)] hover:shadow-[0_0_50px_rgba(56,189,248,0.25)]";
 
   const outerGlowColor = isRecording
-    ? "from-blue-500/30 to-indigo-500/30"
+    ? "from-sky-500/25 to-cyan-500/25"
     : isProcessing
     ? "from-amber-500/20 to-orange-500/20"
-    : "from-blue-500/15 to-indigo-500/10";
+    : "from-sky-500/15 to-indigo-500/10";
 
   const buttonGradient = isRecording
-    ? "from-[#4F8EF7] via-indigo-500 to-violet-600"
+    ? "from-sky-500 via-cyan-600 to-emerald-500"
     : isProcessing
     ? "from-amber-500 via-yellow-500 to-orange-500"
-    : "from-[#4F8EF7] via-indigo-500 to-blue-600";
+    : "from-sky-500 via-cyan-500 to-indigo-600";
 
   return (
     <motion.div
-      className={cn("relative flex items-center justify-center rounded-full transition-shadow duration-700", orbGlow)}
-      style={{ width: 280, height: 280 }}
+      className={cn("relative flex items-center justify-center rounded-full transition-all duration-500", orbGlow)}
+      style={{ width: outerDimensions.w, height: outerDimensions.h }}
     >
       <motion.div
-        animate={prefersReducedMotion ? {
-          scale: 1,
-          rotate: 0,
-        } : {
-          scale: isRecording ? [1, 1.08, 1] : isProcessing ? [1, 1.04, 1] : [1, 1.03, 1],
-          rotate: isProcessing ? 360 : 0,
+        animate={prefersReducedMotion ? { scale: 1 } : {
+          scale: isRecording ? [1, 1.06, 1] : isProcessing ? [1, 1.03, 1] : [1, 1.02, 1],
         }}
         transition={{
           repeat: prefersReducedMotion ? 0 : Infinity,
-          duration: isRecording ? 1.5 : isProcessing ? 5 : 4,
-          ease: isProcessing ? "linear" : "easeInOut",
+          duration: isRecording ? 1.5 : isProcessing ? 3 : 4,
+          ease: "easeInOut",
         }}
-        className={cn("absolute inset-0 rounded-full opacity-60 blur-xl bg-gradient-to-r", outerGlowColor)}
+        className={cn("absolute inset-0 rounded-full opacity-50 blur-lg bg-gradient-to-r", outerGlowColor)}
       />
 
       <canvas
         ref={canvasRef}
-        width={280}
-        height={280}
+        width={outerDimensions.w}
+        height={outerDimensions.h}
         className="absolute inset-0 pointer-events-none rounded-full"
       />
 
@@ -129,20 +129,21 @@ export function VoiceVisualizer({
         disabled={disabled || isConnecting || isProcessing}
         onClick={isRecording ? onStop : onPrimaryAction}
         className={cn(
-          "z-10 flex h-28 w-28 items-center justify-center rounded-full text-white/90 transition-all duration-500",
+          "z-10 flex items-center justify-center rounded-full text-white transition-all duration-300 touch-target",
+          outerDimensions.btnSize,
           disabled
-            ? "bg-[#4A4E69] cursor-not-allowed"
-            : `bg-gradient-to-br ${buttonGradient}`,
-          !disabled && !isProcessing && !isConnecting && "hover:scale-105",
+            ? "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50"
+            : `bg-gradient-to-br ${buttonGradient} shadow-md`,
+          !disabled && !isProcessing && !isConnecting && "hover:scale-105 active:scale-95",
           "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--accent-blue)]"
         )}
       >
         {isRecording ? (
-          <Square className="h-10 w-10 fill-current" />
+          <Square className={cn(outerDimensions.iconSize, "fill-current")} />
         ) : isProcessing || isConnecting ? (
-          <Loader2 className="h-10 w-10 animate-spin" />
+          <Loader2 className={cn(outerDimensions.iconSize, "animate-spin")} />
         ) : (
-          <Mic className="h-10 w-10" />
+          <Mic className={outerDimensions.iconSize} />
         )}
       </button>
     </motion.div>

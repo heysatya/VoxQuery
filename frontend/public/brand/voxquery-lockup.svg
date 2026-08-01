@@ -1,0 +1,29 @@
+<svg width="240" height="48" viewBox="0 0 240 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="vq-lockup-mark-grad" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="50%" stop-color="#0284C7" />
+      <stop offset="100%" stop-color="#34D399" />
+    </linearGradient>
+    <linearGradient id="vq-lockup-text-grad" x1="56" y1="0" x2="240" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="70%" stop-color="#F0F9FF" />
+      <stop offset="100%" stop-color="#38BDF8" />
+    </linearGradient>
+  </defs>
+
+  <!-- Mark -->
+  <g transform="translate(0, 0)">
+    <circle cx="24" cy="24" r="22" fill="url(#vq-lockup-mark-grad)" fill-opacity="0.08" stroke="url(#vq-lockup-mark-grad)" stroke-opacity="0.25" stroke-width="1.5" />
+    <rect x="13" y="19" width="3.5" height="10" rx="1.75" fill="url(#vq-lockup-mark-grad)" />
+    <rect x="18.5" y="13" width="3.5" height="22" rx="1.75" fill="url(#vq-lockup-mark-grad)" />
+    <rect x="24" y="9" width="3.5" height="30" rx="1.75" fill="url(#vq-lockup-mark-grad)" />
+    <rect x="29.5" y="15" width="3.5" height="18" rx="1.75" fill="url(#vq-lockup-mark-grad)" />
+    <rect x="35" y="21" width="3.5" height="6" rx="1.75" fill="url(#vq-lockup-mark-grad)" opacity="0.85" />
+  </g>
+
+  <!-- Wordmark Text -->
+  <text x="58" y="32" font-family="'Inter', sans-serif" font-weight="800" font-size="26" letter-spacing="-0.03em" fill="url(#vq-lockup-text-grad)">
+    Vox<tspan fill="#38BDF8">Query</tspan>
+  </text>
+</svg>
