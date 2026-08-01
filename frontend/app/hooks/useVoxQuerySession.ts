@@ -50,11 +50,15 @@ type VoiceDraft = {
 /** Exposed so the review panel can display the original raw transcript. */
 export type { VoiceDraft };
 
+export type PipelineConnectionState = "connecting" | "connected" | "disconnected" | "error";
+
 export type VoxQueryEngine = {
   authMode: VoxQueryAuthMode;
   modeLabel: string;
   isReady: boolean;
   session: SessionState;
+  connectionState: PipelineConnectionState;
+  connectionStatusLabel: string;
 
   submittedText: string;
   partialTranscript: string;
@@ -124,6 +128,7 @@ function createBrowserAudioContext(options?: AudioContextOptions) {
 
 export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
   const [session, setSession] = useState<SessionState>({ sessionId: null, conversationId: null });
+  const [connectionState, setConnectionState] = useState<PipelineConnectionState>("connecting");
   const [micPermission, setMicPermission] = useState<MicPermission>("unknown");
   const [voiceState, setVoiceState] = useState<VoiceCaptureState>("idle");
   const [partialTranscript, setPartialTranscript] = useState("");
@@ -186,9 +191,22 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
   const GAIN_RAMP_SECONDS = 0.03;
 
   const isReady = useMemo(
-    () => auth.ready && auth.signedIn && Boolean(session.sessionId),
-    [auth.ready, auth.signedIn, session.sessionId]
+    () => auth.ready && auth.signedIn && Boolean(session.sessionId) && connectionState !== "error",
+    [auth.ready, auth.signedIn, session.sessionId, connectionState]
   );
+
+  const connectionStatusLabel = useMemo(() => {
+    switch (connectionState) {
+      case "connecting":
+        return "Connecting to your workspace...";
+      case "connected":
+        return "Connected to your workspace";
+      case "disconnected":
+        return "Reconnecting...";
+      case "error":
+        return "Real-time analysis is unavailable";
+    }
+  }, [connectionState]);
 
   function setActiveTurnId(turnId: string | null) {
     currentTurnIdRef.current = turnId;
@@ -423,9 +441,11 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
         if (cancelled || !session.sessionId) {
           return;
         }
+        setConnectionState("connecting");
         socket = new WebSocket(pipelineSocketUrl(session.sessionId));
         socket.onopen = () => {
           socket?.send(JSON.stringify({ event: "auth", token: token ?? "fake" }));
+          setConnectionState("connected");
         };
         socket.onmessage = (message) => {
           const event = parsePipelineEvent(message.data);
@@ -484,8 +504,12 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
             setNotice(event.message, "error");
           }
         };
-        socket.onerror = () => setNotice("Could not connect to the real-time event stream. Please check your network connection.", "error");
+        socket.onerror = () => {
+          setConnectionState("error");
+          setNotice("Could not connect to the real-time event stream. Please check your network connection.", "error");
+        };
         socket.onclose = (event) => {
+          setConnectionState("disconnected");
           if (event.code !== 4002) {
             return;
           }
@@ -500,7 +524,10 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
             .catch(() => setNotice("Stored session expired, and a new local session could not be created."));
         };
       })
-      .catch(() => setNotice("Could not get an auth token for the pipeline stream."));
+      .catch(() => {
+        setConnectionState("error");
+        setNotice("Could not get an auth token for the pipeline stream.");
+      });
     return () => {
       cancelled = true;
       socket?.close();
@@ -1232,6 +1259,8 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     modeLabel,
     isReady,
     session,
+    connectionState,
+    connectionStatusLabel,
     submittedText,
     partialTranscript,
     pipelineInFlight,

@@ -26,6 +26,7 @@ import { fetchWorkspaceWidgets, pinWorkspaceWidget, deleteWorkspaceWidget, fetch
 import type { LastResult } from "../lib/types";
 
 const authMode = process.env.NEXT_PUBLIC_AUTH_MODE ?? "fake";
+const showDebugUi = process.env.NEXT_PUBLIC_SHOW_DEBUG_UI === "true";
 
 /* ── Auth wrappers ────────────────────────────────────────────── */
 
@@ -93,17 +94,7 @@ function ClerkHomePage() {
     );
   }
 
-  return (
-    <>
-      <div className="fixed top-4 right-4 z-50 flex items-center gap-3">
-        <div className="glass-card px-3 py-1 rounded-full flex items-center">
-          <OrganizationSwitcher hidePersonal={true} afterSelectOrganizationUrl="/" afterLeaveOrganizationUrl="/" />
-        </div>
-        <div className="glass-card p-1 rounded-full"><UserButton /></div>
-      </div>
-      <VoxQueryApp auth={auth} />
-    </>
-  );
+  return <VoxQueryApp auth={auth} />;
 }
 
 const fakeAuthRelay: VoxQueryAuthRelay = {
@@ -225,17 +216,17 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
 
   return (
     <main className="min-h-screen flex flex-col relative bg-[#090B10]">
-      {/* Restrained Top Header Bar */}
-      <header className="w-full px-6 py-3.5 flex items-center justify-between z-40 relative border-b border-white/5 bg-[#090B10]/80 backdrop-blur-xl">
+      {/* Shared Application Header Bar */}
+      <header className="w-full px-4 md:px-6 py-3.5 flex items-center justify-between z-40 relative border-b border-white/5 bg-[#090B10]/80 backdrop-blur-xl">
         <div className="flex items-center gap-3">
           <VoxQueryLogo variant="header" />
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 md:gap-3">
           <button
             type="button"
             onClick={() => setBriefingDrawerOpen(true)}
-            className="px-3.5 py-1.5 rounded-full glass-card text-white text-xs font-semibold hover:border-[var(--accent-blue)]/50 transition-all flex items-center gap-2 touch-target"
+            className="px-3 py-1.5 rounded-full glass-card text-white text-xs font-semibold hover:border-[var(--accent-blue)]/50 transition-all flex items-center gap-1.5 touch-target"
             aria-label="Open today's briefing drawer"
           >
             <span>
@@ -248,6 +239,17 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 : `☀️ Today's briefing — ${anomalyCount} flags`}
             </span>
           </button>
+
+          {auth.mode === "clerk" && (
+            <div className="flex items-center gap-2 pl-2 border-l border-white/10">
+              <div className="glass-card px-2.5 py-1 rounded-full flex items-center">
+                <OrganizationSwitcher hidePersonal={true} afterSelectOrganizationUrl="/" afterLeaveOrganizationUrl="/" />
+              </div>
+              <div className="glass-card p-0.5 rounded-full flex items-center">
+                <UserButton />
+              </div>
+            </div>
+          )}
         </div>
       </header>
 
@@ -307,24 +309,41 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 ))}
               </div>
 
-              {/* Quiet workspace connection status indicator */}
-              <div className="mt-8 flex items-center justify-center gap-2 text-xs text-[var(--text-muted)] font-medium">
-                <CheckCircle2 className="w-3.5 h-3.5 text-[var(--accent-green)]" />
-                <span>Connected to your workspace</span>
+              {/* Honest workspace connection status indicator */}
+              <div className="mt-6 flex items-center justify-center gap-2 text-xs font-medium">
+                {engine.connectionState === "connected" ? (
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[var(--accent-green)]" />
+                ) : engine.connectionState === "connecting" || engine.connectionState === "disconnected" ? (
+                  <span className="w-2 h-2 rounded-full bg-[var(--accent-amber)] animate-pulse" />
+                ) : (
+                  <span className="w-2 h-2 rounded-full bg-rose-500" />
+                )}
+                <span className={
+                  engine.connectionState === "connected"
+                    ? "text-[var(--text-muted)]"
+                    : engine.connectionState === "error"
+                    ? "text-rose-400 font-semibold"
+                    : "text-[var(--accent-amber)] font-medium"
+                }>
+                  {engine.connectionStatusLabel}
+                </span>
               </div>
 
               {/* Home Screen Briefing Summary Card */}
               <div className="mt-8 w-full max-w-xl">
                 <MorningBriefingCard
                   token={token}
+                  variant="compact"
                   onSelectInsight={(q) => {
                     engine.setSubmittedText(q);
                     engine.submitQuery(q);
                   }}
                   onAskFollowUp={engine.toggleRecording}
+                  onOpenFullBriefing={() => setBriefingDrawerOpen(true)}
                 />
               </div>
 
+              {/* Prior session memory */}
               <div className="mt-6 w-full">
                 <PriorSessionMemoryCard
                   questions={priorQuestions}
@@ -609,10 +628,12 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
         authToken={token}
       />
 
-      {/* Quiet Version Footer */}
-      <div className="fixed bottom-2 right-4 text-[10px] font-mono text-[var(--text-muted)] z-10 pointer-events-none opacity-60">
-        Build: {gitSha.slice(0, 7)}
-      </div>
+      {/* Optional Debug Version Footer */}
+      {showDebugUi && (
+        <div className="fixed bottom-2 right-4 text-[10px] font-mono text-[var(--text-muted)] z-10 pointer-events-none opacity-60">
+          Build: {gitSha.slice(0, 7)}
+        </div>
+      )}
     </main>
   );
 }

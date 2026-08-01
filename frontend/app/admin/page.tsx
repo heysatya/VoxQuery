@@ -73,7 +73,7 @@ function ClerkAdminConsole() {
   return <AdminDashboard getToken={getToken} />;
 }
 
-type TabType = "overview" | "vocabulary" | "workspaces" | "quality" | "analytics";
+type TabType = "overview" | "history" | "vocabulary" | "workspaces" | "quality" | "analytics";
 
 function AdminDashboard({ getToken }: { getToken: () => Promise<string | null> }) {
   const [activeTab, setActiveTab] = useState<TabType>("overview");
@@ -111,6 +111,12 @@ function AdminDashboard({ getToken }: { getToken: () => Promise<string | null> }
             onClick={() => { setActiveTab("overview"); setMobileMenuOpen(false); }}
           />
           <SidebarItem 
+            icon={<TerminalSquare className="w-4 h-4" />}
+            label="Query History" 
+            isActive={activeTab === "history"}
+            onClick={() => { setActiveTab("history"); setMobileMenuOpen(false); }}
+          />
+          <SidebarItem 
             icon={<BookOpen className="w-4 h-4" />}
             label="Business Vocabulary" 
             isActive={activeTab === "vocabulary"}
@@ -146,7 +152,7 @@ function AdminDashboard({ getToken }: { getToken: () => Promise<string | null> }
         <header className="px-6 md:px-10 py-6 border-b border-white/5 flex justify-between items-center z-10 bg-[#10141C]/60 backdrop-blur-md">
           <div>
             <h1 className="text-2xl md:text-3xl font-light text-white capitalize tracking-tight">
-              {activeTab === "vocabulary" ? "Business Vocabulary" : activeTab === "analytics" ? "Model Analytics" : activeTab}
+              {activeTab === "vocabulary" ? "Business Vocabulary" : activeTab === "analytics" ? "Model Analytics" : activeTab === "history" ? "Query History" : activeTab}
             </h1>
             <p className="text-xs md:text-sm text-[var(--text-muted)] mt-1 font-medium">
               Manage platform configurations, review query performance, and oversee tenant health.
@@ -157,6 +163,7 @@ function AdminDashboard({ getToken }: { getToken: () => Promise<string | null> }
         <div className="flex-1 overflow-y-auto p-6 md:p-10 z-10">
           <AnimatePresence mode="wait">
             {activeTab === "overview" && <OverviewDashboard key="overview" getToken={getToken} />}
+            {activeTab === "history" && <PlaceholderDashboard key="history" title="Query History" subtitle="Cross-tenant query execution history logging is not configured for this environment. Real-time query execution is logged per session." />}
             {activeTab === "vocabulary" && <VocabularyDashboard key="vocabulary" getToken={getToken} />}
             {activeTab === "workspaces" && <WorkspacesDashboard key="workspaces" getToken={getToken} />}
             {activeTab === "quality" && <QualityReviewDashboard key="quality" getToken={getToken} />}
