@@ -19,6 +19,7 @@ class TurnRepository:
         self,
         turn: TurnRecord,
         *,
+        tenant_name: str | None = None,
         source_tables: list[str] | None = None,
         filter_predicates: list[dict[str, Any]] | None = None,
     ) -> None:
@@ -43,9 +44,10 @@ class TurnRepository:
 
         async with self._pool.acquire() as conn:
             # Ensure tenant, user, session, and conversation records exist for foreign key constraints
+            tenant_display = tenant_name or f"Tenant {turn.tenant_id[:8]}"
             await conn.execute(
-                "INSERT INTO tenants (id, name) VALUES ($1, 'Default Tenant') ON CONFLICT (id) DO NOTHING",
-                turn.tenant_id,
+                "INSERT INTO tenants (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+                turn.tenant_id, tenant_display,
             )
             await conn.execute(
                 """

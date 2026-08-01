@@ -67,17 +67,22 @@ class ClerkJwtVerifier:
 
         # Extract active organization from v2 compact claim payload["o"] or legacy org_id
         org_claim = payload.get("o")
+        org_claim = payload.get("o")
         tenant_id_val = None
         raw_role = None
+        tenant_name_val = None
 
         if isinstance(org_claim, dict):
             tenant_id_val = org_claim.get("id")
             raw_role = org_claim.get("rol")
+            tenant_name_val = org_claim.get("name") or org_claim.get("slug")
         
         if not tenant_id_val:
             tenant_id_val = payload.get("org_id")
             if not raw_role:
                 raw_role = payload.get("org_role")
+            if not tenant_name_val:
+                tenant_name_val = payload.get("org_name") or payload.get("org_slug")
 
         if not tenant_id_val:
             raise ApiError(
@@ -114,6 +119,7 @@ class ClerkJwtVerifier:
             email=str(email_val),
             role=normalized_role,
             snowflake_role=str(snowflake_role_claim or "ANALYST_READONLY"),
+            tenant_name=str(tenant_name_val) if tenant_name_val else None,
         )
 
 
@@ -137,6 +143,7 @@ async def get_current_user(
     authorization: str | None = Header(default=None),
     x_fake_user_id: str | None = Header(default=None),
     x_fake_tenant_id: str | None = Header(default=None),
+    x_fake_tenant_name: str | None = Header(default=None),
     x_fake_role: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
 ) -> AuthClaims:
@@ -145,6 +152,7 @@ async def get_current_user(
             user_id=x_fake_user_id if x_fake_user_id else LOCAL_USER_ID,
             tenant_id=x_fake_tenant_id if x_fake_tenant_id else LOCAL_TENANT_ID,
             role=x_fake_role if x_fake_role else "admin",
+            tenant_name=x_fake_tenant_name if x_fake_tenant_name else None,
         )
     if not authorization:
         raise ApiError(ErrorCode.auth_missing, status_code=401)

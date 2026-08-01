@@ -152,8 +152,8 @@ export type AudioEvent =
 export type BriefingKpi = {
   label: string;
   value: string;
-  change_pct: number;
-  trend: "up" | "down" | "neutral";
+  change_pct?: number | null;
+  trend?: "up" | "down" | "neutral" | null;
   insight: string;
 };
 
@@ -170,6 +170,8 @@ export type ExecutiveBriefingData = {
   summary_narrative: string;
   anomalies: BriefingAnomaly[];
   proactive_insights: string[];
+  is_live?: boolean;
+  data_source?: "live" | "fallback";
 };
 
 export type GraphNode = {

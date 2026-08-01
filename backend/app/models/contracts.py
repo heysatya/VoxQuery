@@ -145,6 +145,7 @@ class AuthClaims(BaseModel):
     email: str = "local-user@voxquery.test"
     role: str = "viewer"
     snowflake_role: str = "ANALYST_READONLY"
+    tenant_name: str | None = None
 
 
 class SessionCreateRequest(BaseModel):
@@ -643,8 +644,8 @@ def _normalize_transcript(value: str) -> str:
 class BriefingKpi(BaseModel):
     label: str
     value: str
-    change_pct: float
-    trend: Literal["up", "down", "neutral"]
+    change_pct: float | None = None
+    trend: Literal["up", "down", "neutral"] | None = None
     insight: str
 
 
@@ -661,6 +662,8 @@ class ExecutiveBriefingResponse(BaseModel):
     summary_narrative: str
     anomalies: list[BriefingAnomaly] = Field(default_factory=list)
     proactive_insights: list[str] = Field(default_factory=list)
+    is_live: bool = False
+    data_source: Literal["live", "fallback"] = "fallback"
 
 
 class GraphNode(BaseModel):

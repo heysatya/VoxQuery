@@ -146,7 +146,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               setAnomalyCount(b.anomalies.length);
             }
           }).catch(() => {});
-          fetchPriorSessionSummary(engine.sessionId, t).then((res) => {
+          fetchPriorSessionSummary(engine.session.sessionId ?? undefined, t).then((res) => {
             if (active && res?.questions) {
               setPriorQuestions(res.questions);
             }
@@ -155,7 +155,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
       }
     });
     return () => { active = false; };
-  }, [auth, engine.sessionId]);
+  }, [auth, engine.session.sessionId]);
 
   useEffect(() => {
     let cancelled = false;

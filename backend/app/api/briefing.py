@@ -59,6 +59,7 @@ async def get_briefing(
 
 @router.get("/api/briefing/pdf")
 async def get_briefing_pdf(
+    request: Request,
     claims: AuthClaims = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
     warehouse = Depends(get_warehouse),
@@ -70,7 +71,19 @@ async def get_briefing_pdf(
     briefing = await generate_morning_briefing(
         claims.tenant_id, settings, user_name=user_name, warehouse=warehouse, snowflake_role=claims.snowflake_role
     )
-    pdf_bytes = await generate_briefing_pdf(briefing, tenant_name=claims.tenant_id)
+    
+    tenant_name = claims.tenant_name
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if not tenant_name and db_pool:
+        try:
+            async with db_pool.acquire() as conn:
+                row = await conn.fetchrow("SELECT name FROM tenants WHERE id = $1", claims.tenant_id)
+                if row and row["name"]:
+                    tenant_name = row["name"]
+        except Exception:
+            pass
+
+    pdf_bytes = await generate_briefing_pdf(briefing, tenant_name=tenant_name or claims.tenant_id)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",

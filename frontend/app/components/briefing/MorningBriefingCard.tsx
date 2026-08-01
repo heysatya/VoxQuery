@@ -195,6 +195,14 @@ export function MorningBriefingCard({
           </div>
         </div>
 
+        {/* Fallback Mode Honest Data Source Indicator */}
+        {(!briefing.is_live || briefing.data_source === "fallback") && (
+          <div className="mb-4 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] font-medium flex items-center gap-2">
+            <span>⚠️</span>
+            <span>Preview data — connect your warehouse for live figures</span>
+          </div>
+        )}
+
         {/* Executive Greeting Subtitle */}
         <p className="text-xs text-slate-200 font-semibold mb-4">
           Good morning. Three things before your 9 AM:
@@ -268,10 +276,12 @@ export function MorningBriefingCard({
                     <span className="text-[10px] font-mono text-slate-300 font-medium">{kpi.label}</span>
                     <div className="my-1 flex items-baseline justify-between">
                       <span className="text-sm font-bold text-white">{kpi.value}</span>
-                      <span className={`text-[10px] font-mono font-semibold flex items-center gap-0.5 ${kpi.trend === "up" ? "text-emerald-400" : "text-amber-400"}`}>
-                        {kpi.trend === "up" ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                        {kpi.change_pct > 0 ? `+${kpi.change_pct}%` : `${kpi.change_pct}%`}
-                      </span>
+                      {kpi.change_pct !== undefined && kpi.change_pct !== null && kpi.trend ? (
+                        <span className={`text-[10px] font-mono font-semibold flex items-center gap-0.5 ${kpi.trend === "up" ? "text-emerald-400" : "text-amber-400"}`}>
+                          {kpi.trend === "up" ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                          {kpi.change_pct > 0 ? `+${kpi.change_pct}%` : `${kpi.change_pct}%`}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                 ))}

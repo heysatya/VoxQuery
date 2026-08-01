@@ -18,6 +18,7 @@ from app.models.contracts import (
 )
 from app.services.anomaly_detector import detect_outliers
 from app.warehouse.connector import WarehouseConnector
+from app.warehouse.sql_policy import canonicalize_readonly_sql
 
 logger = logging.getLogger("voxquery.services.briefing")
 
@@ -36,11 +37,12 @@ async def generate_morning_briefing(
     
     kpis: list[BriefingKpi] = []
     anomalies: list[BriefingAnomaly] = []
+    is_live = False
     
     if warehouse is not None:
         try:
             # Query 1: Core KPIs
-            kpi_sql = (
+            kpi_sql = canonicalize_readonly_sql(
                 "SELECT "
                 "SUM(order_items.price * (1 - order_items.discount_rate) + order_items.freight_value) AS total_revenue, "
                 "AVG(order_items.price) AS avg_order_value, "
@@ -48,58 +50,62 @@ async def generate_morning_briefing(
                 "COUNT(DISTINCT orders.customer_id) AS active_customers "
                 "FROM order_items "
                 "JOIN orders ON order_items.order_id = orders.order_id"
-            )
+            ).sql
             result_payload, _ = await warehouse.execute_readonly(
                 kpi_sql, snowflake_role=snowflake_role, tenant_id=tenant_id
             )
             if result_payload and result_payload.rows and len(result_payload.rows) > 0:
+                is_live = True
                 row = result_payload.rows[0]
-                tot_rev = float(row[0]) if row[0] is not None else 246700000.0
-                aov = float(row[1]) if row[1] is not None else 184.20
-                orders_cnt = int(row[2]) if row[2] is not None else 1000000
-                customers_cnt = int(row[3]) if row[3] is not None else 1000000
+                tot_rev = float(row[0]) if row[0] is not None else None
+                aov = float(row[1]) if row[1] is not None else None
+                orders_cnt = int(row[2]) if row[2] is not None else None
+                customers_cnt = int(row[3]) if row[3] is not None else None
 
-                rev_formatted = f"${tot_rev / 1e6:.1f}M" if tot_rev >= 1e6 else f"${tot_rev:,.2f}"
+                rev_formatted = (
+                    f"${tot_rev / 1e6:.1f}M" if tot_rev is not None and tot_rev >= 1e6
+                    else (f"${tot_rev:,.2f}" if tot_rev is not None else "No data")
+                )
                 kpis = [
                     BriefingKpi(
                         label="Total Revenue (YTD)",
                         value=rev_formatted,
-                        change_pct=12.4,
-                        trend="up",
+                        change_pct=None,
+                        trend=None,
                         insight=f"Tenant {tenant_id[:8]} revenue target performance.",
                     ),
                     BriefingKpi(
                         label="Active Accounts",
-                        value=f"{customers_cnt:,}",
-                        change_pct=5.8,
-                        trend="up",
+                        value=f"{customers_cnt:,}" if customers_cnt is not None else "No data",
+                        change_pct=None,
+                        trend=None,
                         insight="Active account count recorded across tenant workspace.",
                     ),
                     BriefingKpi(
                         label="Avg Order Value",
-                        value=f"${aov:.2f}",
-                        change_pct=-1.2,
-                        trend="down",
+                        value=f"${aov:.2f}" if aov is not None else "No data",
+                        change_pct=None,
+                        trend=None,
                         insight="Average order value across recent transactions.",
                     ),
                     BriefingKpi(
                         label="Total Orders",
-                        value=f"{orders_cnt:,}",
-                        change_pct=3.4,
-                        trend="up",
+                        value=f"{orders_cnt:,}" if orders_cnt is not None else "No data",
+                        change_pct=None,
+                        trend=None,
                         insight="Total completed transaction volume.",
                     ),
                 ]
 
             # Query 2: Weekly trend series for outlier anomaly detection
-            trend_sql = (
+            trend_sql = canonicalize_readonly_sql(
                 "SELECT "
                 "DATE_TRUNC('week', orders.order_purchase_timestamp) AS order_week, "
                 "SUM(order_items.price) AS weekly_revenue "
                 "FROM order_items "
                 "JOIN orders ON order_items.order_id = orders.order_id "
                 "GROUP BY 1 ORDER BY 1"
-            )
+            ).sql
             trend_payload, _ = await warehouse.execute_readonly(
                 trend_sql, snowflake_role=snowflake_role, tenant_id=tenant_id
             )
@@ -183,4 +189,6 @@ async def generate_morning_briefing(
         summary_narrative=summary_narrative,
         anomalies=anomalies,
         proactive_insights=proactive_insights,
+        is_live=is_live,
+        data_source="live" if is_live else "fallback",
     )
