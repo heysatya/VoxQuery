@@ -71,6 +71,7 @@ def start_briefing_scheduler(
             "interval",
             minutes=1,
             id="briefing_minute_check",
+            misfire_grace_time=30,
             replace_existing=True,
         )
         scheduler.start()

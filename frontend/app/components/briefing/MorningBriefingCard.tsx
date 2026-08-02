@@ -187,13 +187,28 @@ export function MorningBriefingCard({
   const isPreviewData = briefing.is_live !== true || briefing.data_source !== "live";
   const hasLiveData = briefing.is_live === true && briefing.kpis.length > 0;
 
+  const displayedAnomalies = briefing.anomalies ? briefing.anomalies.slice(0, 3) : [];
+  const hiddenAnomalyCount = Math.max(0, (briefing.anomalies?.length ?? 0) - 3);
+
   const takeaways = briefing.anomalies && briefing.anomalies.length > 0
-    ? briefing.anomalies.map((anom) => ({
-        severity: anom.severity || "warning",
-        dotColor: anom.severity === "critical" ? "bg-rose-500" : "bg-amber-400",
-        headline: anom.title,
-        subtext: `→ ${anom.description}`,
-      }))
+    ? [
+        ...displayedAnomalies.map((anom) => ({
+          severity: anom.severity || "warning",
+          dotColor: anom.severity === "critical" ? "bg-rose-500" : "bg-amber-400",
+          headline: anom.title,
+          subtext: `→ ${anom.description}`,
+        })),
+        ...(hiddenAnomalyCount > 0
+          ? [
+              {
+                severity: "info",
+                dotColor: "bg-slate-400",
+                headline: `+${hiddenAnomalyCount} more`,
+                subtext: `→ ${hiddenAnomalyCount} additional anomaly flag${hiddenAnomalyCount > 1 ? "s" : ""} recorded`,
+              },
+            ]
+          : []),
+      ]
     : [
         {
           severity: "info",

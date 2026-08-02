@@ -13,6 +13,7 @@ import json
 import logging
 from datetime import date, datetime, timezone
 from email.utils import parseaddr
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request as UrlRequest, urlopen
 
@@ -43,7 +44,8 @@ def _format_plain_text(briefing: ExecutiveBriefingResponse, dashboard_url: str) 
 
 
 def _render_html(briefing: ExecutiveBriefingResponse, dashboard_url: str) -> str:
-    esc = lambda value: html.escape(str(value), quote=True)
+    def esc(value: Any) -> str:
+        return html.escape(str(value), quote=True)
     kpi_rows = "".join(
         "<tr>"
         f"<td style='padding:8px 12px;border-bottom:1px solid #e5e7eb'>{esc(kpi.label)}</td>"

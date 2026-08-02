@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import logging
 import json
+import math
 import os
 from asyncio import Lock
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from time import monotonic
 from typing import Any
 
@@ -189,14 +190,59 @@ async def _generate_morning_briefing_uncached(
                 trend_sql, snowflake_role=snowflake_role, tenant_id=tenant_id
             )
             if trend_payload and trend_payload.rows and len(trend_payload.rows) >= 3:
-                weekly_values = [float(r[1]) for r in trend_payload.rows if len(r) > 1 and r[1] is not None]
-                outlier_indices = detect_outliers(weekly_values, threshold=1.5)
-                for idx in outlier_indices:
-                    week_val = weekly_values[idx]
+                valid_rows = [r for r in trend_payload.rows if len(r) > 1 and r[1] is not None]
+                weekly_values = [float(r[1]) for r in valid_rows]
+
+                candidate_anomalies = []
+                for i, val in enumerate(weekly_values):
+                    # Trailing window of most recent 8-12 weeks relative to point i (up to 12 weeks)
+                    window = weekly_values[max(0, i - 12):i]
+                    if len(window) < 3:
+                        window = [v for j, v in enumerate(weekly_values) if j != i]
+
+                    if not window:
+                        continue
+
+                    baseline_mean = sum(window) / len(window)
+                    variance = sum((x - baseline_mean) ** 2 for x in window) / len(window)
+                    std_dev = math.sqrt(variance)
+
+                    if std_dev > 0:
+                        z_score = abs(val - baseline_mean) / std_dev
+                        if z_score > 2.5:  # (a) Raised threshold to 2.5
+                            abs_dev = abs(val - baseline_mean)
+                            candidate_anomalies.append({
+                                "idx": i,
+                                "row": valid_rows[i],
+                                "val": val,
+                                "abs_dev": abs_dev,
+                            })
+
+                # (b) Cap anomalies appended to the top 3 most significant (largest absolute deviation from baseline)
+                candidate_anomalies.sort(key=lambda c: c["abs_dev"], reverse=True)
+                top_3_anomalies = candidate_anomalies[:3]
+                top_3_anomalies.sort(key=lambda c: c["idx"])
+
+                for item in top_3_anomalies:
+                    row_week = item["row"][0]
+                    # (d) Format actual order_week date from row[0]
+                    if hasattr(row_week, "strftime"):
+                        formatted_date = row_week.strftime("%b %d, %Y")
+                    elif isinstance(row_week, str):
+                        cleaned = row_week.split("T")[0].split(" ")[0]
+                        try:
+                            dt = datetime.strptime(cleaned, "%Y-%m-%d")
+                            formatted_date = dt.strftime("%b %d, %Y")
+                        except ValueError:
+                            formatted_date = cleaned
+                    else:
+                        formatted_date = str(row_week) if row_week is not None else f"Week {item['idx'] + 1}"
+
+                    week_val = item["val"]
                     anomalies.append(
                         BriefingAnomaly(
                             severity="warning",
-                            title=f"Revenue Variance in Week {idx + 1}",
+                            title=f"Revenue Variance ({formatted_date})",
                             description=f"Weekly revenue of ${week_val:,.2f} deviates significantly from baseline average.",
                         )
                     )

@@ -657,7 +657,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
             aria-label="Today's executive briefing"
             onClick={() => setBriefingDrawerOpen(false)}
           >
-            <div className="w-full max-w-xl relative" onClick={(e) => e.stopPropagation()}>
+            <div className="w-full max-w-xl relative max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
                 onClick={() => setBriefingDrawerOpen(false)}
