@@ -11,6 +11,20 @@ from app.models.contracts import AuthClaims
 logger = logging.getLogger("voxquery.repositories.workspace")
 
 
+def _normalise_widget(row: Any) -> dict[str, Any]:
+    data = dict(row)
+    for field in ("result_json", "full_result"):
+        if isinstance(data.get(field), str):
+            data[field] = json.loads(data[field])
+
+    result = data.get("full_result")
+    data["result"] = result
+    data["data_status"] = "available" if result is not None else "unavailable"
+    data["data_source"] = "snapshot" if result is not None else "unavailable"
+    data["saved_at"] = data.get("created_at")
+    return data
+
+
 class WorkspaceRepository:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
@@ -21,24 +35,20 @@ class WorkspaceRepository:
             rows = await conn.fetch(
                 """
                 SELECT w.id, w.turn_id, w.title, w.layout_x, w.layout_y, w.layout_w, w.layout_h, w.created_at,
-                       t.chart_type, t.result_json, t.full_result
+                       t.session_id, t.user_input, t.chart_type, t.result_json, t.full_result
                 FROM pinned_widgets w
-                JOIN turns t ON t.turn_id = w.turn_id
+                JOIN turns t
+                  ON t.turn_id = w.turn_id
+                 AND t.tenant_id = w.tenant_id
+                 AND t.user_id = w.user_id
                 WHERE w.tenant_id = $1 AND w.user_id = $2
                 ORDER BY w.created_at ASC
+                LIMIT 50
                 """,
                 claims.tenant_id, claims.user_id,
             )
 
-        results = []
-        for r in rows:
-            d = dict(r)
-            if isinstance(d.get("result_json"), str):
-                d["result_json"] = json.loads(d["result_json"])
-            if isinstance(d.get("full_result"), str):
-                d["full_result"] = json.loads(d["full_result"])
-            results.append(d)
-        return results
+        return [_normalise_widget(row) for row in rows]
 
     async def create_widget(
         self,
@@ -49,18 +59,33 @@ class WorkspaceRepository:
         layout_y: int = 0,
         layout_w: int = 4,
         layout_h: int = 3,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | None:
         """Pins a new widget to user's workspace."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO pinned_widgets (tenant_id, user_id, turn_id, title, layout_x, layout_y, layout_w, layout_h)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                RETURNING id, turn_id, title, layout_x, layout_y, layout_w, layout_h, created_at
+                WITH inserted AS (
+                    INSERT INTO pinned_widgets (tenant_id, user_id, turn_id, title, layout_x, layout_y, layout_w, layout_h)
+                    SELECT $1, $2, t.turn_id, $4, $5, $6, $7, $8
+                    FROM turns t
+                    WHERE t.turn_id = $3
+                      AND t.tenant_id = $1
+                      AND t.user_id = $2
+                      AND t.completed = TRUE
+                    ON CONFLICT (tenant_id, user_id, turn_id) DO NOTHING
+                    RETURNING id, turn_id, title, layout_x, layout_y, layout_w, layout_h, created_at
+                )
+                SELECT i.id, i.turn_id, i.title, i.layout_x, i.layout_y, i.layout_w, i.layout_h, i.created_at,
+                       t.session_id, t.user_input, t.chart_type, t.result_json, t.full_result
+                FROM inserted i
+                JOIN turns t
+                  ON t.turn_id = i.turn_id
+                 AND t.tenant_id = $1
+                 AND t.user_id = $2
                 """,
                 claims.tenant_id, claims.user_id, turn_id, title, layout_x, layout_y, layout_w, layout_h,
             )
-        return dict(row) if row else {}
+        return _normalise_widget(row) if row else None
 
     async def delete_widget(self, widget_id: UUID, claims: AuthClaims) -> bool:
         """Deletes a pinned widget scoped to user and tenant."""

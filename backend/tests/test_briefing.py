@@ -20,12 +20,12 @@ async def test_generate_morning_briefing_service():
     briefing = await generate_morning_briefing(tenant_id, settings, user_name="Executive Test")
     
     assert briefing.date is not None
-    assert "Executive Briefing" in briefing.greeting
-    assert len(briefing.kpis) >= 3
-    assert len(briefing.anomalies) >= 1
-    assert len(briefing.proactive_insights) >= 2
+    assert briefing.greeting == "Business pulse unavailable"
+    assert briefing.kpis == []
+    assert briefing.anomalies == []
+    assert briefing.proactive_insights == []
     assert briefing.is_live is False
-    assert briefing.data_source == "fallback"
+    assert briefing.data_source == "unavailable"
 
 
 @pytest.mark.asyncio

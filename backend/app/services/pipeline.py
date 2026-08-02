@@ -76,6 +76,11 @@ class PipelineOrchestrator:
             raise ApiError(ErrorCode.pipeline_in_flight, status_code=409)
 
         if request.parent_turn_id is not None:
+            if request.parent_turn_id not in self.turns and self.db_pool:
+                from app.repositories.turn_repository import TurnRepository
+                persisted_parent = await TurnRepository(self.db_pool).get_turn(request.parent_turn_id, claims)
+                if persisted_parent:
+                    self.turns[request.parent_turn_id] = TurnRepository.to_model(persisted_parent)
             self._validate_parent_turn(request.parent_turn_id, session, claims)
 
         turn = TurnRecord(
@@ -91,6 +96,19 @@ class PipelineOrchestrator:
             input_modality=request.input_modality,
         )
         self.turns[turn.turn_id] = turn
+
+        if self.db_pool:
+            from app.repositories.turn_repository import TurnRepository
+            try:
+                await TurnRepository(self.db_pool).save(turn, tenant_name=claims.tenant_name)
+            except Exception as exc:
+                self.turns.pop(turn.turn_id, None)
+                logger.exception("turn.initial_persist_failed turn_id=%s error=%s", turn.turn_id, type(exc).__name__)
+                raise ApiError(
+                    ErrorCode.service_unavailable,
+                    status_code=503,
+                    detail="The query could not be safely persisted. Please try again.",
+                ) from exc
 
         self._in_flight.add(request.session_id)
         self._schedule_pipeline_task(self._run_turn_background(session, turn, claims), session.session_id)
@@ -128,6 +146,12 @@ class PipelineOrchestrator:
             await self.sessions.clear_pending_clarification(session)
             self.turns.pop(turn_id, None)
             return None
+
+        if turn_id not in self.turns and self.db_pool:
+            from app.repositories.turn_repository import TurnRepository
+            persisted_turn = await TurnRepository(self.db_pool).get_turn(turn_id, claims)
+            if persisted_turn:
+                self.turns[turn_id] = TurnRepository.to_model(persisted_turn)
 
         if turn_id not in self.turns:
             raise ApiError(ErrorCode.clarification_not_found, status_code=404)

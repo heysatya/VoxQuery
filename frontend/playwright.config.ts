@@ -18,4 +18,13 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
+  webServer: {
+    command: 'npx next dev --port 3000',
+    url: 'http://localhost:3000',
+    reuseExistingServer: false,
+    timeout: 120 * 1000,
+    env: {
+      NEXT_PUBLIC_AUTH_MODE: 'fake',
+    },
+  },
 });

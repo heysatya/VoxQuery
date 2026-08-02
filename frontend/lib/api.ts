@@ -5,11 +5,27 @@ import type {
   QueryAcceptedResponse,
   QueryRequest,
   ResultResponse,
-  SessionCreateResponse
+  PinnedAnalysis,
+  SessionCreateResponse,
+  QueryHistoryPage,
+  QueryHistoryDetail,
+  TenantAnalytics,
+  SystemHealthResponse,
+  MemorySummaryResponse,
+  ShareLinkCreateRequest,
+  ShareLinkCreateResponse,
+  SharedResultResponse,
+  WorkspaceDetail
 } from "./types";
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 const fakeToken = "fake";
+type TokenRefresher = (options?: { skipCache?: boolean }) => Promise<string | null>;
+let tokenRefresher: TokenRefresher | null = null;
+
+export function setAuthTokenRefresher(refresher: TokenRefresher | null): void {
+  tokenRefresher = refresher;
+}
 
 export class ApiRequestError extends Error {
   status: number;
@@ -29,9 +45,20 @@ export async function fetchAuthenticatedBlob(
   authToken?: string | null
 ): Promise<Blob> {
   const targetUrl = apiUrlOverride || apiUrl;
-  const response = await fetch(`${targetUrl}${path}`, {
-    headers: authToken ? { Authorization: `Bearer ${authToken}` } : {}
-  });
+  const buildHeaders = (token?: string | null) => {
+    const headers = new Headers();
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+    return headers;
+  };
+  let response = await fetch(`${targetUrl}${path}`, { headers: buildHeaders(authToken) });
+  if (response.status === 401 && authToken && tokenRefresher) {
+    const refreshedToken = await tokenRefresher({ skipCache: true });
+    if (refreshedToken && refreshedToken !== authToken) {
+      response = await fetch(`${targetUrl}${path}`, { headers: buildHeaders(refreshedToken) });
+    }
+  }
   if (!response.ok) {
     throw new ApiRequestError(response.status, `Request failed with status ${response.status}`, null);
   }
@@ -39,16 +66,44 @@ export async function fetchAuthenticatedBlob(
 }
 
 async function request<T>(path: string, init?: RequestInit, authToken?: string | null): Promise<T> {
+  const send = async (token?: string | null) => {
+    const headers: Record<string, string> = {};
+
+    // Merge any caller-supplied headers into the plain object
+    if (init?.headers) {
+      if (init.headers instanceof Headers) {
+        init.headers.forEach((value, key) => { headers[key] = value; });
+      } else if (Array.isArray(init.headers)) {
+        for (const [k, v] of init.headers) { headers[k] = v; }
+      } else {
+        Object.assign(headers, init.headers as Record<string, string>);
+      }
+    }
+
+    // Default Content-Type (case-insensitive check)
+    if (!Object.keys(headers).some((k) => k.toLowerCase() === "content-type")) {
+      headers["Content-Type"] = "application/json";
+    }
+
+    // Bearer token (only when present)
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    return fetch(`${apiUrl}${path}`, {
+      ...init,
+      headers
+    });
+  };
   let response: Response;
   try {
-    response = await fetch(`${apiUrl}${path}`, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-        ...(init?.headers ?? {})
+    response = await send(authToken);
+    if (response.status === 401 && authToken && tokenRefresher) {
+      const refreshedToken = await tokenRefresher({ skipCache: true });
+      if (refreshedToken && refreshedToken !== authToken) {
+        response = await send(refreshedToken);
       }
-    });
+    }
   } catch (error) {
     // This catches network-level errors like offline, DNS resolution failure, or CORS rejection
     throw new ApiRequestError(0, "A network error occurred. Please check your internet connection and ensure the server is reachable.", "network_error");
@@ -187,15 +242,15 @@ export async function postTelemetry(
   }, authToken);
 }
 
-export async function fetchWorkspaceWidgets(authToken?: string | null): Promise<any[]> {
-  return request<any[]>("/api/workspace/widgets", { method: "GET" }, authToken);
+export async function fetchWorkspaceWidgets(authToken?: string | null): Promise<PinnedAnalysis[]> {
+  return request<PinnedAnalysis[]>("/api/workspace/widgets", { method: "GET" }, authToken);
 }
 
 export async function pinWorkspaceWidget(
   payload: { turn_id: string; title: string; layout_x?: number; layout_y?: number; layout_w?: number; layout_h?: number },
   authToken?: string | null
-) {
-  return request<any>("/api/workspace/widgets", { method: "POST", body: JSON.stringify(payload) }, authToken);
+): Promise<PinnedAnalysis> {
+  return request<PinnedAnalysis>("/api/workspace/widgets", { method: "POST", body: JSON.stringify(payload) }, authToken);
 }
 
 export async function deleteWorkspaceWidget(widgetId: string, authToken?: string | null): Promise<any> {
@@ -271,6 +326,68 @@ export async function fetchPriorSessionSummary(
     ? `/api/memory/prior-session-summary?current_session_id=${encodeURIComponent(currentSessionId)}`
     : "/api/memory/prior-session-summary";
   return request<{ questions: string[] }>(path, {}, authToken);
+}
+
+export async function fetchAdminHistory(
+  page: number = 1,
+  pageSize: number = 50,
+  search: string = "",
+  qualityFlag: string = "",
+  confidenceTier: string = "",
+  completedOnly: boolean = false,
+  authToken?: string | null
+): Promise<QueryHistoryPage> {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  if (search) params.append("search", search);
+  if (qualityFlag) params.append("quality_flag", qualityFlag);
+  if (confidenceTier) params.append("confidence_tier", confidenceTier);
+  if (completedOnly) params.append("completed_only", "true");
+  return request<QueryHistoryPage>(`/api/admin/history?${params.toString()}`, {}, authToken);
+}
+
+export async function fetchAdminHistoryDetail(
+  turnId: string,
+  authToken?: string | null
+): Promise<QueryHistoryDetail> {
+  return request<QueryHistoryDetail>(`/api/admin/history/${encodeURIComponent(turnId)}`, {}, authToken);
+}
+
+export async function fetchAdminAnalytics(
+  days: number = 30,
+  authToken?: string | null
+): Promise<TenantAnalytics> {
+  return request<TenantAnalytics>(`/api/admin/analytics?days=${days}`, {}, authToken);
+}
+
+export async function fetchAdminHealth(
+  authToken?: string | null
+): Promise<SystemHealthResponse> {
+  return request<SystemHealthResponse>("/api/admin/health", {}, authToken);
+}
+
+export async function fetchMemorySummary(
+  authToken?: string | null
+): Promise<MemorySummaryResponse> {
+  return request<MemorySummaryResponse>("/api/memory/summary", {}, authToken);
+}
+
+export async function createShareLink(
+  payload: ShareLinkCreateRequest,
+  authToken?: string | null
+): Promise<ShareLinkCreateResponse> {
+  return request<ShareLinkCreateResponse>("/api/share/create", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }, authToken);
+}
+
+export async function fetchSharedResult(
+  token: string
+): Promise<SharedResultResponse> {
+  return request<SharedResultResponse>(`/api/share/${encodeURIComponent(token)}`, {});
 }
 
 function socketUrl(path: string): string {

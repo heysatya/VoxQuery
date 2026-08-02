@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mic, BarChart2, Download, TrendingUp, TrendingDown, X, Play, Share2, Sparkles, ChevronRight, AlertTriangle } from "lucide-react";
+import { Mic, BarChart2, Download, TrendingUp, TrendingDown, X, Play, Sparkles, ChevronRight, AlertTriangle } from "lucide-react";
 import { ExecutiveAudioPlayer } from "../insight/ExecutiveAudioPlayer";
 import { FailureNotice } from "../notice/FailureNotice";
 import { fetchBriefing as fetchBriefingApi, fetchAuthenticatedBlob, ApiRequestError } from "../../../lib/api";
@@ -12,22 +12,32 @@ export type { BriefingKpi, BriefingAnomaly, ExecutiveBriefingData };
 
 type MorningBriefingCardProps = {
   token?: string | null;
+  getToken?: (options?: { skipCache?: boolean }) => Promise<string | null>;
+  briefing?: ExecutiveBriefingData | null;
+  onBriefingLoaded?: (briefing: ExecutiveBriefingData) => void;
   onSelectInsight?: (query: string) => void;
   onAskFollowUp?: () => void;
   variant?: "compact" | "card" | "drawer";
   onClose?: () => void;
   onOpenFullBriefing?: () => void;
+  onAuthExpired?: () => void;
+  actionsDisabled?: boolean;
 };
 
 export function MorningBriefingCard({
   token,
+  getToken,
+  briefing: providedBriefing,
+  onBriefingLoaded,
   onSelectInsight,
   onAskFollowUp,
   variant = "compact",
   onClose,
   onOpenFullBriefing,
+  onAuthExpired,
+  actionsDisabled = false,
 }: MorningBriefingCardProps) {
-  const [briefing, setBriefing] = useState<ExecutiveBriefingData | null>(null);
+  const [briefing, setBriefing] = useState<ExecutiveBriefingData | null>(providedBriefing ?? null);
   const [dismissed, setDismissed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -35,16 +45,25 @@ export function MorningBriefingCard({
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [isPlayingTopAudio, setIsPlayingTopAudio] = useState(false);
-  const [slackShared, setSlackShared] = useState(false);
+  const [authExpired, setAuthExpired] = useState(false);
 
-  // Silent retry once on failure, per PRD reliability policy
   const attemptFetch = useCallback(async (): Promise<ExecutiveBriefingData> => {
+    if (!token) {
+      throw new ApiRequestError(401, "Sign-in is required to load today's briefing.", "auth_missing");
+    }
     try {
       return await fetchBriefingApi(token);
-    } catch {
-      return await fetchBriefingApi(token);
+    } catch (error) {
+      if (!(error instanceof ApiRequestError) || error.status !== 401 || !getToken) {
+        throw error;
+      }
+      const refreshedToken = await getToken({ skipCache: true });
+      if (!refreshedToken) {
+        throw error;
+      }
+      return fetchBriefingApi(refreshedToken);
     }
-  }, [token]);
+  }, [getToken, token]);
 
   const loadBriefing = useCallback(async () => {
     setLoading(true);
@@ -52,22 +71,51 @@ export function MorningBriefingCard({
     try {
       const data = await attemptFetch();
       setBriefing(data);
+      setAuthExpired(false);
+      onBriefingLoaded?.(data);
     } catch (err) {
       setBriefing(null);
-      setLoadError(err instanceof ApiRequestError ? err.message : "Couldn't load today's briefing.");
+      const isAuthFailure = err instanceof ApiRequestError && err.status === 401;
+      setAuthExpired(isAuthFailure);
+      setLoadError(
+        isAuthFailure
+          ? "Your sign-in session expired. Sign in again to load today's briefing."
+          : err instanceof ApiRequestError
+          ? err.message
+          : "Couldn't load today's briefing."
+      );
     } finally {
       setLoading(false);
     }
-  }, [attemptFetch]);
+  }, [attemptFetch, onBriefingLoaded]);
 
   useEffect(() => {
+    if (providedBriefing) {
+      setBriefing(providedBriefing);
+      setLoading(false);
+      return;
+    }
+    if (!token) return;
     void loadBriefing();
-  }, [loadBriefing]);
+  }, [loadBriefing, providedBriefing, token]);
+
+  const fetchBriefingBlob = useCallback(async (path: string): Promise<Blob> => {
+    try {
+      return await fetchAuthenticatedBlob(path, undefined, token);
+    } catch (error) {
+      if (!(error instanceof ApiRequestError) || error.status !== 401 || !getToken) {
+        throw error;
+      }
+      const refreshedToken = await getToken({ skipCache: true });
+      if (!refreshedToken) throw error;
+      return fetchAuthenticatedBlob(path, undefined, refreshedToken);
+    }
+  }, [getToken, token]);
 
   useEffect(() => {
     if (!showDetails && !isPlayingTopAudio) return;
     let objectUrl: string | undefined;
-    fetchAuthenticatedBlob("/api/briefing/audio?voice=aura-asteria-en", undefined, token)
+    fetchBriefingBlob("/api/briefing/audio?voice=aura-asteria-en")
       .then((blob) => {
         objectUrl = URL.createObjectURL(blob);
         setAudioUrl(objectUrl);
@@ -76,12 +124,12 @@ export function MorningBriefingCard({
     return () => {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [token, showDetails, isPlayingTopAudio]);
+  }, [fetchBriefingBlob, showDetails, isPlayingTopAudio]);
 
   const handleDownloadPdf = async () => {
     try {
       setIsDownloadingPdf(true);
-      const blob = await fetchAuthenticatedBlob("/api/briefing/pdf", undefined, token);
+      const blob = await fetchBriefingBlob("/api/briefing/pdf");
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -95,16 +143,12 @@ export function MorningBriefingCard({
     }
   };
 
-  const handleSendSlack = () => {
-    setSlackShared(true);
-    setTimeout(() => setSlackShared(false), 3000);
-  };
-
   if (dismissed) return null;
 
   if (loading) {
     return (
       <div
+        data-testid="briefing-summary"
         role="status"
         aria-live="polite"
         aria-label="Loading briefing"
@@ -126,18 +170,22 @@ export function MorningBriefingCard({
 
   if (!briefing) {
     return (
-      <div role="status" aria-live="polite" className="w-full max-w-xl mx-auto mb-6">
+      <div data-testid="briefing-summary" role="status" aria-live="polite" className="w-full max-w-xl mx-auto mb-6">
         <FailureNotice
-          severity="info"
+          severity={authExpired ? "error" : "info"}
           message={loadError ?? "Couldn't load today's briefing."}
-          action={{ label: "Retry", onClick: () => void loadBriefing() }}
+          action={{
+            label: authExpired ? "Sign in again" : "Retry",
+            onClick: authExpired && onAuthExpired ? onAuthExpired : () => void loadBriefing()
+          }}
         />
       </div>
     );
   }
 
   const anomalyCount = briefing.anomalies?.length ?? 0;
-  const isPreviewData = !briefing.is_live || briefing.data_source === "fallback";
+  const isPreviewData = briefing.is_live !== true || briefing.data_source !== "live";
+  const hasLiveData = briefing.is_live === true && briefing.kpis.length > 0;
 
   const takeaways = briefing.anomalies && briefing.anomalies.length > 0
     ? briefing.anomalies.map((anom) => ({
@@ -166,31 +214,36 @@ export function MorningBriefingCard({
       ];
 
   /* ── COMPACT SUMMARY PRESENTATION (for Ready screen) ────────── */
+  const visibleTakeaways = hasLiveData ? takeaways : [];
+
   if (variant === "compact") {
     return (
       <motion.div
+        data-testid="briefing-summary"
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, height: 0 }}
-        className="w-full max-w-xl mx-auto mb-6 rounded-2xl glass-card p-4 relative overflow-hidden border border-white/10 hover:border-[var(--accent-blue)]/30 transition-all"
+        className="w-full max-w-xl mx-auto mb-6 rounded-2xl glass-card p-5 relative overflow-hidden border border-white/10 bg-[#10141C]/90 shadow-[0_12px_40px_rgba(0,0,0,0.22)] hover:border-[var(--accent-blue)]/30 transition-all"
       >
         {/* Compact Header Bar */}
         <div className="flex items-center justify-between mb-2.5">
           <div className="flex items-center gap-2">
-            <span className="text-sm">☀️</span>
+            <Sparkles className="w-4 h-4 text-[var(--accent-amber)]" aria-hidden="true" />
             <h3 className="text-xs font-semibold text-white tracking-tight">
-              Today's briefing
+              Today's business pulse
             </h3>
             <span
               className={`text-[10px] font-mono px-2 py-0.5 rounded-full border font-medium ${
-                anomalyCount === 0
+                !hasLiveData
+                  ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                  : anomalyCount === 0
                   ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                   : anomalyCount === 1
                   ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
                   : "bg-rose-500/10 text-rose-400 border-rose-500/20"
               }`}
             >
-              {anomalyCount === 0 ? "Clear" : `${anomalyCount} ${anomalyCount === 1 ? "flag" : "flags"}`}
+              {!hasLiveData ? "Unavailable" : anomalyCount === 0 ? "Clear" : `${anomalyCount} ${anomalyCount === 1 ? "flag" : "flags"}`}
             </span>
           </div>
 
@@ -209,14 +262,27 @@ export function MorningBriefingCard({
         {isPreviewData && (
           <div className="mb-2.5 px-2.5 py-1 rounded-md bg-[var(--accent-amber)]/10 border border-[var(--accent-amber)]/20 text-[var(--accent-amber)] text-[10px] font-medium flex items-center gap-1.5">
             <AlertTriangle className="w-3 h-3 shrink-0" />
-            <span>Preview mode — connect warehouse for live figures</span>
+            <span>Live workspace not connected - no business figures are being shown.</span>
           </div>
         )}
 
-        {/* Compact Key Takeaway Bullets (up to 2) */}
+        {!hasLiveData && (
+          <div className="mb-3 rounded-lg border border-white/10 bg-[var(--bg-base)]/50 px-3 py-3">
+            <p className="text-xs font-medium text-white">Your business pulse is not available yet.</p>
+            <p className="text-[11px] text-[var(--text-secondary)] mt-1">Connect a live workspace to see verified changes, risks, and recommended actions.</p>
+          </div>
+        )}
+
+        {/* Key takeaways */}
         <div className="space-y-2 mb-3">
-          {takeaways.slice(0, 2).map((item, idx) => (
-            <div key={idx} className="flex items-start gap-2 group cursor-pointer" onClick={onOpenFullBriefing}>
+          {visibleTakeaways.slice(0, 2).map((item, idx) => (
+            <button
+              key={idx}
+              type="button"
+              className="w-full text-left flex items-start gap-2 group cursor-pointer rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent-blue)]"
+              onClick={onOpenFullBriefing}
+              aria-label={`Open details for ${item.headline}`}
+            >
               <span className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${item.dotColor}`} />
               <div className="space-y-0.5 min-w-0 flex-1">
                 <h4 className="text-xs font-medium text-white tracking-wide truncate group-hover:text-[var(--accent-blue)] transition-colors">
@@ -226,7 +292,7 @@ export function MorningBriefingCard({
                   {item.subtext}
                 </p>
               </div>
-            </div>
+            </button>
           ))}
         </div>
 
@@ -235,7 +301,8 @@ export function MorningBriefingCard({
           <button
             type="button"
             onClick={onAskFollowUp}
-            className="flex-1 py-1.5 px-3 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)]/80 border border-white/10 text-white text-[11px] font-medium flex items-center justify-center gap-1.5 transition-all touch-target"
+            disabled={actionsDisabled}
+            className="flex-1 py-1.5 px-3 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)]/80 border border-white/10 text-white text-[11px] font-medium flex items-center justify-center gap-1.5 transition-all touch-target disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Mic className="w-3 h-3 text-[var(--accent-blue)]" />
             <span>Ask follow-up</span>
@@ -246,7 +313,7 @@ export function MorningBriefingCard({
             className="py-1.5 px-3 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] border border-white/10 text-[var(--text-secondary)] hover:text-white text-[11px] font-medium flex items-center justify-center gap-1.5 transition-all touch-target"
           >
             <BarChart2 className="w-3 h-3 text-[var(--accent-blue)]" />
-            <span>KPI breakdown</span>
+            <span>View details</span>
           </button>
         </div>
       </motion.div>
@@ -267,18 +334,20 @@ export function MorningBriefingCard({
         {/* Top Title Bar */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <span className="text-base">☀️</span>
+            <Sparkles className="w-4 h-4 text-[var(--accent-amber)]" aria-hidden="true" />
             <h2 className="text-sm font-semibold text-white tracking-tight">
-              Today's briefing
+              Today's business pulse
             </h2>
             <span
               className={`text-[10px] font-mono px-2 py-0.5 rounded-full border font-medium ${
-                anomalyCount === 0
+                !hasLiveData
+                  ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                  : anomalyCount === 0
                   ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                   : "bg-amber-500/10 text-amber-400 border-amber-500/20"
               }`}
             >
-              {anomalyCount === 0 ? "Clear" : `${anomalyCount} ${anomalyCount === 1 ? "flag" : "flags"}`}
+              {!hasLiveData ? "Unavailable" : anomalyCount === 0 ? "Clear" : `${anomalyCount} ${anomalyCount === 1 ? "flag" : "flags"}`}
             </span>
           </div>
 
@@ -292,7 +361,7 @@ export function MorningBriefingCard({
               className="px-2.5 py-1 rounded-full bg-[var(--accent-blue)]/15 hover:bg-[var(--accent-blue)]/25 border border-[var(--accent-blue)]/30 text-[var(--accent-blue)] text-[11px] font-medium flex items-center gap-1.5 transition-colors touch-target"
             >
               <Play className="w-3 h-3 fill-[var(--accent-blue)]" />
-              <span>Listen — 45s</span>
+              <span>Listen - 45s</span>
             </button>
             <span className="text-xs font-mono text-[var(--text-muted)]">9:00 AM</span>
             <button
@@ -314,18 +383,25 @@ export function MorningBriefingCard({
         {isPreviewData && (
           <div className="mb-3 px-3 py-1.5 rounded-lg bg-[var(--accent-amber)]/10 border border-[var(--accent-amber)]/20 text-[var(--accent-amber)] text-[11px] font-medium flex items-center gap-2">
             <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-            <span>Preview data — connect your warehouse for live figures</span>
+            <span>Live workspace not connected - no business figures are being shown.</span>
           </div>
         )}
 
         {/* Executive Greeting Subtitle */}
         <p className="text-xs text-[var(--text-secondary)] font-medium mb-3">
-          Good morning. Key highlights for today:
+          {hasLiveData ? "What changed and what may need attention:" : "Connect your workspace to generate a verified business pulse."}
         </p>
+
+        {!hasLiveData && (
+          <div className="mb-5 rounded-xl border border-white/10 bg-[var(--bg-base)]/50 px-4 py-4">
+            <p className="text-sm font-semibold text-white">No verified business figures are available.</p>
+            <p className="text-xs text-[var(--text-secondary)] mt-1">Once a live workspace is connected, this briefing will summarize changes, risks, and recommended actions.</p>
+          </div>
+        )}
 
         {/* Executive Bullet Takeaways */}
         <div className="space-y-3 mb-5">
-          {takeaways.map((item, idx) => (
+          {visibleTakeaways.map((item, idx) => (
             <div
               key={idx}
               className="flex items-start gap-2.5 group cursor-pointer"
@@ -349,7 +425,8 @@ export function MorningBriefingCard({
           <button
             type="button"
             onClick={onAskFollowUp}
-            className="flex-1 py-2 px-3.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 text-white text-xs font-semibold shadow-md flex items-center justify-center gap-2 transition-all active:scale-[0.98] touch-target"
+            disabled={actionsDisabled}
+            className="flex-1 py-2 px-3.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 text-white text-xs font-semibold shadow-md flex items-center justify-center gap-2 transition-all active:scale-[0.98] touch-target disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Mic className="w-3.5 h-3.5" />
             <span>Ask a follow-up</span>
@@ -387,7 +464,7 @@ export function MorningBriefingCard({
             {/* KPI Grid */}
             <div>
               <span className="text-[10px] font-mono text-[var(--text-muted)] uppercase tracking-widest block mb-2 font-semibold">
-                EXECUTIVE METRICS BREAKDOWN
+                BUSINESS SIGNALS
               </span>
               <div className="grid grid-cols-2 gap-2.5">
                 {briefing.kpis.map((kpi, idx) => (
@@ -413,15 +490,6 @@ export function MorningBriefingCard({
 
             {/* Export Actions */}
             <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={handleSendSlack}
-                className="text-xs px-3 py-1.5 rounded-xl bg-[var(--accent-green)]/10 hover:bg-[var(--accent-green)]/20 border border-[var(--accent-green)]/20 text-[var(--accent-green)] font-medium transition-all flex items-center gap-1.5 touch-target"
-              >
-                <Share2 className="w-3.5 h-3.5" />
-                <span>{slackShared ? "Shared to Slack!" : "Send to Slack"}</span>
-              </button>
-
               <button
                 type="button"
                 onClick={handleDownloadPdf}

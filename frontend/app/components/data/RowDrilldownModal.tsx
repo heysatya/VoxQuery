@@ -23,11 +23,7 @@ export function RowDrilldownModal({
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const attemptFetch = useCallback(async (tid: string): Promise<Record<string, any>[]> => {
-    try {
-      return await fetchDrilldownApi(tid, authToken);
-    } catch {
-      return await fetchDrilldownApi(tid, authToken);
-    }
+    return fetchDrilldownApi(tid, authToken);
   }, [authToken]);
 
   const fetchDrilldownData = useCallback(async () => {

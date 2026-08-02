@@ -4,38 +4,14 @@ import { render, screen } from "@testing-library/react";
 import { ExecutiveMemoryGraph } from "./ExecutiveMemoryGraph";
 
 describe("ExecutiveMemoryGraph", () => {
-  const mockAuth = {
-    mode: "fake" as const,
-    ready: true,
-    signedIn: true,
-    getToken: async () => "fake-token",
-  };
-
-  it("renders empty state when sessionId is null", () => {
-    render(<ExecutiveMemoryGraph sessionId={null} auth={mockAuth} />);
-    expect(
-      screen.getByText(
-        "Ask a question to get started — I'll keep track of what you've covered as you go."
-      )
-    ).toBeInTheDocument();
+  it("renders the empty state when there is no session", () => {
+    render(<ExecutiveMemoryGraph sessionId={null} />);
+    expect(screen.getByText("Your conversation trail will appear here.")).toBeInTheDocument();
   });
 
-  it("renders loading state initially", async () => {
-    // Mock the global fetch
-    const fetchMock = vi.fn().mockImplementation(() =>
-      Promise.resolve({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            session_id: "test-session",
-            nodes: [{ id: "n1", label: "Query 1", type: "query", turn_index: 1 }],
-            edges: [],
-          }),
-      })
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(<ExecutiveMemoryGraph sessionId="test-session" auth={mockAuth} />);
-    expect(screen.getByText("What we've covered")).toBeInTheDocument();
+  it("renders the conversation trail while loading history", () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => new Promise(() => undefined)));
+    render(<ExecutiveMemoryGraph sessionId="test-session" authToken="fake-token" />);
+    expect(screen.getByText("Conversation trail")).toBeInTheDocument();
   });
 });

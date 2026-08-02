@@ -192,3 +192,148 @@ export type MemoryGraphData = {
   nodes: GraphNode[];
   edges: GraphEdge[];
 };
+
+export type MemoryItem = {
+  id: string;
+  memory_type: "metric_interest" | "dimension_interest" | "time_range" | "filter_preference" | "clarification_resolution";
+  label: string;
+  confidence: number;
+  last_observed_at?: string | null;
+  created_at?: string | null;
+  source_turn_id?: string | null;
+};
+
+export type MemorySummaryResponse = {
+  items: MemoryItem[];
+  total: number;
+};
+
+export type PinnedAnalysis = {
+  id: string;
+  turn_id: string;
+  title: string;
+  created_at: string;
+  chart_type: string;
+  layout_x?: number;
+  layout_y?: number;
+  layout_w?: number;
+  layout_h?: number;
+  result: ResultResponse["result"];
+};
+
+export type QueryHistoryItem = {
+  turn_id: string;
+  session_id: string;
+  submitted_text: string;
+  user_input?: string;
+  user_display?: string;
+  input_modality: InputModality;
+  created_at: string;
+  confidence_tier?: "High" | "Medium" | "Low" | null;
+  chart_type?: string | null;
+  quality_flags?: string[];
+  execution_time_ms?: number | null;
+  latency_ms?: number | null;
+  user_feedback?: number | null;
+};
+
+export type QueryHistoryPage = {
+  items: QueryHistoryItem[];
+  total: number;
+  total_count: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  has_more?: boolean;
+};
+
+export type QueryHistoryDetail = {
+  turn_id: string;
+  session_id: string;
+  tenant_id: string;
+  submitted_text: string;
+  input_modality: InputModality;
+  raw_transcript?: string | null;
+  stt_confidence?: number | null;
+  transcript_edited?: boolean;
+  generated_sql?: string | null;
+  chart_type?: string | null;
+  chart_rationale?: string | null;
+  confidence_tier?: string | null;
+  confidence_reasons?: string[];
+  row_count?: number | null;
+  execution_time_ms?: number | null;
+  user_feedback?: number | null;
+  quality_flag?: string | null;
+  quality_flags?: string[];
+  created_at: string;
+};
+
+export type TenantAnalytics = {
+  total_queries: number;
+  active_sessions: number;
+  avg_latency_ms: number;
+  satisfaction_rate: number;
+  success_rate_pct?: number;
+  low_quality_rate_pct?: number;
+  queries_by_day?: Array<{ date: string; count: number }>;
+  queries_per_day?: Array<{ date: string; count: number }>;
+  modality_breakdown?: { voice: number; text: number };
+  confidence_breakdown?: { High: number; Medium: number; Low: number };
+  confidence_distribution: { high: number; medium: number; low: number };
+  top_metrics?: Array<{ metric: string; count: number }>;
+  top_questions?: Array<{ user_input: string; count: number }>;
+};
+
+export type HealthCheckItem = {
+  name: string;
+  status: "ok" | "degraded" | "error" | "not_configured";
+  latency_ms?: number | null;
+  details?: string | null;
+};
+
+export type SystemHealthResponse = {
+  status: "ok" | "degraded" | "error";
+  overall?: "ok" | "degraded" | "error";
+  components?: Record<string, HealthCheckItem>;
+  checks?: HealthCheckItem[];
+  checked_at: string;
+  version?: string;
+  last_briefing_at?: string | null;
+};
+
+export type ShareLinkCreateRequest = {
+  turn_id: string;
+  title?: string;
+  expires_in_days?: number;
+  ttl_hours?: number;
+};
+
+export type ShareLinkCreateResponse = {
+  token: string;
+  share_url?: string;
+  url?: string;
+  expires_at: string;
+};
+
+export type SharedResultResponse = {
+  token: string;
+  title?: string;
+  label?: string;
+  submitted_text?: string;
+  user_input?: string;
+  chart_type?: string;
+  confidence_tier?: "High" | "Medium" | "Low";
+  generated_sql?: string;
+  result?: ResultResponse["result"];
+  full_result?: ResultResponse["result"];
+  created_at: string;
+  expires_at: string;
+};
+
+export type WorkspaceDetail = {
+  id: string;
+  tenant_id: string;
+  name: string;
+  widgets: PinnedAnalysis[];
+};

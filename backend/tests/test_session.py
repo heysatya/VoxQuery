@@ -276,6 +276,7 @@ def test_redis_mode_requires_tls_in_staging_and_production():
         SUPABASE_DATABASE_URL="dummy",
         FERNET_KEY="dummy",
         SNOWFLAKE_DSN="dummy",
+        PUBLIC_APP_URL="https://voxquery.test",
     )
     production.validate_startup()
 

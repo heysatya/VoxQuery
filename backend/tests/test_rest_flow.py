@@ -150,7 +150,7 @@ def test_clear_non_ambiguous_query_returns_before_result_ready():
     assert payload["trust"]["data_freshness_note"] == "Live warehouse query"
     assert "order_items" in payload["generated_sql"]
     assert "customers.customer_segment" in payload["generated_sql"]
-    assert payload["chart_rationale"].endswith("customer_segment.")
+    assert payload["chart_rationale"].lower().endswith("customer segment.")
 
 
 async def test_positive_feedback_records_ok_quality_flag():

@@ -15,11 +15,13 @@ from apscheduler.jobstores.redis import RedisJobStore
 from app.config import Settings, get_settings
 from app.services.briefing import generate_morning_briefing
 from app.services.briefing_dispatcher import dispatch_briefing_email
+from app.warehouse.connector import WarehouseConnector
 
 logger = logging.getLogger("voxquery.services.briefing_scheduler")
 
 _scheduler: AsyncIOScheduler | None = None
 _db_pool: asyncpg.Pool | None = None
+_warehouse: WarehouseConnector | None = None
 
 
 def get_scheduler(settings: Settings | None = None) -> AsyncIOScheduler:
@@ -54,9 +56,14 @@ def get_scheduler(settings: Settings | None = None) -> AsyncIOScheduler:
     return _scheduler
 
 
-def start_briefing_scheduler(pool: asyncpg.Pool, settings: Settings) -> None:
-    global _db_pool
+def start_briefing_scheduler(
+    pool: asyncpg.Pool,
+    settings: Settings,
+    warehouse: WarehouseConnector | None = None,
+) -> None:
+    global _db_pool, _warehouse
     _db_pool = pool
+    _warehouse = warehouse
     scheduler = get_scheduler(settings)
     if not scheduler.running:
         scheduler.add_job(
@@ -81,15 +88,17 @@ async def check_and_dispatch_due_briefings(pool: asyncpg.Pool | None = None, set
     async with target_pool.acquire() as conn:
         due_users = await conn.fetch(
             """
-            SELECT up.user_id, up.email, up.delivery_time, up.timezone, u.tenant_id
+            SELECT up.user_id, up.email, up.delivery_time, up.timezone,
+                   tm.tenant_id, usr.snowflake_role
             FROM user_preferences up
-            JOIN users u ON u.id = up.user_id
+            JOIN tenant_memberships tm
+              ON tm.user_id = up.user_id AND tm.deleted_at IS NULL
+            JOIN users u
+              ON u.id = up.user_id AND u.deleted_at IS NULL
+            LEFT JOIN user_snowflake_roles usr
+              ON usr.user_id = tm.user_id AND usr.tenant_id = tm.tenant_id
             WHERE up.email_briefing_enabled = true
               AND up.email IS NOT NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM briefing_send_log bsl
-                  WHERE bsl.user_id = up.user_id AND bsl.send_date = CURRENT_DATE
-              )
             """
         )
 
@@ -114,9 +123,25 @@ async def check_and_dispatch_due_briefings(pool: asyncpg.Pool | None = None, set
 
         if local_now.hour == target_hour and local_now.minute == target_minute:
             try:
-                briefing = await generate_morning_briefing(tenant_id, target_settings, user_name="Executive")
-                await dispatch_briefing_email(user_id, email, briefing, target_settings, pool=target_pool, tenant_id=tenant_id)
-                dispatched_count += 1
+                user_name = email.split("@", 1)[0].replace(".", " ").replace("_", " ").title()
+                briefing = await generate_morning_briefing(
+                    tenant_id,
+                    target_settings,
+                    user_name=user_name or "Executive",
+                    warehouse=_warehouse,
+                    snowflake_role=str(row["snowflake_role"] or "ANALYST_READONLY"),
+                )
+                sent = await dispatch_briefing_email(
+                    user_id,
+                    email,
+                    briefing,
+                    target_settings,
+                    pool=target_pool,
+                    tenant_id=tenant_id,
+                    delivery_date=local_now.date(),
+                )
+                if sent:
+                    dispatched_count += 1
             except Exception as exc:
                 logger.error("Failed to dispatch scheduled briefing for user %s: %s", user_id, exc)
 

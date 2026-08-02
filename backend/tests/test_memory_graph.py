@@ -20,7 +20,7 @@ async def test_generate_memory_graph_service():
     sample_turns = [
         {
             "user_input": "Total Revenue 2025",
-            "chart_type": "bar",
+            "metric_name": "Total Revenue",
             "source_tables": ["orders"],
             "filter_predicates": ["state = 'CA'"],
         }

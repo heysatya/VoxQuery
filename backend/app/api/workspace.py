@@ -59,7 +59,7 @@ async def create_widget(
     """Pin a widget to current user's workspace."""
     if repo is None:
         raise ApiError(ErrorCode.service_unavailable, status_code=501, detail="Database pool unavailable")
-    return await repo.create_widget(
+    created = await repo.create_widget(
         claims,
         turn_id=request_data.turn_id,
         title=request_data.title,
@@ -68,6 +68,13 @@ async def create_widget(
         layout_w=request_data.layout_w,
         layout_h=request_data.layout_h,
     )
+    if created is None:
+        raise ApiError(
+            ErrorCode.turn_not_found,
+            status_code=404,
+            detail="Completed analysis not found or already saved.",
+        )
+    return created
 
 
 @router.delete("/api/workspace/widgets/{widget_id}")

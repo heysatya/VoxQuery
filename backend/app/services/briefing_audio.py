@@ -12,6 +12,7 @@ from typing import Any
 from app.config import Settings
 from app.core.tts import build_tts_provider
 from app.models.contracts import AuthClaims
+from app.warehouse.connector import WarehouseConnector
 from app.services.briefing import generate_morning_briefing
 
 logger = logging.getLogger("voxquery.services.briefing_audio")
@@ -30,13 +31,21 @@ async def get_or_generate_briefing_audio_bytes(
     settings: Settings,
     redis_client: Any | None = None,
     voice: str = "aura-asteria-en",
+    warehouse: WarehouseConnector | None = None,
 ) -> tuple[bytes, str]:
     """
     Returns (audio_bytes, provider_type).
     Checks Redis cache for key briefing_audio:{tenant_id}:{date}:{voice}:{hash}.
     If cache miss, synthesizes via Deepgram TTS and caches raw bytes in Redis.
     """
-    briefing = await generate_morning_briefing(claims.tenant_id, settings, user_name="Executive")
+    briefing = await generate_morning_briefing(
+        claims.tenant_id,
+        settings,
+        user_name="Executive",
+        warehouse=warehouse,
+        snowflake_role=claims.snowflake_role,
+        redis_client=redis_client,
+    )
     raw_text = f"{briefing.greeting}. {briefing.summary_narrative}"
     text_to_speak = clean_text_for_tts(raw_text)
 

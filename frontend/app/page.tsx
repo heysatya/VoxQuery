@@ -1,12 +1,12 @@
 "use client";
 
 import { OrganizationList, OrganizationSwitcher, SignInButton, UserButton, useAuth, useOrganization } from "@clerk/nextjs";
-import React, { useMemo, useEffect, useState } from "react";
+import React, { useMemo, useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { RotateCcw, CheckCircle2 } from "lucide-react";
+import { RotateCcw, CheckCircle2, X } from "lucide-react";
 import { useVoxQuerySession, type VoxQueryAuthRelay } from "./hooks/useVoxQuerySession";
 import { VoiceVisualizer } from "./components/hero/VoiceVisualizer";
-import { MorningBriefingCard } from "./components/briefing/MorningBriefingCard";
+import { MorningBriefingCard, type ExecutiveBriefingData } from "./components/briefing/MorningBriefingCard";
 import { ExecutiveMemoryGraph } from "./components/memory/ExecutiveMemoryGraph";
 import { DataGlassPanel } from "./components/data/DataGlassPanel";
 import { ExecutiveWorkspace } from "./components/workspace/ExecutiveWorkspace";
@@ -22,8 +22,8 @@ import { FailureNotice } from "./components/notice/FailureNotice";
 import { PriorSessionMemoryCard } from "./components/memory/PriorSessionMemoryCard";
 import { VoxQueryLogo } from "./components/brand/VoxQueryLogo";
 import { getStatusLabel } from "./state/interactionState";
-import { fetchWorkspaceWidgets, pinWorkspaceWidget, deleteWorkspaceWidget, fetchVersion, fetchBriefing, fetchPriorSessionSummary } from "../lib/api";
-import type { LastResult } from "../lib/types";
+import { fetchWorkspaceWidgets, pinWorkspaceWidget, deleteWorkspaceWidget, fetchVersion, fetchPriorSessionSummary, setAuthTokenRefresher } from "../lib/api";
+import type { LastResult, PinnedAnalysis } from "../lib/types";
 
 const authMode = process.env.NEXT_PUBLIC_AUTH_MODE ?? "fake";
 const showDebugUi = process.env.NEXT_PUBLIC_SHOW_DEBUG_UI === "true";
@@ -37,22 +37,31 @@ export default function HomePage() {
 
 function ClerkHomePage() {
   const { isLoaded: isAuthLoaded, isSignedIn, orgId, getToken } = useAuth();
+  // useOrganization provides richer org data but resolves in a second round-trip.
+  // We only need it for the org-picker screen — don't block auth on it.
   const { isLoaded: isOrgLoaded, organization } = useOrganization();
 
-  const isLoaded = isAuthLoaded && isOrgLoaded;
   const hasActiveOrg = Boolean(orgId || organization);
+
+  useEffect(() => {
+    setAuthTokenRefresher(getToken);
+    return () => setAuthTokenRefresher(null);
+  }, [getToken]);
 
   const auth = useMemo<VoxQueryAuthRelay>(
     () => ({
       mode: "clerk",
-      ready: isLoaded && hasActiveOrg,
+      // Engine is ready once both auth + org are confirmed.
+      ready: isAuthLoaded && isOrgLoaded && hasActiveOrg,
       signedIn: Boolean(isSignedIn) && hasActiveOrg,
       getToken
     }),
-    [getToken, isLoaded, isSignedIn, hasActiveOrg]
+    [getToken, isAuthLoaded, isOrgLoaded, isSignedIn, hasActiveOrg]
   );
 
-  if (!isLoaded) {
+  // Block ONLY on auth load — org load (second round-trip) must not gate the
+  // loading splash. Once auth resolves we know sign-in status and can branch.
+  if (!isAuthLoaded) {
     return (
       <main className="min-h-screen bg-[#090B10] flex items-center justify-center">
         <div className="text-[var(--text-muted)] text-sm font-medium animate-pulse">Loading workspace...</div>
@@ -77,6 +86,15 @@ function ClerkHomePage() {
   }
 
   if (!hasActiveOrg) {
+    // If org data is still loading (second round-trip), wait quietly instead of
+    // flashing the org-picker — which would be a false alarm while org resolves.
+    if (!isOrgLoaded) {
+      return (
+        <main className="min-h-screen bg-[#090B10] flex items-center justify-center">
+          <div className="text-[var(--text-muted)] text-sm font-medium animate-pulse">Loading workspace...</div>
+        </main>
+      );
+    }
     return (
       <main className="min-h-screen bg-[#090B10] flex flex-col items-center justify-center p-4">
         <div className="fixed top-4 right-4 z-50">
@@ -93,6 +111,7 @@ function ClerkHomePage() {
       </main>
     );
   }
+
 
   return <VoxQueryApp auth={auth} />;
 }
@@ -117,27 +136,24 @@ const STARTER_QUESTIONS = [
 function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
   const engine = useVoxQuerySession(auth);
   const [drilldownTurnId, setDrilldownTurnId] = useState<string | null>(null);
-  const [pinnedWidgets, setPinnedWidgets] = useState<any[]>([]);
+  const [pinnedWidgets, setPinnedWidgets] = useState<PinnedAnalysis[]>([]);
   const [token, setToken] = useState<string | null>(null);
   const [briefingDrawerOpen, setBriefingDrawerOpen] = useState(false);
   const [gitSha, setGitSha] = useState<string>("unknown");
-  const [anomalyCount, setAnomalyCount] = useState<number | null>(null);
+  const [briefingData, setBriefingData] = useState<ExecutiveBriefingData | null>(null);
   const [priorQuestions, setPriorQuestions] = useState<string[]>([]);
 
   useEffect(() => {
     let active = true;
-    auth.getToken().then((t) => {
+    auth.getToken({ skipCache: true }).then((t) => {
       if (active) {
         setToken(t);
-        fetchVersion(t).then((v) => {
-          if (active && v?.git_sha) setGitSha(v.git_sha);
-        }).catch(() => {});
-        if (t) {
-          fetchBriefing(t).then((b) => {
-            if (active && b?.anomalies) {
-              setAnomalyCount(b.anomalies.length);
-            }
+        if (showDebugUi) {
+          fetchVersion(t).then((v) => {
+            if (active && v?.git_sha) setGitSha(v.git_sha);
           }).catch(() => {});
+        }
+        if (t) {
           fetchPriorSessionSummary(engine.session.sessionId ?? undefined, t).then((res) => {
             if (active && res?.questions) {
               setPriorQuestions(res.questions);
@@ -151,7 +167,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
 
   useEffect(() => {
     let cancelled = false;
-    auth.getToken().then((token) => {
+    auth.getToken({ skipCache: true }).then((token) => {
       fetchWorkspaceWidgets(token).then((widgets) => {
         if (!cancelled && Array.isArray(widgets)) {
           setPinnedWidgets(widgets);
@@ -163,10 +179,24 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
     return () => { cancelled = true; };
   }, [auth]);
 
+  useEffect(() => {
+    if (!briefingDrawerOpen) return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setBriefingDrawerOpen(false);
+    };
+    document.addEventListener("keydown", handleEscape);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", handleEscape);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [briefingDrawerOpen]);
+
   const handlePinWidget = async (result: LastResult) => {
     const title = result.submittedText
       || result.resultData?.tts_text?.split(".")[0]
-      || "Pinned metric";
+      || "Saved analysis";
     try {
       const token = await auth.getToken();
       const newWidget = await pinWorkspaceWidget(
@@ -189,16 +219,32 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
     try {
       const token = await auth.getToken();
       await deleteWorkspaceWidget(id, token);
-      setPinnedWidgets((prev) => prev.filter((w) => w.id !== id && w.widget_id !== id));
+      setPinnedWidgets((prev) => prev.filter((w) => w.id !== id));
     } catch (err) {
       console.error("Failed to remove widget", err);
     }
   };
 
+  const handleRerunPinnedAnalysis = useCallback((query: string) => {
+    engine.setSubmittedText(query);
+    void engine.submitQuery(query);
+  }, [engine]);
+
   const isReviewing = engine.voiceState === "reviewing";
   const isActive = engine.recordingState !== "idle" || engine.pipelineInFlight;
   const hasResult = !!engine.lastResult;
   const isError = engine.turnState === "recoverable_error" || engine.turnState === "fatal_error";
+  const anomalyCount = briefingData?.anomalies?.length;
+  const briefingLabel = briefingData === null
+    ? "Business pulse"
+    : briefingData.is_live !== true
+    ? "Business pulse unavailable"
+    : anomalyCount === 0
+    ? "Business pulse - Clear"
+    : `Business pulse - ${anomalyCount} ${anomalyCount === 1 ? "flag" : "flags"}`;
+  const handleAuthExpired = useCallback(() => {
+    window.location.reload();
+  }, []);
 
   const uiState: "ready" | "reviewing" | "active" | "insight" =
     isReviewing ? "reviewing" :
@@ -229,15 +275,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
             className="px-3 py-1.5 rounded-full glass-card text-white text-xs font-semibold hover:border-[var(--accent-blue)]/50 transition-all flex items-center gap-1.5 touch-target"
             aria-label="Open today's briefing drawer"
           >
-            <span>
-              {anomalyCount === null
-                ? "☀️ Today's briefing"
-                : anomalyCount === 0
-                ? "☀️ Today's briefing — Clear"
-                : anomalyCount === 1
-                ? "☀️ Today's briefing — 1 flag"
-                : `☀️ Today's briefing — ${anomalyCount} flags`}
-            </span>
+            <span>{briefingLabel}</span>
           </button>
 
           {auth.mode === "clerk" && (
@@ -266,12 +304,12 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0, y: -20 }}
               transition={{ duration: 0.4 }}
-              className="flex-1 flex flex-col items-center justify-center min-h-[75vh] max-w-2xl w-full pt-8"
+              className="flex-1 flex flex-col items-center justify-start max-w-2xl w-full py-8 md:py-10"
             >
-              <VoxQueryLogo variant="hero" className="mb-8" />
+              <VoxQueryLogo variant="hero" className="mb-5" />
 
               {/* Voice Visualizer Orb - Primary Interaction */}
-              <div className="my-4 flex flex-col items-center">
+              <div className="my-2 flex flex-col items-center">
                 <VoiceVisualizer
                   state={engine.recordingState}
                   analyser={engine.audioAnalyserNode}
@@ -284,7 +322,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 />
               </div>
 
-              <h2 className="mt-8 text-2xl md:text-3xl font-extrabold text-white text-center tracking-tight">
+              <h2 className="mt-6 text-2xl md:text-3xl font-extrabold text-white text-center tracking-tight">
                 What would you like to know?
               </h2>
               <p className="mt-2 text-xs md:text-sm text-[var(--text-secondary)] font-medium text-center">
@@ -292,7 +330,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               </p>
 
               {/* Starter questions */}
-              <div className="mt-5 flex flex-wrap justify-center gap-2.5 max-w-lg">
+              <div className="mt-4 flex flex-wrap justify-center gap-2.5 max-w-lg">
                 {STARTER_QUESTIONS.map((q) => (
                   <button
                     key={q}
@@ -310,7 +348,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               </div>
 
               {/* Honest workspace connection status indicator */}
-              <div className="mt-6 flex items-center justify-center gap-2 text-xs font-medium">
+              <div className="mt-4 flex items-center justify-center gap-2 text-xs font-medium">
                 {engine.connectionState === "connected" ? (
                   <CheckCircle2 className="w-3.5 h-3.5 text-[var(--accent-green)]" />
                 ) : engine.connectionState === "connecting" || engine.connectionState === "disconnected" ? (
@@ -327,12 +365,26 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 }>
                   {engine.connectionStatusLabel}
                 </span>
+                {engine.connectionState === "error" && (
+                  <button
+                    type="button"
+                    onClick={engine.retryConnection}
+                    className="ml-1 rounded-full border border-rose-400/30 px-2.5 py-1 text-[11px] font-semibold text-rose-300 hover:bg-rose-400/10 transition-colors touch-target"
+                  >
+                    Retry connection
+                  </button>
+                )}
               </div>
 
               {/* Home Screen Briefing Summary Card */}
-              <div className="mt-8 w-full max-w-xl">
+              <div className="mt-5 w-full max-w-xl">
                 <MorningBriefingCard
                   token={token}
+                  getToken={auth.getToken}
+                  briefing={briefingData}
+                  onBriefingLoaded={setBriefingData}
+                  onAuthExpired={handleAuthExpired}
+                  actionsDisabled={!engine.isReady}
                   variant="compact"
                   onSelectInsight={(q) => {
                     engine.setSubmittedText(q);
@@ -354,11 +406,12 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 />
               </div>
 
-              {/* Saved metrics workspace */}
+              {/* Pinned analyses workspace */}
               <div className="mt-6 w-full">
                 <ExecutiveWorkspace
                   pinnedWidgets={pinnedWidgets}
                   onRemoveWidget={handleRemoveWidget}
+                  onRerunAnalysis={handleRerunPinnedAnalysis}
                 />
               </div>
 
@@ -491,10 +544,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               <DataGlassPanel
                 result={engine.lastResult}
                 feedbackRating={engine.feedbackRating}
-                isMuted={engine.isMuted}
                 onFeedback={engine.submitFeedback}
-                onMute={engine.muteTTS}
-                onUnmute={engine.unmuteTTS}
                 onDrillDown={engine.submitQuery}
                 onDrilldownOpen={setDrilldownTurnId}
                 onPin={handlePinWidget}
@@ -526,7 +576,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
               {/* Conversation context graph */}
               <div className="mt-6 w-full">
                 <h4 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
-                  Conversation context
+                  Analysis recap
                 </h4>
                 <ExecutiveMemoryGraph
                   sessionId={engine.session.sessionId}
@@ -599,10 +649,30 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
       {/* Briefing Drawer Overlay */}
       <AnimatePresence>
         {briefingDrawerOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
-            <div className="w-full max-w-xl">
+          <div
+            data-testid="briefing-drawer"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Today's executive briefing"
+            onClick={() => setBriefingDrawerOpen(false)}
+          >
+            <div className="w-full max-w-xl relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={() => setBriefingDrawerOpen(false)}
+                className="absolute top-4 right-4 z-10 p-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors touch-target"
+                aria-label="Close briefing drawer"
+              >
+                <X className="w-4 h-4" />
+              </button>
               <MorningBriefingCard
                 token={token}
+                getToken={auth.getToken}
+                briefing={briefingData}
+                onBriefingLoaded={setBriefingData}
+                onAuthExpired={handleAuthExpired}
+                actionsDisabled={!engine.isReady}
                 variant="drawer"
                 onClose={() => setBriefingDrawerOpen(false)}
                 onSelectInsight={(q) => {

@@ -30,8 +30,8 @@ async def test_get_or_generate_briefing_audio_bytes_redis_cache():
     claims = AuthClaims(user_id=str(user_id), tenant_id=str(tenant_id), email="audio@test.com", role="admin", snowflake_role="ANALYST")
 
     mock_redis = AsyncMock()
-    mock_redis.get.return_value = b"\x01\x02\x03\x04"  # Cache hit
+    mock_redis.get.side_effect = lambda key: b"\x01\x02\x03\x04" if "briefing_audio" in str(key) else None  # Cache hit for audio only
 
     audio_bytes, provider = await get_or_generate_briefing_audio_bytes(claims, settings, redis_client=mock_redis)
     assert audio_bytes == b"\x01\x02\x03\x04"
-    mock_redis.get.assert_called_once()
+    assert mock_redis.get.call_count >= 1

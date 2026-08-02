@@ -17,7 +17,11 @@ class TenantRoutingWarehouseConnector(WarehouseConnector):
     def __init__(self, settings: Settings, db_pool: asyncpg.Pool, sf_pool: SnowflakeConnectionPool | None = None):
         self.settings = settings
         self.db_pool = db_pool
-        self.sf_pool = sf_pool  # Pre-warmed pool shared across all tenants
+        # A SnowflakeConnectionPool owns credentials/connection parameters and
+        # therefore cannot be shared across tenant DSNs. Keep the argument for
+        # compatibility with existing callers, but never use a global pool for
+        # tenant-routed connections.
+        self.sf_pool = None
         self.fernet = Fernet(settings.fernet_key.encode()) if settings.fernet_key else None
         self._cache: dict[str, tuple[WarehouseConnector, datetime]] = {}
 
@@ -29,8 +33,8 @@ class TenantRoutingWarehouseConnector(WarehouseConnector):
 
         if not self.fernet:
             # Fallback for dev/test mode if no encryption configured
-            if self.settings.snowflake_dsn:
-                connector = SnowflakeWarehouseConnector(dsn=self.settings.snowflake_dsn, pool=self.sf_pool)
+            if self.settings.snowflake_dsn and getattr(self.settings, "app_env", "development") in {"development", "test"}:
+                connector = SnowflakeWarehouseConnector(dsn=self.settings.snowflake_dsn)
                 self._cache[tenant_id] = (connector, datetime.now(UTC))
                 return connector
             raise RuntimeError("FERNET_KEY is required to decrypt tenant warehouse configurations.")
@@ -51,7 +55,9 @@ class TenantRoutingWarehouseConnector(WarehouseConnector):
             logger.error(f"Failed to decrypt DSN for tenant {tenant_id}: {e}")
             raise RuntimeError("Failed to decrypt warehouse connection configuration.") from e
 
-        connector = SnowflakeWarehouseConnector(dsn=decrypted_dsn, pool=self.sf_pool)
+        # The decrypted DSN is tenant-specific. Never attach a pool created
+        # from another tenant's DSN or from a global SNOWFLAKE_DSN.
+        connector = SnowflakeWarehouseConnector(dsn=decrypted_dsn)
         self._cache[tenant_id] = (connector, datetime.now(UTC))
         return connector
 

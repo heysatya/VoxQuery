@@ -5,12 +5,11 @@ Morning Executive Briefing API Router (PRD V2.1 Feature 1).
 from __future__ import annotations
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from app.config import Settings, get_settings
-from app.core.rate_limit import RateLimiter
 from app.middleware.auth import get_current_user
-from app.models.contracts import AuthClaims, ExecutiveBriefingResponse
+from app.models.contracts import ApiError, AuthClaims, ErrorCode, ExecutiveBriefingResponse
 from app.services.briefing import generate_morning_briefing
 
 router = APIRouter()
@@ -22,13 +21,20 @@ def get_warehouse(request: Request):
     return getattr(pipeline, "warehouse", None)
 
 
-async def _enforce_rate_limit(user_id: str, settings: Settings) -> None:
-    rate_limiter = RateLimiter(settings)
-    rl_result = await rate_limiter.check_rate_limit(user_id)
+async def _enforce_rate_limit(request: Request, claims: AuthClaims) -> None:
+    rate_limiter = request.app.state.rate_limiter
+    rl_result = await rate_limiter.check_rate_limit(claims.user_id, claims.tenant_id)
+    if not rl_result.available:
+        raise ApiError(
+            ErrorCode.service_unavailable,
+            status_code=503,
+            detail="Request protection is temporarily unavailable.",
+        )
     if not rl_result.ok:
-        raise HTTPException(
+        raise ApiError(
+            ErrorCode.rate_limit_exceeded,
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Rate limit exceeded. Retry in {rl_result.retry_after_seconds} seconds.",
+            detail=f"Retry after {rl_result.retry_after_seconds}s",
         )
 
 
@@ -42,6 +48,7 @@ def _get_user_name(claims: AuthClaims) -> str:
 
 @router.get("/api/briefing", response_model=ExecutiveBriefingResponse)
 async def get_briefing(
+    request: Request,
     claims: AuthClaims = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
     warehouse = Depends(get_warehouse),
@@ -49,11 +56,16 @@ async def get_briefing(
     """
     Fetch the morning executive briefing for the authenticated tenant.
     """
-    await _enforce_rate_limit(claims.user_id, settings)
+    await _enforce_rate_limit(request, claims)
     logger.info("Generating morning briefing for tenant_id=%s user_id=%s", claims.tenant_id, claims.user_id)
     user_name = _get_user_name(claims)
     return await generate_morning_briefing(
-        claims.tenant_id, settings, user_name=user_name, warehouse=warehouse, snowflake_role=claims.snowflake_role
+        claims.tenant_id,
+        settings,
+        user_name=user_name,
+        warehouse=warehouse,
+        snowflake_role=claims.snowflake_role,
+        redis_client=getattr(getattr(request.app.state, "sessions", None), "client", None),
     )
 
 
@@ -66,10 +78,15 @@ async def get_briefing_pdf(
 ):
     from fastapi.responses import Response
     from app.services.pdf_exporter import generate_briefing_pdf
-    await _enforce_rate_limit(claims.user_id, settings)
+    await _enforce_rate_limit(request, claims)
     user_name = _get_user_name(claims)
     briefing = await generate_morning_briefing(
-        claims.tenant_id, settings, user_name=user_name, warehouse=warehouse, snowflake_role=claims.snowflake_role
+        claims.tenant_id,
+        settings,
+        user_name=user_name,
+        warehouse=warehouse,
+        snowflake_role=claims.snowflake_role,
+        redis_client=getattr(getattr(request.app.state, "sessions", None), "client", None),
     )
     
     tenant_name = claims.tenant_name
@@ -93,15 +110,21 @@ async def get_briefing_pdf(
 
 @router.get("/api/briefing/audio")
 async def get_briefing_audio(
+    request: Request,
     voice: str = Query(default="aura-asteria-en", description="TTS voice narrator model"),
     claims: AuthClaims = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
+    warehouse = Depends(get_warehouse),
 ):
     from fastapi.responses import Response
     from app.services.briefing_audio import get_or_generate_briefing_audio_bytes
-    await _enforce_rate_limit(claims.user_id, settings)
+    await _enforce_rate_limit(request, claims)
     audio_bytes, provider = await get_or_generate_briefing_audio_bytes(
-        claims, settings, redis_client=None, voice=voice
+        claims,
+        settings,
+        redis_client=getattr(getattr(request.app.state, "sessions", None), "client", None),
+        voice=voice,
+        warehouse=warehouse,
     )
     return Response(content=audio_bytes, media_type="audio/mpeg")
 

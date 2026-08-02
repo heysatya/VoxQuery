@@ -116,7 +116,7 @@ class PostgresAuditStore(AuditStore):
                 # 1. Upsert tenant
                 await conn.execute("""
                     INSERT INTO tenants (id, name) VALUES ($1, $2)
-                    ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+                    ON CONFLICT (id) DO NOTHING
                 """, identity["tenant_id"], identity.get("tenant_name", "Unknown"))
                 
                 # 2. Upsert user
@@ -128,7 +128,9 @@ class PostgresAuditStore(AuditStore):
                 # 2b. Upsert tenant_memberships
                 await conn.execute("""
                     INSERT INTO tenant_memberships (tenant_id, user_id, role) VALUES ($1, $2, $3)
-                    ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = EXCLUDED.role
+                    ON CONFLICT (tenant_id, user_id) DO UPDATE
+                    SET role = EXCLUDED.role, updated_at = NOW()
+                    WHERE tenant_memberships.deleted_at IS NULL
                 """, identity["tenant_id"], identity["user_id"], identity.get("role", "viewer"))
                 
                 # 3. Upsert user_snowflake_roles
@@ -179,7 +181,7 @@ class PostgresAuditStore(AuditStore):
                     )
             
     async def _update_feedback(self, turn_id: str, quality_flag: str) -> None:
-        query = "UPDATE turns SET quality_flag = $1 WHERE turn_id = $2::uuid OR id = $2::uuid"
+        query = "UPDATE turns SET quality_flag = $1, feedback_submitted = TRUE WHERE turn_id = $2::uuid"
         async with self._pool.acquire() as conn:
             await conn.execute(query, quality_flag, turn_id)
 

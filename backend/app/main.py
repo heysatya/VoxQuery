@@ -19,6 +19,8 @@ from fastapi.responses import JSONResponse
 
 from app.api.briefing import router as briefing_router
 from app.api.memory_graph import router as memory_graph_router
+from app.api.memory import router as memory_router
+from app.api.share import router as share_router
 from app.api.workspace import router as workspace_router
 from app.api.rest import router as rest_router
 from app.api.ws_audio import router as ws_audio_router
@@ -44,7 +46,7 @@ from app.warehouse.snowflake import SnowflakeWarehouseConnector
 import asyncpg
 from anthropic import AsyncAnthropic
 from langfuse.openai import AsyncOpenAI
-from app.warehouse.snowflake import SnowflakeConnectionPool
+
 settings = get_settings()
 settings.validate_startup()
 logger = logging.getLogger("voxquery.api")
@@ -88,6 +90,7 @@ storyteller = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    db_pool = None
     if settings.supabase_database_url:
         await run_migrations(settings.supabase_database_url)
     
@@ -114,21 +117,16 @@ async def lifespan(app: FastAPI):
             else:
                 pool = schema_retriever.pool
             
-            # Build a pre-warmed Snowflake connection pool.
-            # Connections are created lazily on first use per thread.
-            sf_conn_params = SnowflakeWarehouseConnector(dsn=settings.snowflake_dsn or "")._parse_dsn() if settings.snowflake_dsn else None
-            sf_pool = SnowflakeConnectionPool(conn_params=sf_conn_params, pool_size=5) if sf_conn_params else None
-            
-            # Pass the pre-warmed pool to the routing connector so that
-            # tenant-resolved connectors reuse persistent connections instead
-            # of opening a fresh TLS handshake per query (slow path).
-            warehouse_connector = TenantRoutingWarehouseConnector(settings=settings, db_pool=pool, sf_pool=sf_pool)
-            app.state.sf_pool = sf_pool  # stored for teardown
+            # Do not create a global Snowflake pool here. Its credentials would
+            # be shared across tenant connectors and could cross tenant data
+            # boundaries. TenantRoutingWarehouseConnector resolves each
+            # encrypted tenant DSN independently.
+            warehouse_connector = TenantRoutingWarehouseConnector(settings=settings, db_pool=pool)
         else:
             dsn = settings.snowflake_dsn or "dummy_dsn"
             warehouse_connector = SnowflakeWarehouseConnector(dsn=dsn)
             
-    app.state.db_pool = getattr(schema_retriever, "pool", None) or pool if 'pool' in locals() else None
+    app.state.db_pool = getattr(schema_retriever, "pool", None) or db_pool or (pool if "pool" in locals() else None)
     await audit_store.start()
     await app.state.sessions.start()
     
@@ -147,17 +145,17 @@ async def lifespan(app: FastAPI):
     
     from app.services.briefing_scheduler import start_briefing_scheduler
     if app.state.db_pool and settings.supabase_database_url:
-        start_briefing_scheduler(app.state.db_pool, settings)
+        start_briefing_scheduler(app.state.db_pool, settings, warehouse=warehouse_connector)
 
     yield
     await audit_store.stop()
     await app.state.sessions.close()
+    await app.state.rate_limiter.close()
     if schema_retriever and getattr(schema_retriever, "pool", None):
         await schema_retriever.pool.close()
         
-    # Gracefully drain the Snowflake thread pool
-    if hasattr(app.state, "sf_pool") and app.state.sf_pool:
-        await app.state.sf_pool.close()
+    if app.state.db_pool and not getattr(schema_retriever, "pool", None):
+        await app.state.db_pool.close()
 
 app = FastAPI(title="VoxQuery Voice Subsystem", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
@@ -170,7 +168,10 @@ app.add_middleware(
 
 app.state.audit = audit_store
 app.state.sessions = build_session_store(settings=settings)
-app.state.rate_limiter = RateLimiter(settings=settings)
+app.state.rate_limiter = RateLimiter(
+    settings=settings,
+    client=getattr(app.state.sessions, "client", None),
+)
 app.state.events = PipelineEventBus()
 # The pipeline is fully initialized in the lifespan context now.
 app.state.pipeline = PipelineOrchestrator(
@@ -277,4 +278,6 @@ app.include_router(telemetry_router)
 app.include_router(webhooks_router)
 app.include_router(briefing_router)
 app.include_router(memory_graph_router)
+app.include_router(memory_router)
+app.include_router(share_router)
 app.include_router(workspace_router)

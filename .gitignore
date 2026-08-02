@@ -75,3 +75,8 @@ playwright-report/
 test-results/
 frontend/playwright-report/
 frontend/test-results/
+artifacts/
+frontend/artifacts/
+
+# Temporary directories
+temp/

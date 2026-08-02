@@ -133,8 +133,17 @@ class FakeWarehouseConnector(WarehouseConnector):
 
 class FakeChartSelector:
     def select(self, result: ResultPayload) -> tuple[ChartType, str]:
-        dimension = result.columns[0] if result.columns else "dimension"
-        return ChartType.bar, f"Showing as bar chart - categorical comparison detected on {dimension}."
+        semantics = result.semantic_columns
+        numeric = [column for column in semantics if column.value_type == "number" or column.role == "metric"]
+        time_columns = [column for column in semantics if column.role == "time"]
+        dimensions = [column for column in semantics if column.role == "dimension"]
+        if result.row_count == 1 and numeric:
+            return ChartType.stat, "A single KPI is the clearest view for this result."
+        if time_columns and numeric:
+            return ChartType.line, f"Showing change over time using {numeric[0].display_name}."
+        if dimensions and numeric:
+            return ChartType.bar, f"Comparing {numeric[0].display_name} across {dimensions[0].display_name}."
+        return ChartType.table, "A table is the clearest view for this result shape."
 
 
 class FakeStoryteller:
@@ -142,7 +151,11 @@ class FakeStoryteller:
         return result_shape.aggregate_summary
 
     async def generate_proactive_questions(self, result_shape: ResultShape, user_query: str) -> list[str]:
-        return ["Fake proactive question 1", "Fake proactive question 2"]
+        return [
+            "What are the top drivers for this result?",
+            "How does this compare to the prior month?",
+            "Can we break this down by region?",
+        ]
 
 
 def clarification_options_for_signal() -> tuple[str, list[str]]:

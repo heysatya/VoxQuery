@@ -86,7 +86,12 @@ async def audio_socket(
         await websocket.close(code=4002)
         return
 
-    limit = await websocket.app.state.rate_limiter.check_rate_limit(str(claims.user_id))
+    limit = await websocket.app.state.rate_limiter.check_rate_limit(
+        str(claims.user_id), str(claims.tenant_id)
+    )
+    if not limit.available:
+        await websocket.close(code=1013, reason="Request protection is temporarily unavailable")
+        return
     if not limit.ok:
         # 4429: custom close code for rate limit exceeded
         await websocket.close(code=4429, reason=f"Rate limit exceeded. Retry after {limit.retry_after_seconds}s")

@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     session_ttl_seconds: int = Field(default=14_400, alias="SESSION_TTL_SECONDS")
     token_budget: int = Field(default=2_500, alias="TOKEN_BUDGET")
     result_cache_ttl_seconds: int = Field(default=300, alias="RESULT_CACHE_TTL_SECONDS")
+    public_app_url: str = Field(default="http://localhost:3000", alias="PUBLIC_APP_URL")
+    briefing_email_provider: str = Field(default="disabled", alias="BRIEFING_EMAIL_PROVIDER")
+    briefing_email_from: str | None = Field(default=None, alias="BRIEFING_EMAIL_FROM")
+    resend_api_key: str | None = Field(default=None, alias="RESEND_API_KEY")
+    resend_api_url: str = Field(default="https://api.resend.com/emails", alias="RESEND_API_URL")
     session_store: str = Field(default="memory", alias="SESSION_STORE")
     upstash_redis_url: str | None = Field(default=None, alias="UPSTASH_REDIS_URL")
     supabase_database_url: str | None = Field(default=None, alias="SUPABASE_DATABASE_URL")
@@ -75,6 +80,14 @@ class Settings(BaseSettings):
         allowed = {"memory", "redis"}
         if value not in allowed:
             raise ValueError(f"SESSION_STORE must be one of {sorted(allowed)}")
+        return value
+
+    @field_validator("briefing_email_provider")
+    @classmethod
+    def validate_briefing_email_provider(cls, value: str) -> str:
+        allowed = {"disabled", "resend"}
+        if value not in allowed:
+            raise ValueError(f"BRIEFING_EMAIL_PROVIDER must be one of {sorted(allowed)}")
         return value
 
     @field_validator("stt_provider")
@@ -147,6 +160,11 @@ class Settings(BaseSettings):
             )
         ):
             raise RuntimeError("CLERK_ISSUER and CLERK_JWKS_URL must use https://.")
+        if self.app_env in {"staging", "production"}:
+            if self.session_store != "redis":
+                raise RuntimeError("SESSION_STORE=redis is required in staging/production.")
+            if not self.upstash_redis_url:
+                raise RuntimeError("UPSTASH_REDIS_URL is required in staging/production.")
         if self.session_store == "redis" and not self.upstash_redis_url:
             raise RuntimeError("UPSTASH_REDIS_URL is required when SESSION_STORE=redis.")
         if (
@@ -165,8 +183,15 @@ class Settings(BaseSettings):
         if self.app_env in {"staging", "production"}:
             if not self.fernet_key:
                 raise RuntimeError("FERNET_KEY is required in staging/production.")
-            if not self.snowflake_dsn:
-                raise RuntimeError("SNOWFLAKE_DSN is required in staging/production.")
+            if self.warehouse_provider == "snowflake" and not self.supabase_database_url:
+                raise RuntimeError("SUPABASE_DATABASE_URL is required for tenant-routed Snowflake in staging/production.")
+            if not self.public_app_url.startswith("https://"):
+                raise RuntimeError("PUBLIC_APP_URL must use https:// in staging/production.")
+        if self.briefing_email_provider == "resend":
+            if not self.resend_api_key:
+                raise RuntimeError("RESEND_API_KEY is required when BRIEFING_EMAIL_PROVIDER=resend.")
+            if not self.briefing_email_from:
+                raise RuntimeError("BRIEFING_EMAIL_FROM is required when BRIEFING_EMAIL_PROVIDER=resend.")
 
 
 @lru_cache

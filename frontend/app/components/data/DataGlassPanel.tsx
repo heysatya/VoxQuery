@@ -24,6 +24,7 @@ import {
 } from "recharts";
 import { TrustPanel } from "./TrustPanel";
 import { triggerPdfExport } from "../../../lib/pdfExporter";
+import { createShareLink } from "../../../lib/api";
 
 /* -- Chart Renderer ---------------------------------------------- */
 
@@ -262,10 +263,7 @@ function ChartRenderer({ type, result, onDrillDown }: { type: ChartType; result:
 type DataGlassPanelProps = {
   result: LastResult;
   feedbackRating: -1 | 1 | null;
-  isMuted: boolean;
   onFeedback: (rating: -1 | 1) => void | Promise<void>;
-  onMute: () => void;
-  onUnmute: () => void;
   onDrillDown?: (query: string) => void;
   onDrilldownOpen?: (turnId: string) => void;
   onPin?: (result: LastResult) => void;
@@ -325,8 +323,18 @@ export function DataGlassPanel({
   }
 
   const [copiedLink, setCopiedLink] = useState(false);
-  function copyPermalink() {
-    // Generate a permalink using the turnId
+  async function copyPermalink() {
+    try {
+      const shareRes = await createShareLink({ turn_id: result.turnId, ttl_hours: 168 });
+      if (shareRes?.url) {
+        await navigator.clipboard.writeText(shareRes.url);
+        setCopiedLink(true);
+        setTimeout(() => setCopiedLink(false), 2000);
+        return;
+      }
+    } catch (err) {
+      console.warn("Share link creation error, falling back to permalink", err);
+    }
     const url = new URL(window.location.href);
     url.searchParams.set("share", result.turnId);
     navigator.clipboard.writeText(url.toString()).then(() => {

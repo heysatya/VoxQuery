@@ -1,12 +1,12 @@
 <svg width="180" height="40" viewBox="0 0 180 40" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="vq-wm-white" x1="0" y1="0" x2="80" y2="40" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#FFFFFF" />
-      <stop offset="100%" stop-color="#F0F9FF" />
+      <stop offset="0%" stop-color="#60A5FA" />
+      <stop offset="100%" stop-color="#2563EB" />
     </linearGradient>
     <linearGradient id="vq-wm-blue" x1="80" y1="0" x2="180" y2="40" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#38BDF8" />
-      <stop offset="100%" stop-color="#0284C7" />
+      <stop offset="100%" stop-color="#34D399" />
     </linearGradient>
   </defs>
 

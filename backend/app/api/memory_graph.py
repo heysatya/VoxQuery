@@ -27,9 +27,9 @@ async def get_memory_graph(
     settings: Settings = Depends(get_settings),
 ) -> MemoryGraphResponse:
     """
-    Fetch the multi-turn executive memory graph for a given session with tenant scoping.
+    Fetch the tenant-scoped analysis recap for a given session.
     """
-    logger.info("Fetching memory graph session_id=%s tenant_id=%s", session_id, claims.tenant_id)
+    logger.info("Fetching analysis recap session_id=%s tenant_id=%s", session_id, claims.tenant_id)
     
     turns: list[dict[str, Any]] = []
 

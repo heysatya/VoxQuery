@@ -319,9 +319,13 @@ Chart Type: {result_shape.chart_type}"""
                     {"role": "user", "content": user_prompt}
                 ]
             )
-        except anthropic.AnthropicError as e:
+        except Exception as e:
             logger.error(f"LLM Proactive questions failed: {e}")
-            return []
+            return [
+                "What are the key drivers behind this?",
+                "How does this compare to the previous period?",
+                "Can we break this down by dimension?",
+            ]
             
         content = response.content[0].text.strip()
         if content.startswith("```json"):
@@ -332,10 +336,18 @@ Chart Type: {result_shape.chart_type}"""
         
         try:
             questions = json.loads(content)
-            if not isinstance(questions, list):
-                return []
+            if not isinstance(questions, list) or not questions:
+                return [
+                    "What are the key drivers behind this?",
+                    "How does this compare to the previous period?",
+                    "Can we break this down by dimension?",
+                ]
             _safe_update_current_generation(output={"proactive_questions": questions[:3]})
             return [str(q) for q in questions[:3]]
         except Exception as e:
             logger.error(f"Failed to parse proactive questions JSON: {e}")
-            return []
+            return [
+                "What are the key drivers behind this?",
+                "How does this compare to the previous period?",
+                "Can we break this down by dimension?",
+            ]

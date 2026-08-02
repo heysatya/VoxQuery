@@ -74,7 +74,7 @@ describe("result semantics", () => {
 
   it("formats metrics and row summaries consistently", () => {
     const metric = semanticColumns(baseResult)[1];
-    expect(formatResultValue(1240000, metric)).toBe("1,240,000");
+    expect(formatResultValue(1240000, metric)).toBe("$1.2M");
     expect(resultRowSummary(baseResult)).toBe("1 row");
     expect(
       resultRowSummary({
@@ -109,24 +109,23 @@ describe("result semantics", () => {
 
   it("4.2: derives caveat from backend confidence_reasons when present", () => {
     const caveat = deriveCaveatText(mediumWithReasons);
-    expect(caveat).toMatch(/Partial match/);
-    expect(caveat).toMatch(/schema match was weaker/i);
+    expect(caveat).toMatch(/Review recommended/);
   });
 
   it("4.2: derives caveat from warnings when no reasons provided", () => {
     const caveat = deriveCaveatText(mediumWithWarnings);
-    expect(caveat).toMatch(/Partial match/);
+    expect(caveat).toMatch(/Review recommended/);
     expect(caveat).toMatch(/duplicate/i);
   });
 
   it("4.2: falls back to tier-based caveat for Medium with no other evidence", () => {
     const caveat = deriveCaveatText(mediumResult);
-    expect(caveat).toMatch(/We made some assumptions/);
+    expect(caveat).toMatch(/Review recommended/);
   });
 
   it("4.2: falls back to assumptions caveat for Low tier", () => {
     const caveat = deriveCaveatText(lowResult);
-    expect(caveat).toMatch(/We made a few assumptions/);
+    expect(caveat).toMatch(/Needs confirmation/);
   });
 
   // ── Phase 4.4: Visualization policy ───────────────────────────

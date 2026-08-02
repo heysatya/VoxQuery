@@ -8,7 +8,12 @@ proactive analytical questions for logon dashboards and email push notifications
 from __future__ import annotations
 
 import logging
+import json
+import os
+from asyncio import Lock
 from datetime import datetime, timezone
+from time import monotonic
+from typing import Any
 
 from app.config import Settings
 from app.models.contracts import (
@@ -22,8 +27,82 @@ from app.warehouse.sql_policy import canonicalize_readonly_sql
 
 logger = logging.getLogger("voxquery.services.briefing")
 
+try:
+    _BRIEFING_CACHE_TTL_SECONDS = max(
+        30,
+        int(os.getenv("VOXQUERY_BRIEFING_CACHE_TTL_SECONDS", "300")),
+    )
+except (TypeError, ValueError):
+    _BRIEFING_CACHE_TTL_SECONDS = 300
+_briefing_cache: dict[tuple[str, str, str, bool], tuple[float, ExecutiveBriefingResponse]] = {}
+_briefing_cache_lock = Lock()
+
 
 async def generate_morning_briefing(
+    tenant_id: str,
+    settings: Settings,
+    user_name: str = "Executive",
+    warehouse: WarehouseConnector | None = None,
+    snowflake_role: str = "ANALYST_READONLY",
+    redis_client: Any | None = None,
+) -> ExecutiveBriefingResponse:
+    """Return a short-lived tenant-scoped briefing snapshot.
+
+    The home screen, drawer, and export paths can request the same briefing
+    within seconds of one another. A bounded in-process cache prevents those
+    requests from repeating the two warehouse queries while keeping the data
+    fresh for the next briefing window.
+    """
+    cache_key = (tenant_id, user_name, snowflake_role, warehouse is not None)
+    shared_cache_key = (
+        f"briefing:{tenant_id}:{user_name}:{snowflake_role}:"
+        f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}:"
+        f"{'live' if warehouse is not None else 'unavailable'}"
+    )
+
+    if redis_client is not None:
+        try:
+            raw = await redis_client.get(shared_cache_key)
+            if raw:
+                if isinstance(raw, bytes):
+                    raw = raw.decode("utf-8")
+                shared_briefing = ExecutiveBriefingResponse.model_validate(json.loads(raw))
+                _briefing_cache[cache_key] = (monotonic(), shared_briefing)
+                return shared_briefing
+        except Exception:
+            logger.debug("Shared briefing cache read failed", exc_info=True)
+    now = monotonic()
+    cached = _briefing_cache.get(cache_key)
+    if cached and now - cached[0] < _BRIEFING_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    async with _briefing_cache_lock:
+        now = monotonic()
+        cached = _briefing_cache.get(cache_key)
+        if cached and now - cached[0] < _BRIEFING_CACHE_TTL_SECONDS:
+            return cached[1]
+
+        briefing = await _generate_morning_briefing_uncached(
+            tenant_id,
+            settings,
+            user_name=user_name,
+            warehouse=warehouse,
+            snowflake_role=snowflake_role,
+        )
+        _briefing_cache[cache_key] = (monotonic(), briefing)
+        if redis_client is not None:
+            try:
+                await redis_client.setex(
+                    shared_cache_key,
+                    _BRIEFING_CACHE_TTL_SECONDS,
+                    json.dumps(briefing.model_dump(mode="json")),
+                )
+            except Exception:
+                logger.debug("Shared briefing cache write failed", exc_info=True)
+        return briefing
+
+
+async def _generate_morning_briefing_uncached(
     tenant_id: str,
     settings: Settings,
     user_name: str = "Executive",
@@ -125,70 +204,36 @@ async def generate_morning_briefing(
             logger.warning("Could not execute real warehouse briefing query for tenant %s: %s", tenant_id, e)
 
     if not kpis:
-        kpis = [
-            BriefingKpi(
-                label="Total Revenue (YTD)",
-                value="$246.7M",
-                change_pct=12.4,
-                trend="up",
-                insight="Exceeding Q3 target by $4.2M driven by expansion.",
-            ),
-            BriefingKpi(
-                label="Active Accounts",
-                value="1,000,000",
-                change_pct=5.8,
-                trend="up",
-                insight="Active customer count recorded this quarter.",
-            ),
-            BriefingKpi(
-                label="Avg Order Value",
-                value="$184.20",
-                change_pct=-1.2,
-                trend="down",
-                insight="Average order value across recent transactions.",
-            ),
-            BriefingKpi(
-                label="Return & Refund Rate",
-                value="3.8%",
-                change_pct=0.9,
-                trend="down",
-                insight="Spike monitored in returned items.",
-            ),
-        ]
+        return ExecutiveBriefingResponse(
+            date=today_str,
+            greeting="Business pulse unavailable",
+            kpis=[],
+            summary_narrative="Connect a live workspace to generate a briefing from your business data.",
+            anomalies=[],
+            proactive_insights=[],
+            is_live=False,
+            data_source="unavailable",
+        )
 
-    if warehouse is None and not anomalies:
-        anomalies = [
-            BriefingAnomaly(
-                severity="warning",
-                title="Refund Surge in Electronics",
-                description="Returns for 4K Curved Monitors increased by 14% over the last 72 hours.",
-            ),
-        ]
-
-    proactive_insights = [
-        "What are our top 5 most returned products this week?",
-        "Compare revenue performance across regions for 2025.",
-        "Which customer tier drove the highest average order value last month?",
-    ]
-
+    proactive_insights = []
     rev_val = kpis[0].value
-    acc_val = kpis[1].value
+    acc_val = kpis[1].value if len(kpis) > 1 else "the available account data"
     summary_narrative = (
-        f"Good morning, {user_name}. YTD revenue stands at **{rev_val}**, "
-        f"supported by active account growth reaching **{acc_val} customers**."
+        f"Good morning, {user_name}. Revenue stands at {rev_val}, "
+        f"with account activity at {acc_val}."
     )
-    if anomalies:
-        summary_narrative += f" {len(anomalies)} anomaly flag{'s' if len(anomalies) > 1 else ''} detected in tenant metrics."
-    else:
-        summary_narrative += " No metric anomalies detected today."
+    summary_narrative += (
+        f" {len(anomalies)} item{'s' if len(anomalies) != 1 else ''} require attention."
+        if anomalies else " No anomalies were detected in the available metrics."
+    )
 
     return ExecutiveBriefingResponse(
         date=today_str,
-        greeting=f"Executive Briefing — {today_str}",
+        greeting=f"Executive Briefing - {today_str}",
         kpis=kpis,
         summary_narrative=summary_narrative,
         anomalies=anomalies,
         proactive_insights=proactive_insights,
         is_live=is_live,
-        data_source="live" if is_live else "fallback",
+        data_source="live" if is_live else "unavailable",
     )

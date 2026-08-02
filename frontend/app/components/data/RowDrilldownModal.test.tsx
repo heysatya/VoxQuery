@@ -4,16 +4,9 @@ import { render, screen } from "@testing-library/react";
 import { RowDrilldownModal } from "./RowDrilldownModal";
 
 describe("RowDrilldownModal", () => {
-  const mockAuth = {
-    mode: "fake" as const,
-    ready: true,
-    signedIn: true,
-    getToken: async () => "fake-token",
-  };
-
   it("renders nothing when isOpen is false", () => {
     const { container } = render(
-      <RowDrilldownModal isOpen={false} onClose={() => {}} turnId="t1" auth={mockAuth} />
+      <RowDrilldownModal isOpen={false} onClose={() => {}} turnId="t1" />
     );
     expect(container.firstChild).toBeNull();
   });
@@ -33,7 +26,7 @@ describe("RowDrilldownModal", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(
-      <RowDrilldownModal isOpen={true} onClose={() => {}} turnId="t1" auth={mockAuth} />
+      <RowDrilldownModal isOpen={true} onClose={() => {}} turnId="t1" />
     );
     expect(screen.getByText("Raw Transaction Drilldown")).toBeInTheDocument();
   });

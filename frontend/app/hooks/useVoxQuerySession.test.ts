@@ -25,6 +25,9 @@ class MockWebSocket {
   constructor(url: string) {
     mockWebSocketInstances.push(this);
     mockWebSocket(url);
+    setTimeout(() => {
+      if (this.onopen) this.onopen();
+    }, 0);
   }
 }
 global.WebSocket = MockWebSocket as any;

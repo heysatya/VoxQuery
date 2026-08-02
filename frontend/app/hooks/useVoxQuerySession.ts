@@ -39,7 +39,7 @@ export type VoxQueryAuthRelay = {
   mode: VoxQueryAuthMode;
   ready: boolean;
   signedIn: boolean;
-  getToken: () => Promise<string | null>;
+  getToken: (options?: { skipCache?: boolean }) => Promise<string | null>;
 };
 
 type VoiceDraft = {
@@ -59,6 +59,7 @@ export type VoxQueryEngine = {
   session: SessionState;
   connectionState: PipelineConnectionState;
   connectionStatusLabel: string;
+  retryConnection: () => void;
 
   submittedText: string;
   partialTranscript: string;
@@ -104,6 +105,9 @@ const tenantId =
   "";
 
 function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof ApiRequestError && error.status === 401) {
+    return "Your sign-in session expired. Please sign in again.";
+  }
   if (error instanceof Error) return error.message;
   return fallback;
 }
@@ -129,6 +133,7 @@ function createBrowserAudioContext(options?: AudioContextOptions) {
 export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
   const [session, setSession] = useState<SessionState>({ sessionId: null, conversationId: null });
   const [connectionState, setConnectionState] = useState<PipelineConnectionState>("connecting");
+  const [connectionRetryKey, setConnectionRetryKey] = useState(0);
   const [micPermission, setMicPermission] = useState<MicPermission>("unknown");
   const [voiceState, setVoiceState] = useState<VoiceCaptureState>("idle");
   const [partialTranscript, setPartialTranscript] = useState("");
@@ -191,7 +196,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
   const GAIN_RAMP_SECONDS = 0.03;
 
   const isReady = useMemo(
-    () => auth.ready && auth.signedIn && Boolean(session.sessionId) && connectionState !== "error",
+    () => auth.ready && auth.signedIn && Boolean(session.sessionId) && connectionState === "connected",
     [auth.ready, auth.signedIn, session.sessionId, connectionState]
   );
 
@@ -207,6 +212,12 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
         return "Real-time analysis is unavailable";
     }
   }, [connectionState]);
+
+  const retryConnection = useCallback(() => {
+    setConnectionState("connecting");
+    setNotice("Reconnecting to your workspace...");
+    setConnectionRetryKey((key) => key + 1);
+  }, [setNotice]);
 
   function setActiveTurnId(turnId: string | null) {
     currentTurnIdRef.current = turnId;
@@ -296,9 +307,19 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       }
       return;
     }
-    const created = await createSession(tenantId, await auth.getToken());
-    window.sessionStorage.setItem("voxquery_session_id", created.session_id);
-    setSession({ sessionId: created.session_id, conversationId: created.conversation_id });
+    try {
+      const created = await createSession(tenantId, await auth.getToken({ skipCache: true }));
+      window.sessionStorage.setItem("voxquery_session_id", created.session_id);
+      setSession({ sessionId: created.session_id, conversationId: created.conversation_id });
+    } catch (err) {
+      if (auth.mode === "fake") {
+        const fallbackId = "fake_session_1";
+        window.sessionStorage.setItem("voxquery_session_id", fallbackId);
+        setSession({ sessionId: fallbackId, conversationId: "fake_conv_1" });
+      } else {
+        throw err;
+      }
+    }
   }, [auth, session.sessionId]);
 
   const resetConversation = useCallback(async () => {
@@ -320,7 +341,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     recorderCleanup();
     if (session.sessionId) {
       try {
-        await deleteSession(session.sessionId, await auth.getToken());
+        await deleteSession(session.sessionId, await auth.getToken({ skipCache: true }));
       } catch (error) {
         console.warn("Could not explicitly delete session on backend", error);
       }
@@ -330,7 +351,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     }
     setSession({ sessionId: null, conversationId: null });
     try {
-      const created = await createSession(tenantId, await auth.getToken());
+      const created = await createSession(tenantId, await auth.getToken({ skipCache: true }));
       window.sessionStorage.setItem("voxquery_session_id", created.session_id);
       setSession({ sessionId: created.session_id, conversationId: created.conversation_id });
       setNotice("New conversation started.");
@@ -436,7 +457,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     }
     let socket: WebSocket | null = null;
     let cancelled = false;
-    getTokenRef.current()
+    getTokenRef.current({ skipCache: true })
       .then((token) => {
         if (cancelled || !session.sessionId) {
           return;
@@ -510,6 +531,11 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
         };
         socket.onclose = (event) => {
           setConnectionState("disconnected");
+          if (event.code === 4001) {
+            setConnectionState("error");
+            setNotice("Your sign-in session expired. Please sign in again.", "error");
+            return;
+          }
           if (event.code !== 4002) {
             return;
           }
@@ -532,7 +558,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       cancelled = true;
       socket?.close();
     };
-  }, [auth.ready, auth.signedIn, session.sessionId, setNotice]);
+  }, [auth.ready, auth.signedIn, session.sessionId, connectionRetryKey, setNotice]);
 
 
 
@@ -1261,6 +1287,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     session,
     connectionState,
     connectionStatusLabel,
+    retryConnection,
     submittedText,
     partialTranscript,
     pipelineInFlight,

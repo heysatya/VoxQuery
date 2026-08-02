@@ -538,6 +538,43 @@ async def render_node(state: PipelineGraphState) -> dict:
     identity: AuditIdentity = state["audit_identity"]  # type: ignore[assignment]
     state["audit"].enqueue_turn(turn, identity, state.get("clarification"))
 
+    # ── Durable executive memory: extract and upsert candidates ────────────
+    # Runs only when a turn completes with a result. Extracts explainable
+    # memory candidates (metrics, dimensions, time ranges) from turn metadata.
+    # Never stores raw rows, SQL text, or user PII. Errors are silently skipped.
+    if state.get("db_pool") and turn.completed:
+        try:
+            from app.repositories.memory_repository import MemoryRepository, extract_memory_candidates
+            import re as _re
+            _turn_meta: dict = {"source_tables": [], "filter_predicates": [], "metric_name": None}
+            if turn.generated_sql:
+                _tables = _re.findall(
+                    r"(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_.]*)",
+                    turn.generated_sql, flags=_re.IGNORECASE,
+                )
+                _turn_meta["source_tables"] = list(dict.fromkeys(t.lower() for t in _tables[:5]))
+            if turn.full_result and turn.full_result.semantic_columns:
+                for _col in turn.full_result.semantic_columns:
+                    if _col.role == "metric" and _col.display_name:
+                        _turn_meta["metric_name"] = _col.display_name
+                        break
+            _confidence = float(turn.composite_score or 0.8)
+            _candidates = extract_memory_candidates(_turn_meta, turn.user_input, _confidence)
+            if _candidates:
+                _mem_repo = MemoryRepository(state["db_pool"])
+                for _candidate in _candidates:
+                    await _mem_repo.upsert_memory(
+                        claims,
+                        memory_type=_candidate["memory_type"],
+                        subject=_candidate["subject"],
+                        label=_candidate["label"],
+                        source_turn_id=turn.turn_id,
+                        source_session_id=turn.session_id,
+                        confidence=_candidate["confidence"],
+                    )
+        except Exception as _mem_exc:
+            logger.warning("render_node: memory upsert skipped: %s", _mem_exc)
+
     await state["sessions"].append_turn(
         state["session"],
         turn_id=turn.turn_id,

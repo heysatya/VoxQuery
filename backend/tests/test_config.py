@@ -4,7 +4,10 @@ from app.config import Settings
 def test_production_guardrails_reject_fake_providers():
     base_kwargs = {
         "APP_ENV": "production",
-        "SESSION_STORE": "memory",  # to avoid upstash validation for now
+        "SESSION_STORE": "redis",
+        "UPSTASH_REDIS_URL": "rediss://localhost:6379",
+        "SUPABASE_DATABASE_URL": "postgresql://localhost:5432/voxquery",
+        "PUBLIC_APP_URL": "https://voxquery.test",
         "CLERK_ISSUER": "https://clerk.voxquery.test",
         "CLERK_JWKS_URL": "https://clerk.voxquery.test/.well-known/jwks.json",
         "DEEPGRAM_API_KEY": "dummy",
@@ -74,7 +77,10 @@ def test_production_guardrails_require_keys():
     base_prod_kwargs = {
         "APP_ENV": "production",
         "AUTH_MODE": "clerk",
-        "SESSION_STORE": "memory",
+        "SESSION_STORE": "redis",
+        "UPSTASH_REDIS_URL": "rediss://localhost:6379",
+        "SUPABASE_DATABASE_URL": "postgresql://localhost:5432/voxquery",
+        "PUBLIC_APP_URL": "https://voxquery.test",
         "CLERK_ISSUER": "https://clerk.voxquery.test",
         "CLERK_JWKS_URL": "https://clerk.voxquery.test/.well-known/jwks.json",
         "STT_PROVIDER": "deepgram",
@@ -88,12 +94,12 @@ def test_production_guardrails_require_keys():
     
     # Missing FERNET_KEY
     with pytest.raises(RuntimeError, match="FERNET_KEY is required in staging/production"):
-        Settings(**base_prod_kwargs, SNOWFLAKE_DSN="dummy-dsn", FERNET_KEY=None).validate_startup()
+        Settings(**{**base_prod_kwargs, "FERNET_KEY": None}).validate_startup()
 
-    # Missing SNOWFLAKE_DSN
-    with pytest.raises(RuntimeError, match="SNOWFLAKE_DSN is required in staging/production"):
-        Settings(**base_prod_kwargs, SNOWFLAKE_DSN=None, FERNET_KEY="dummy-key").validate_startup()
+    # Missing SUPABASE_DATABASE_URL
+    with pytest.raises(RuntimeError, match="SUPABASE_DATABASE_URL is required"):
+        Settings(**{**base_prod_kwargs, "SUPABASE_DATABASE_URL": None}).validate_startup()
 
     # Valid config passes
-    Settings(**base_prod_kwargs, SNOWFLAKE_DSN="dummy-dsn", FERNET_KEY="dummy-key").validate_startup()
+    Settings(**base_prod_kwargs).validate_startup()
 

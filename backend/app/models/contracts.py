@@ -663,7 +663,7 @@ class ExecutiveBriefingResponse(BaseModel):
     anomalies: list[BriefingAnomaly] = Field(default_factory=list)
     proactive_insights: list[str] = Field(default_factory=list)
     is_live: bool = False
-    data_source: Literal["live", "fallback"] = "fallback"
+    data_source: Literal["live", "fallback", "unavailable"] = "fallback"
 
 
 class GraphNode(BaseModel):
@@ -691,4 +691,191 @@ class UserPreferences(BaseModel):
     email: str | None = None
     delivery_time: str = "09:00"
     timezone: str = "UTC"
+
+
+# ── Executive Memory contracts ─────────────────────────────────
+
+class MemoryItem(BaseModel):
+    id: str
+    memory_type: Literal[
+        "metric_interest",
+        "dimension_interest",
+        "time_range",
+        "filter_preference",
+        "clarification_resolution",
+    ]
+    label: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    last_observed_at: str | None = None
+    created_at: str | None = None
+    source_turn_id: str | None = None
+
+
+class MemorySummaryResponse(BaseModel):
+    available: bool = True
+    unavailable_reason: str | None = None
+    items: list[MemoryItem] = Field(default_factory=list)
+
+
+# ── Share link contracts ──────────────────────────────────────
+
+class ShareLinkCreateRequest(BaseModel):
+    turn_id: UUID
+    label: str | None = Field(default=None, max_length=200)
+    ttl_hours: int | None = Field(default=None, ge=1, le=720)
+
+
+class ShareLinkCreateResponse(BaseModel):
+    link_id: str
+    url: str
+    token: str
+    expires_at: str
+
+
+class SharedResultResponse(BaseModel):
+    link_id: str
+    turn_id: str
+    label: str | None = None
+    user_input: str
+    chart_type: str | None = None
+    confidence_tier: str | None = None
+    full_result: dict[str, Any] | None = None
+    created_at: str
+    expires_at: str
+    is_snapshot: bool = True
+
+
+class ShareLinkItem(BaseModel):
+    link_id: str
+    turn_id: str
+    label: str | None = None
+    user_input: str
+    url: str
+    created_at: str
+    expires_at: str
+    access_count: int
+
+
+class ShareLinkListResponse(BaseModel):
+    items: list[ShareLinkItem] = Field(default_factory=list)
+
+
+# ── Admin query history contracts ──────────────────────────────
+
+class QueryHistorySummary(BaseModel):
+    turn_id: str
+    user_display: str
+    user_input: str
+    chart_type: str | None = None
+    confidence_tier: str | None = None
+    quality_flag: str
+    latency_ms: int
+    row_count: int | None = None
+    created_at: str
+    completed: bool
+    clarification_triggered: bool
+    input_modality: str
+
+
+class QueryHistoryPage(BaseModel):
+    items: list[QueryHistorySummary] = Field(default_factory=list)
+    total_count: int = 0
+    page: int = 1
+    page_size: int = 50
+    has_more: bool = False
+
+
+class QueryHistoryDetail(BaseModel):
+    turn_id: str
+    user_display: str
+    user_input: str
+    generated_sql: str
+    chart_type: str | None = None
+    confidence_tier: str | None = None
+    quality_flag: str
+    latency_ms: int
+    row_count: int | None = None
+    created_at: str
+    completed: bool
+    clarification_triggered: bool
+    input_modality: str
+    result_columns: list[str] = Field(default_factory=list)
+
+
+# ── Tenant analytics contracts ────────────────────────────────
+
+class DailyQueryCount(BaseModel):
+    date: str
+    count: int
+
+
+class ConfidenceDistribution(BaseModel):
+    high: int = 0
+    medium: int = 0
+    low: int = 0
+
+
+class FeedbackDistribution(BaseModel):
+    positive: int = 0
+    negative: int = 0
+    unrated: int = 0
+
+
+class TopQuestion(BaseModel):
+    user_input: str
+    count: int
+
+
+class TenantAnalytics(BaseModel):
+    period_days: int
+    total_queries: int
+    completed_queries: int
+    failed_queries: int
+    success_rate_pct: float
+    avg_latency_ms: float
+    p50_latency_ms: float | None = None
+    p95_latency_ms: float | None = None
+    queries_per_day: list[DailyQueryCount] = Field(default_factory=list)
+    top_questions: list[TopQuestion] = Field(default_factory=list)
+    confidence_distribution: ConfidenceDistribution = Field(default_factory=ConfidenceDistribution)
+    clarification_rate_pct: float
+    feedback_distribution: FeedbackDistribution = Field(default_factory=FeedbackDistribution)
+    low_quality_rate_pct: float
+    active_users: int
+    saved_analyses_count: int
+
+
+# ── System health contracts ────────────────────────────────────
+
+HealthStatus = Literal["healthy", "degraded", "unavailable", "not_configured"]
+
+
+class HealthCheckItem(BaseModel):
+    name: str
+    status: HealthStatus
+    detail: str | None = None
+    checked_at: str | None = None
+
+
+class SystemHealthResponse(BaseModel):
+    overall: HealthStatus
+    checks: list[HealthCheckItem] = Field(default_factory=list)
+    last_briefing_at: str | None = None
+    version: str | None = None
+    checked_at: str
+
+
+# ── Workspace detail contract ──────────────────────────────────
+
+class WorkspaceDetail(BaseModel):
+    workspace_name: str
+    tenant_status: str
+    provisioning_status: str
+    connection_health: str
+    last_query_at: str | None = None
+    member_count: int | None = None
+    has_glossary: bool
+    recent_query_count_7d: int
+    total_queries: int
+
 

@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import Depends, Header, WebSocket, WebSocketDisconnect
+from fastapi import Depends, Header, Request, WebSocket, WebSocketDisconnect
 import jwt
 from jwt import PyJWKClient
 from jwt.exceptions import PyJWTError
@@ -67,7 +67,6 @@ class ClerkJwtVerifier:
 
         # Extract active organization from v2 compact claim payload["o"] or legacy org_id
         org_claim = payload.get("o")
-        org_claim = payload.get("o")
         tenant_id_val = None
         raw_role = None
         tenant_name_val = None
@@ -123,6 +122,71 @@ class ClerkJwtVerifier:
         )
 
 
+async def enforce_active_membership(claims: AuthClaims, app) -> AuthClaims:
+    """Require a live local tenant membership for a valid Clerk token.
+
+    Clerk proves token authenticity and active organization context. The local
+    database remains the authority for immediate membership revocation and
+    tenant suspension, so signed-but-stale tokens cannot retain access.
+    """
+    pool = getattr(app.state, "db_pool", None)
+    if pool is None:
+        return claims
+
+    try:
+        row = await pool.fetchrow(
+            """
+            SELECT tm.role, usr.snowflake_role
+            FROM tenants t
+            JOIN tenant_memberships tm
+              ON tm.tenant_id = t.id
+             AND tm.user_id = $2
+             AND tm.deleted_at IS NULL
+            LEFT JOIN user_snowflake_roles usr
+              ON usr.tenant_id = tm.tenant_id
+             AND usr.user_id = tm.user_id
+            LEFT JOIN users u
+              ON u.id = tm.user_id
+             AND u.deleted_at IS NULL
+            WHERE t.id = $1
+              AND t.deleted_at IS NULL
+              AND u.id IS NOT NULL
+            LIMIT 1
+            """,
+            claims.tenant_id,
+            claims.user_id,
+        )
+    except Exception as exc:
+        logger.exception(
+            "auth.membership_lookup_failed user_id=%s tenant_id=%s error=%s",
+            claims.user_id,
+            claims.tenant_id,
+            type(exc).__name__,
+        )
+        raise ApiError(
+            ErrorCode.service_unavailable,
+            status_code=503,
+            detail="Tenant authorization service is unavailable.",
+        ) from exc
+
+    if not row:
+        raise ApiError(
+            ErrorCode.auth_invalid,
+            status_code=403,
+            detail="Active tenant membership is required.",
+        )
+
+    local_role = str(row["role"] or "viewer").lower()
+    normalized_role = "admin" if local_role in {"admin", "org:admin"} else "viewer"
+    local_snowflake_role = row["snowflake_role"]
+    return claims.model_copy(
+        update={
+            "role": normalized_role,
+            "snowflake_role": str(local_snowflake_role or claims.snowflake_role),
+        }
+    )
+
+
 def get_clerk_verifier(settings: Settings) -> ClerkJwtVerifier:
     cache_key = (
         settings.clerk_issuer,
@@ -146,6 +210,7 @@ async def get_current_user(
     x_fake_tenant_name: str | None = Header(default=None),
     x_fake_role: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
+    request: Request = None,
 ) -> AuthClaims:
     if settings.auth_mode == "fake":
         return AuthClaims(
@@ -164,7 +229,10 @@ async def get_current_user(
 
     verifier = get_clerk_verifier(settings)
     payload = verifier.verify(token)
-    return verifier.claims_from_payload(payload)
+    claims = verifier.claims_from_payload(payload)
+    if request is not None and hasattr(request, "app"):
+        return await enforce_active_membership(claims, request.app)
+    return claims
 
 
 async def authenticate_websocket_message(
@@ -184,7 +252,8 @@ async def authenticate_websocket_message(
         token = message["token"]
         verifier = get_clerk_verifier(settings)
         payload = verifier.verify(token)
-        return verifier.claims_from_payload(payload)
+        claims = verifier.claims_from_payload(payload)
+        return await enforce_active_membership(claims, websocket.app)
     except WebSocketDisconnect:
         return None
     except ApiError:

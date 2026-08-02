@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from uuid import uuid4
 from fastapi.testclient import TestClient
@@ -14,7 +14,13 @@ client = TestClient(app)
 
 @pytest.mark.asyncio
 async def test_dispatch_briefing_email_service():
-    settings = get_settings()
+    settings = get_settings().model_copy(
+        update={
+            "briefing_email_provider": "resend",
+            "resend_api_key": "re_dummy",
+            "briefing_email_from": "briefing@voxquery.test",
+        }
+    )
     user_id = str(uuid4())
     briefing = ExecutiveBriefingResponse(
         date="2026-07-22",
@@ -33,20 +39,21 @@ async def test_dispatch_briefing_email_service():
         proactive_insights=["Check store sales"],
     )
 
-    success = await dispatch_briefing_email(
-        user_id, "exec@test.com", briefing, settings
-    )
-    assert success is True
+    with patch("app.services.briefing_dispatcher._send_resend", new=AsyncMock(return_value=None)):
+        success = await dispatch_briefing_email(
+            user_id, "exec@test.com", briefing, settings, tenant_id="tenant-123"
+        )
+        assert success is True
 
-    # Test with pool mock
-    mock_pool = MagicMock()
-    mock_conn = AsyncMock()
-    mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
-    success_with_pool = await dispatch_briefing_email(
-        user_id, "exec@test.com", briefing, settings, pool=mock_pool, tenant_id="tenant-123"
-    )
-    assert success_with_pool is True
-    mock_conn.execute.assert_called_once()
+        # Test with pool mock
+        mock_pool = MagicMock()
+        mock_conn = AsyncMock()
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+        success_with_pool = await dispatch_briefing_email(
+            user_id, "exec@test.com", briefing, settings, pool=mock_pool, tenant_id="tenant-123"
+        )
+        assert success_with_pool is True
+        mock_conn.execute.assert_called_once()
 
 
 def test_user_preferences_api_endpoints():
