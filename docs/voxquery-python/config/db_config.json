@@ -1,0 +1,50 @@
+{
+  "_comment": "Change 'active_provider' to swap the entire backend without touching pipeline code. Each provider block only names ENV VAR KEYS, never actual secrets.",
+
+  "active_provider": "supabase_postgres",
+
+  "providers": {
+    "supabase_postgres": {
+      "adapter": "postgres",
+      "dialect_for_validator": "postgres",
+      "connection_env_var": "SUPABASE_DB_URL_READONLY",
+      "statement_timeout_ms": 30000,
+      "default_row_cap": 10000,
+      "notes": "Connect via Supabase's Supavisor pooler (transaction mode), using a dedicated read-only Postgres role. NEVER point this at the service_role key."
+    },
+
+    "generic_postgres": {
+      "adapter": "postgres",
+      "dialect_for_validator": "postgres",
+      "connection_env_var": "GENERIC_PG_URL_READONLY",
+      "statement_timeout_ms": 30000,
+      "default_row_cap": 10000,
+      "notes": "Same postgres.py adapter as Supabase — any vanilla Postgres warehouse works with just a connection string swap."
+    },
+
+    "snowflake": {
+      "adapter": "snowflake",
+      "dialect_for_validator": "snowflake",
+      "connection_env_var": "SNOWFLAKE_CONN_STRING",
+      "statement_timeout_ms": 30000,
+      "default_row_cap": 10000,
+      "notes": "Original spec target. Kept as a working reference — see lib/db/providers/snowflake.py."
+    },
+
+    "mysql_warehouse": {
+      "adapter": "mysql",
+      "dialect_for_validator": "mysql",
+      "connection_env_var": "MYSQL_CONN_STRING",
+      "statement_timeout_ms": 30000,
+      "default_row_cap": 10000,
+      "notes": "Illustrative third provider — demonstrates the adapter interface isn't Postgres-specific."
+    }
+  },
+
+  "query_sources": {
+    "accept_llm_generated": true,
+    "accept_rag_retrieved_candidates": true,
+    "accept_predetermined_file": true,
+    "predetermined_queries_path": "data/predetermined_queries.json"
+  }
+}

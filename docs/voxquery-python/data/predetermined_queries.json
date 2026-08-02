@@ -1,0 +1,14 @@
+[
+  {
+    "id": "top_sellers_this_quarter",
+    "label": "Top sellers this quarter",
+    "description": "Sellers ranked by total order value in the current quarter.",
+    "sql": "SELECT s.seller_id, s.seller_company_name, SUM(oi.price) AS total_revenue FROM order_items oi JOIN orders o ON o.order_id = oi.order_id JOIN sellers s ON s.seller_id = oi.seller_id WHERE o.order_purchase_timestamp >= date_trunc('quarter', CURRENT_DATE) GROUP BY s.seller_id, s.seller_company_name ORDER BY total_revenue DESC LIMIT 20"
+  },
+  {
+    "id": "low_review_score_products",
+    "label": "Products with low review scores",
+    "description": "Products averaging under 3 stars, minimum 10 reviews.",
+    "sql": "SELECT p.product_id, p.product_name, AVG(r.review_score) AS avg_score, COUNT(*) AS review_count FROM order_reviews r JOIN orders o ON o.order_id = r.order_id JOIN order_items oi ON oi.order_id = o.order_id JOIN products p ON p.product_id = oi.product_id GROUP BY p.product_id, p.product_name HAVING COUNT(*) >= 10 AND AVG(r.review_score) < 3 ORDER BY avg_score ASC LIMIT 50"
+  }
+]
