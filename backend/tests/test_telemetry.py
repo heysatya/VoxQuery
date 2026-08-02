@@ -50,6 +50,7 @@ def test_emit_always_includes_required_envelope_fields(capsys):
 
 def test_emit_timestamp_is_iso8601_string(capsys):
     from datetime import datetime
+
     emit("stt.test", tier=2)
     out = capsys.readouterr().out.strip()
     ts = json.loads(out)["ts"]
@@ -90,7 +91,14 @@ def test_emit_does_not_raise_on_non_serializable_payload(capsys):
 
 
 def test_emit_scrubs_secrets_from_payload(capsys):
-    emit("test.secrets", tier=2, token="sk-123456", key="sk_test_abcdef", jwt="Bearer eyJhb", basic="Basic YWRta")
+    emit(
+        "test.secrets",
+        tier=2,
+        token="sk-123456",
+        key="sk_test_abcdef",
+        jwt="Bearer eyJhb",
+        basic="Basic YWRta",
+    )
     out = capsys.readouterr().out.strip()
     line = json.loads(out)
     assert line["token"] == "***SCRUBBED***"

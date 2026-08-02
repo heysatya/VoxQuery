@@ -7,16 +7,21 @@ from app.main import app
 
 client = TestClient(app)
 
+
 @pytest.fixture
 def mock_svix():
     with patch("svix.webhooks.Webhook.verify") as mock_verify:
-        with patch.dict("os.environ", {"CLERK_WEBHOOK_SECRET": "test_secret", "CLERK_SECRET_KEY": "test_key"}):
+        with patch.dict(
+            "os.environ", {"CLERK_WEBHOOK_SECRET": "test_secret", "CLERK_SECRET_KEY": "test_key"}
+        ):
             yield mock_verify
+
 
 @pytest.fixture(autouse=True)
 def mock_db_pool():
     from unittest.mock import MagicMock
     from app.api.webhooks import get_db_pool
+
     mock_pool = MagicMock()
     mock_conn = AsyncMock()
 
@@ -43,12 +48,13 @@ async def test_organization_created_webhook(mock_svix, mock_db_pool):
     _, mock_conn = mock_db_pool
     mock_svix.return_value = {
         "type": "organization.created",
-        "data": {
-            "id": "org_test123",
-            "name": "Test Org"
-        }
+        "data": {"id": "org_test123", "name": "Test Org"},
     }
-    headers = {"svix-id": "msg_123", "svix-timestamp": "1234567890", "svix-signature": "v1,signature"}
+    headers = {
+        "svix-id": "msg_123",
+        "svix-timestamp": "1234567890",
+        "svix-signature": "v1,signature",
+    }
 
     response = client.post("/api/webhooks/clerk", json={"data": {}}, headers=headers)
 
@@ -64,15 +70,16 @@ async def test_organization_membership_created_webhook(mock_svix, mock_db_pool):
         "type": "organizationMembership.created",
         "data": {
             "organization": {"id": "org_test123"},
-            "public_user_data": {
-                "user_id": "user_test123",
-                "identifier": "member@example.com"
-            },
+            "public_user_data": {"user_id": "user_test123", "identifier": "member@example.com"},
             "role": "org:admin",
-            "permissions": ["org:admin:read"]
-        }
+            "permissions": ["org:admin:read"],
+        },
     }
-    headers = {"svix-id": "msg_124", "svix-timestamp": "1234567890", "svix-signature": "v1,signature"}
+    headers = {
+        "svix-id": "msg_124",
+        "svix-timestamp": "1234567890",
+        "svix-signature": "v1,signature",
+    }
 
     response = client.post("/api/webhooks/clerk", json={"data": {}}, headers=headers)
 
@@ -89,9 +96,13 @@ async def test_user_created_webhook_does_not_create_tenant(mock_svix, mock_db_po
         "data": {
             "id": "user_456",
             "email_addresses": [{"email_address": "test@example.com"}],
-        }
+        },
     }
-    headers = {"svix-id": "msg_125", "svix-timestamp": "1234567890", "svix-signature": "v1,signature"}
+    headers = {
+        "svix-id": "msg_125",
+        "svix-timestamp": "1234567890",
+        "svix-signature": "v1,signature",
+    }
 
     response = client.post("/api/webhooks/clerk", json={"data": {}}, headers=headers)
 
@@ -107,11 +118,12 @@ async def test_user_created_webhook_does_not_create_tenant(mock_svix, mock_db_po
 @pytest.mark.asyncio
 async def test_user_deleted_webhook_deactivates_user_and_memberships(mock_svix, mock_db_pool):
     _, mock_conn = mock_db_pool
-    mock_svix.return_value = {
-        "type": "user.deleted",
-        "data": {"id": "user_456"}
+    mock_svix.return_value = {"type": "user.deleted", "data": {"id": "user_456"}}
+    headers = {
+        "svix-id": "msg_126",
+        "svix-timestamp": "1234567890",
+        "svix-signature": "v1,signature",
     }
-    headers = {"svix-id": "msg_126", "svix-timestamp": "1234567890", "svix-signature": "v1,signature"}
 
     response = client.post("/api/webhooks/clerk", json={"data": {}}, headers=headers)
 

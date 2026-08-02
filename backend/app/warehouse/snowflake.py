@@ -6,7 +6,15 @@ import concurrent.futures
 from threading import local as _ThreadLocal
 
 import snowflake.connector
-from app.models.contracts import ChartType, ResultPayload, ResultShape, SchemaTable, ColumnInfo, ApiError, ErrorCode
+from app.models.contracts import (
+    ChartType,
+    ResultPayload,
+    ResultShape,
+    SchemaTable,
+    ColumnInfo,
+    ApiError,
+    ErrorCode,
+)
 from app.warehouse.connector import WarehouseConnector
 from app.warehouse.sql_policy import SqlPolicyError, canonicalize_readonly_sql
 
@@ -96,13 +104,19 @@ class SnowflakeConnectionPool:
         try:
             with conn.cursor() as cur:
                 if snowflake_role:
-                    cur.execute(f"USE ROLE IDENTIFIER('{_validate_snowflake_role(snowflake_role)}')")
+                    cur.execute(
+                        f"USE ROLE IDENTIFIER('{_validate_snowflake_role(snowflake_role)}')"
+                    )
                 cur.execute(sql)
                 rows = cur.fetchall()
                 columns = [d[0].lower() for d in cur.description] if cur.description else []
                 return rows, columns, cur.rowcount
         except snowflake.connector.errors.OperationalError as e:
-            raise ApiError(ErrorCode.warehouse_error, status_code=502, detail=f"Snowflake warehouse error: {type(e).__name__}") from e
+            raise ApiError(
+                ErrorCode.warehouse_error,
+                status_code=502,
+                detail=f"Snowflake warehouse error: {type(e).__name__}",
+            ) from e
 
     async def execute(self, sql: str, snowflake_role: str) -> tuple:
         """Async entry point — dispatches to the pre-warmed thread pool."""
@@ -135,13 +149,14 @@ class SnowflakeWarehouseConnector(WarehouseConnector):
 
     def _parse_dsn(self) -> dict:
         from urllib.parse import urlparse, unquote
+
         parsed = urlparse(self.dsn)
-        
+
         path = parsed.path.strip("/")
         path_parts = path.split("/") if path else []
         database = path_parts[0] if len(path_parts) > 0 else None
         schema = path_parts[1] if len(path_parts) > 1 else None
-        
+
         return {
             "user": unquote(parsed.username) if parsed.username else "",
             "password": unquote(parsed.password) if parsed.password else "",
@@ -170,7 +185,9 @@ class SnowflakeWarehouseConnector(WarehouseConnector):
                 with conn.cursor() as cur:
                     cur.execute(sql)
                     rows = cur.fetchall()
-                    columns = [desc[0].lower() for desc in cur.description] if cur.description else []
+                    columns = (
+                        [desc[0].lower() for desc in cur.description] if cur.description else []
+                    )
                     row_count = cur.rowcount
                     return rows, columns, row_count
         except snowflake.connector.errors.OperationalError as e:
@@ -178,20 +195,24 @@ class SnowflakeWarehouseConnector(WarehouseConnector):
             raise ApiError(
                 ErrorCode.warehouse_error,
                 status_code=502,
-                detail=f"Snowflake warehouse timeout or connection error (DSN redacted: {redacted}): {type(e).__name__}"
+                detail=f"Snowflake warehouse timeout or connection error (DSN redacted: {redacted}): {type(e).__name__}",
             ) from e
         except Exception as e:
             redacted = _redact_dsn(self.dsn)
             raise ApiError(
                 ErrorCode.warehouse_error,
                 status_code=502,
-                detail=f"Snowflake warehouse error (DSN redacted: {redacted}): {type(e).__name__} - {str(e)}"
+                detail=f"Snowflake warehouse error (DSN redacted: {redacted}): {type(e).__name__} - {str(e)}",
             ) from e
 
-    async def execute_readonly(self, sql: str, *, snowflake_role: str, tenant_id: str | None = None) -> tuple[ResultPayload, ResultShape]:
+    async def execute_readonly(
+        self, sql: str, *, snowflake_role: str, tenant_id: str | None = None
+    ) -> tuple[ResultPayload, ResultShape]:
         canonical = canonicalize_readonly_sql(sql)
         if canonical.sql != sql:
-            raise SqlPolicyError("Warehouse received SQL that was not canonicalized by the pipeline.")
+            raise SqlPolicyError(
+                "Warehouse received SQL that was not canonicalized by the pipeline."
+            )
 
         self.last_sql = sql
 
@@ -210,7 +231,7 @@ class SnowflakeWarehouseConnector(WarehouseConnector):
             raise ApiError(
                 ErrorCode.warehouse_timeout,
                 status_code=504,
-                detail=f"Snowflake query timed out after {self.timeout_seconds}s (DSN redacted: {redacted})."
+                detail=f"Snowflake query timed out after {self.timeout_seconds}s (DSN redacted: {redacted}).",
             )
 
         list_rows = [list(r) for r in rows]
@@ -252,7 +273,9 @@ class SnowflakeWarehouseConnector(WarehouseConnector):
         try:
             with snowflake.connector.connect(**kwargs) as conn:
                 with conn.cursor() as cur:
-                    target_schema = conn_params["schema"].upper() if conn_params["schema"] else 'PUBLIC'
+                    target_schema = (
+                        conn_params["schema"].upper() if conn_params["schema"] else "PUBLIC"
+                    )
                     cur.execute(
                         f"""SELECT table_name, column_name, data_type FROM information_schema.columns
                            WHERE table_schema = '{target_schema}' ORDER BY table_name, ordinal_position"""
@@ -261,7 +284,9 @@ class SnowflakeWarehouseConnector(WarehouseConnector):
                     for table_name, column_name, data_type in cur.fetchall():
                         if table_name not in by_table:
                             by_table[table_name] = SchemaTable(table_name=table_name)
-                        by_table[table_name].columns.append(ColumnInfo(name=column_name, data_type=str(data_type)))
+                        by_table[table_name].columns.append(
+                            ColumnInfo(name=column_name, data_type=str(data_type))
+                        )
                     return list(by_table.values())
         except snowflake.connector.errors.OperationalError as e:
             redacted = _redact_dsn(self.dsn)

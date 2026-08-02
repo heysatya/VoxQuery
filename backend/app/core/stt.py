@@ -132,8 +132,8 @@ class DeepgramSttProvider(SttProvider):
             "&sample_rate=16000"
             "&channels=1"
             "&interim_results=true"
-            "&endpointing=1500"         # 1.5s silence before speech_final fires.
-            "&utterance_end_ms=2500"    # 2.5s silence before UtteranceEnd fires — the authoritative submission signal.
+            "&endpointing=1500"  # 1.5s silence before speech_final fires.
+            "&utterance_end_ms=2500"  # 2.5s silence before UtteranceEnd fires — the authoritative submission signal.
             "&vad_events=true"
             f"{keyterm_params}"
             f"{mip_opt_out_param}"
@@ -156,7 +156,8 @@ class DeepgramSttProvider(SttProvider):
                         text = normalize_text([segment.text for segment in final_segments])
                         total_weight = sum(segment.weight for segment in final_segments)
                         confidence = (
-                            sum(segment.confidence * segment.weight for segment in final_segments) / total_weight
+                            sum(segment.confidence * segment.weight for segment in final_segments)
+                            / total_weight
                             if total_weight
                             else 0.0
                         )
@@ -194,16 +195,21 @@ class DeepgramSttProvider(SttProvider):
                         confidences = [
                             word.get("confidence", 0.0)
                             for word in words
-                            if isinstance(word, dict) and isinstance(word.get("confidence", 0.0), int | float)
+                            if isinstance(word, dict)
+                            and isinstance(word.get("confidence", 0.0), int | float)
                         ]
                         confidence = sum(confidences) / len(confidences) if confidences else 0.0
                         weight = len(words)
                     else:
                         raw_confidence = alt.get("confidence", 0.0)
-                        confidence = raw_confidence if isinstance(raw_confidence, int | float) else 0.0
+                        confidence = (
+                            raw_confidence if isinstance(raw_confidence, int | float) else 0.0
+                        )
                         weight = max(len(transcript.split()), 1)
 
-                    return _TranscriptSegment(text=transcript, confidence=float(confidence), weight=weight)
+                    return _TranscriptSegment(
+                        text=transcript, confidence=float(confidence), weight=weight
+                    )
 
                 async def sender() -> None:
                     nonlocal sender_exception
@@ -251,7 +257,9 @@ class DeepgramSttProvider(SttProvider):
                                 if final_event:
                                     yield final_event
                                 return
-                            raise DeepgramUnavailableError("No messages received from Deepgram for 15s (idle timeout)")
+                            raise DeepgramUnavailableError(
+                                "No messages received from Deepgram for 15s (idle timeout)"
+                            )
 
                         if isinstance(msg, bytes):
                             continue
@@ -265,7 +273,9 @@ class DeepgramSttProvider(SttProvider):
                             err_msg = str(err_msg)
                             if self._api_key in err_msg:
                                 err_msg = err_msg.replace(self._api_key, "[REDACTED]")
-                            raise DeepgramUnavailableError(f"Deepgram returned error frame: {err_msg}")
+                            raise DeepgramUnavailableError(
+                                f"Deepgram returned error frame: {err_msg}"
+                            )
 
                         if data.get("type") == "UtteranceEnd":
                             final_event = aggregate_final()

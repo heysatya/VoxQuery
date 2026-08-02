@@ -13,8 +13,14 @@ from app.warehouse.snowflake import SnowflakeConnectionPool, SnowflakeWarehouseC
 
 logger = logging.getLogger(__name__)
 
+
 class TenantRoutingWarehouseConnector(WarehouseConnector):
-    def __init__(self, settings: Settings, db_pool: asyncpg.Pool, sf_pool: SnowflakeConnectionPool | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        db_pool: asyncpg.Pool,
+        sf_pool: SnowflakeConnectionPool | None = None,
+    ):
         self.settings = settings
         self.db_pool = db_pool
         # A SnowflakeConnectionPool owns credentials/connection parameters and
@@ -33,7 +39,10 @@ class TenantRoutingWarehouseConnector(WarehouseConnector):
 
         if not self.fernet:
             # Fallback for dev/test mode if no encryption configured
-            if self.settings.snowflake_dsn and getattr(self.settings, "app_env", "development") in {"development", "test"}:
+            if self.settings.snowflake_dsn and getattr(self.settings, "app_env", "development") in {
+                "development",
+                "test",
+            }:
                 connector = SnowflakeWarehouseConnector(dsn=self.settings.snowflake_dsn)
                 self._cache[tenant_id] = (connector, datetime.now(UTC))
                 return connector
@@ -81,14 +90,15 @@ class TenantRoutingWarehouseConnector(WarehouseConnector):
         if not tenant_id:
             raise ValueError("tenant_id is required for TenantRoutingWarehouseConnector")
         connector = await self._get_connector(tenant_id)
-        return await connector.execute_readonly(sql, snowflake_role=snowflake_role, tenant_id=tenant_id)
+        return await connector.execute_readonly(
+            sql, snowflake_role=snowflake_role, tenant_id=tenant_id
+        )
 
     def fetch_schema_snapshot(self, tenant_id: str | None = None) -> list[SchemaTable]:
         if not tenant_id:
             raise ValueError("tenant_id is required for TenantRoutingWarehouseConnector")
-            
+
         # Since fetch_schema_snapshot is synchronous, we cannot easily await _get_connector here.
         # But this is only used by sync_schema.py, which uses SnowflakeWarehouseConnector directly.
         # So we can just raise NotImplementedError.
         raise NotImplementedError("fetch_schema_snapshot is not supported via routing connector.")
-

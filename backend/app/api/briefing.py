@@ -21,9 +21,11 @@ def get_warehouse(request: Request):
     return getattr(pipeline, "warehouse", None)
 
 
-async def _enforce_rate_limit(request: Request, claims: AuthClaims) -> None:
+async def _enforce_rate_limit(
+    request: Request, claims: AuthClaims, action: str = "briefing"
+) -> None:
     rate_limiter = request.app.state.rate_limiter
-    rl_result = await rate_limiter.check_rate_limit(claims.user_id, claims.tenant_id)
+    rl_result = await rate_limiter.check_rate_limit(claims.user_id, claims.tenant_id, action=action)
     if not rl_result.available:
         raise ApiError(
             ErrorCode.service_unavailable,
@@ -51,13 +53,15 @@ async def get_briefing(
     request: Request,
     claims: AuthClaims = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
-    warehouse = Depends(get_warehouse),
+    warehouse=Depends(get_warehouse),
 ) -> ExecutiveBriefingResponse:
     """
     Fetch the morning executive briefing for the authenticated tenant.
     """
-    await _enforce_rate_limit(request, claims)
-    logger.info("Generating morning briefing for tenant_id=%s user_id=%s", claims.tenant_id, claims.user_id)
+    await _enforce_rate_limit(request, claims, action="briefing")
+    logger.info(
+        "Generating morning briefing for tenant_id=%s user_id=%s", claims.tenant_id, claims.user_id
+    )
     user_name = _get_user_name(claims)
     return await generate_morning_briefing(
         claims.tenant_id,
@@ -74,11 +78,12 @@ async def get_briefing_pdf(
     request: Request,
     claims: AuthClaims = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
-    warehouse = Depends(get_warehouse),
+    warehouse=Depends(get_warehouse),
 ):
     from fastapi.responses import Response
     from app.services.pdf_exporter import generate_briefing_pdf
-    await _enforce_rate_limit(request, claims)
+
+    await _enforce_rate_limit(request, claims, action="pdf")
     user_name = _get_user_name(claims)
     briefing = await generate_morning_briefing(
         claims.tenant_id,
@@ -88,13 +93,15 @@ async def get_briefing_pdf(
         snowflake_role=claims.snowflake_role,
         redis_client=getattr(getattr(request.app.state, "sessions", None), "client", None),
     )
-    
+
     tenant_name = claims.tenant_name
     db_pool = getattr(request.app.state, "db_pool", None)
     if not tenant_name and db_pool:
         try:
             async with db_pool.acquire() as conn:
-                row = await conn.fetchrow("SELECT name FROM tenants WHERE id = $1", claims.tenant_id)
+                row = await conn.fetchrow(
+                    "SELECT name FROM tenants WHERE id = $1", claims.tenant_id
+                )
                 if row and row["name"]:
                     tenant_name = row["name"]
         except Exception:
@@ -114,11 +121,12 @@ async def get_briefing_audio(
     voice: str = Query(default="aura-asteria-en", description="TTS voice narrator model"),
     claims: AuthClaims = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
-    warehouse = Depends(get_warehouse),
+    warehouse=Depends(get_warehouse),
 ):
     from fastapi.responses import Response
     from app.services.briefing_audio import get_or_generate_briefing_audio_bytes
-    await _enforce_rate_limit(request, claims)
+
+    await _enforce_rate_limit(request, claims, action="audio")
     audio_bytes, provider = await get_or_generate_briefing_audio_bytes(
         claims,
         settings,
@@ -127,4 +135,3 @@ async def get_briefing_audio(
         warehouse=warehouse,
     )
     return Response(content=audio_bytes, media_type="audio/mpeg")
-

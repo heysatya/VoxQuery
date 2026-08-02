@@ -101,6 +101,7 @@ async def test_fake_provider_emits_interim_then_final():
       2. Yield a FinalTranscriptEvent after the frame generator is exhausted.
       3. Yield events in that order with no duplicates.
     """
+
     async def single_frame():
         yield b"\x00\x01\x02\x03"  # one 100ms-shaped binary chunk
 
@@ -125,6 +126,7 @@ async def test_fake_provider_emits_single_interim_across_multiple_frames():
     FakeSttProvider must yield exactly one InterimTranscriptEvent
     regardless of how many binary frames it receives.
     """
+
     async def many_frames():
         for _ in range(5):
             yield b"\x00" * 3200  # five chunks
@@ -144,6 +146,7 @@ async def test_fake_provider_emits_single_interim_across_multiple_frames():
 # DeepgramSttProvider Slice 4 behaviour
 # ---------------------------------------------------------------------------
 
+
 class MockDeepgramWS:
     def __init__(self, messages_to_yield, throw_on_close=False):
         self.messages = messages_to_yield
@@ -152,15 +155,16 @@ class MockDeepgramWS:
         self.send = AsyncMock()
         self.close = AsyncMock()
         self._msg_iter = iter(self.messages)
-        
+
         async def mock_recv():
             try:
                 return next(self._msg_iter)
             except StopIteration:
                 from websockets.exceptions import ConnectionClosedOK
                 import websockets.frames
+
                 raise ConnectionClosedOK(websockets.frames.Close(1000, ""), None)
-                
+
         self.recv = AsyncMock(side_effect=mock_recv)
 
     async def __aenter__(self):
@@ -169,8 +173,10 @@ class MockDeepgramWS:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if self.throw_on_close and not exc_type:
             from websockets.exceptions import ConnectionClosed
+
             raise ConnectionClosed(None, None)
         self.closed = True
+
 
 @pytest.fixture
 def mock_logger():
@@ -178,13 +184,32 @@ def mock_logger():
         def __init__(self):
             super().__init__()
             self.emitted = []
+
         def emit(self, event, tier=2, **payload):
             self.emitted.append({"event": event, "tier": tier, **payload})
+
     return TestLogger()
 
+
 async def test_deepgram_provider_happy_path_interim_then_final(mock_logger):
-    interim_resp = json.dumps({"type": "Results", "channel": {"alternatives": [{"transcript": "show revenue", "confidence": 0.89}]}, "is_final": False, "speech_final": False})
-    final_resp = json.dumps({"type": "Results", "channel": {"alternatives": [{"transcript": "show revenue by region", "confidence": 0.94}]}, "is_final": True, "speech_final": True})
+    interim_resp = json.dumps(
+        {
+            "type": "Results",
+            "channel": {"alternatives": [{"transcript": "show revenue", "confidence": 0.89}]},
+            "is_final": False,
+            "speech_final": False,
+        }
+    )
+    final_resp = json.dumps(
+        {
+            "type": "Results",
+            "channel": {
+                "alternatives": [{"transcript": "show revenue by region", "confidence": 0.94}]
+            },
+            "is_final": True,
+            "speech_final": True,
+        }
+    )
 
     mock_ws = MockDeepgramWS([interim_resp, final_resp])
 
@@ -208,25 +233,32 @@ async def test_deepgram_provider_happy_path_interim_then_final(mock_logger):
     assert events[2].text == "show revenue by region"
     assert events[2].confidence == 0.94
 
+
 async def test_deepgram_provider_concatenates_final_segments_until_stream_close(mock_logger):
-    first_final_segment = json.dumps({
-        "type": "Results",
-        "channel": {"alternatives": [{"transcript": "show revenue", "confidence": 0.90}]},
-        "is_final": True,
-        "speech_final": False,
-    })
-    next_interim = json.dumps({
-        "type": "Results",
-        "channel": {"alternatives": [{"transcript": "by region", "confidence": 0.80}]},
-        "is_final": False,
-        "speech_final": False,
-    })
-    second_final_segment = json.dumps({
-        "type": "Results",
-        "channel": {"alternatives": [{"transcript": "by region", "confidence": 0.96}]},
-        "is_final": True,
-        "speech_final": True,
-    })
+    first_final_segment = json.dumps(
+        {
+            "type": "Results",
+            "channel": {"alternatives": [{"transcript": "show revenue", "confidence": 0.90}]},
+            "is_final": True,
+            "speech_final": False,
+        }
+    )
+    next_interim = json.dumps(
+        {
+            "type": "Results",
+            "channel": {"alternatives": [{"transcript": "by region", "confidence": 0.80}]},
+            "is_final": False,
+            "speech_final": False,
+        }
+    )
+    second_final_segment = json.dumps(
+        {
+            "type": "Results",
+            "channel": {"alternatives": [{"transcript": "by region", "confidence": 0.96}]},
+            "is_final": True,
+            "speech_final": True,
+        }
+    )
 
     mock_ws = MockDeepgramWS([first_final_segment, next_interim, second_final_segment])
 
@@ -246,6 +278,7 @@ async def test_deepgram_provider_concatenates_final_segments_until_stream_close(
     assert events[-1].text == "show revenue by region"
     assert events[-1].confidence == pytest.approx(((0.90 * 2) + (0.96 * 2)) / 4)
 
+
 async def test_deepgram_provider_client_disconnect_closes_upstream(mock_logger):
     mock_ws = MockDeepgramWS([])
 
@@ -261,6 +294,7 @@ async def test_deepgram_provider_client_disconnect_closes_upstream(mock_logger):
 
     assert mock_ws.closed is True
 
+
 async def test_deepgram_provider_deepgram_close_yields_safe_error(mock_logger):
     from websockets.exceptions import ConnectionClosedError
     import websockets.frames
@@ -270,13 +304,13 @@ async def test_deepgram_provider_deepgram_close_yields_safe_error(mock_logger):
         def __init__(self):
             super().__init__([])
             self.count = 0
-            
+
             async def mock_recv():
                 if self.count == 0:
                     self.count += 1
                     return json.dumps({"type": "Metadata"})
                 raise ConnectionClosedError(websockets.frames.Close(1011, ""), None)
-            
+
             self.recv = AsyncMock(side_effect=mock_recv)
 
     mock_ws = ThrowingWS()
@@ -294,12 +328,13 @@ async def test_deepgram_provider_deepgram_close_yields_safe_error(mock_logger):
 
         assert "sk-test-placeholder" not in str(exc.value)
 
+
 async def test_deepgram_provider_idle_timeout_closes_both_sides(mock_logger):
     mock_ws = MockDeepgramWS([])
     from app.core.stt import DeepgramUnavailableError
 
     async def hanging_frames():
-        await asyncio.sleep(20.0) # More than 15s timeout
+        await asyncio.sleep(20.0)  # More than 15s timeout
         yield b"chunk"
 
     provider = DeepgramSttProvider(api_key="sk-test-placeholder", logger=mock_logger)
@@ -310,6 +345,7 @@ async def test_deepgram_provider_idle_timeout_closes_both_sides(mock_logger):
                 async for evt in provider.stream(hanging_frames()):
                     pass
             assert "idle timeout" in str(exc.value)
+
 
 async def test_deepgram_provider_api_key_never_appears_in_exceptions(mock_logger):
     mock_ws = MockDeepgramWS([json.dumps({"type": "Error", "err_msg": "sk-test-abc123"})])
@@ -328,6 +364,7 @@ async def test_deepgram_provider_api_key_never_appears_in_exceptions(mock_logger
         assert "sk-test-abc123" not in str(exc.value)
         assert "[REDACTED]" in str(exc.value)
 
+
 async def test_deepgram_provider_sender_failure_propagates_safely(mock_logger):
     mock_ws = MockDeepgramWS([])
     from app.core.stt import DeepgramUnavailableError
@@ -337,6 +374,7 @@ async def test_deepgram_provider_sender_failure_propagates_safely(mock_logger):
     async def blocking_recv():
         await asyncio.sleep(0.1)
         raise ConnectionClosedOK(websockets.frames.Close(1000, ""), None)
+
     mock_ws.recv = blocking_recv
 
     async def failing_frames():
@@ -353,6 +391,7 @@ async def test_deepgram_provider_sender_failure_propagates_safely(mock_logger):
         assert "sk-test-abc123" not in str(exc.value)
         assert "Deepgram send failed" in str(exc.value)
 
+
 async def test_deepgram_provider_websocket_disconnect_passes_transparently(mock_logger):
     mock_ws = MockDeepgramWS([])
     from websockets.exceptions import ConnectionClosedOK
@@ -361,10 +400,11 @@ async def test_deepgram_provider_websocket_disconnect_passes_transparently(mock_
     async def blocking_recv():
         await asyncio.sleep(0.1)
         raise ConnectionClosedOK(websockets.frames.Close(1000, ""), None)
+
     mock_ws.recv = blocking_recv
 
     from starlette.websockets import WebSocketDisconnect
-    
+
     async def disconnect_frames():
         yield b"chunk"
         raise WebSocketDisconnect(code=1006)
@@ -476,7 +516,9 @@ async def test_deepgram_provider_mip_opt_out_true_when_enabled(mock_logger):
         captured_urls.append(url)
         return mock_ws
 
-    provider = DeepgramSttProvider(api_key="sk-test-placeholder", logger=mock_logger, mip_opt_out=True)
+    provider = DeepgramSttProvider(
+        api_key="sk-test-placeholder", logger=mock_logger, mip_opt_out=True
+    )
 
     with patch("websockets.connect", side_effect=capture_connect):
         async for _ in provider.stream(fake_frames()):
@@ -487,7 +529,10 @@ async def test_deepgram_provider_mip_opt_out_true_when_enabled(mock_logger):
 
 def test_build_stt_provider_wires_mip_opt_out_setting():
     settings = Settings(
-        APP_ENV="test", STT_PROVIDER="deepgram", DEEPGRAM_API_KEY="sk-test", DEEPGRAM_MIP_OPT_OUT=True
+        APP_ENV="test",
+        STT_PROVIDER="deepgram",
+        DEEPGRAM_API_KEY="sk-test",
+        DEEPGRAM_MIP_OPT_OUT=True,
     )
     provider = build_stt_provider(settings)
     assert isinstance(provider, DeepgramSttProvider)

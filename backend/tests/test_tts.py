@@ -44,7 +44,10 @@ def test_deepgram_tts_provider_mip_opt_out_can_be_enabled():
 def test_build_tts_provider_wires_mip_opt_out_setting():
     provider = build_tts_provider(
         Settings(
-            APP_ENV="test", TTS_PROVIDER="deepgram", DEEPGRAM_API_KEY="sk-test", DEEPGRAM_MIP_OPT_OUT=True
+            APP_ENV="test",
+            TTS_PROVIDER="deepgram",
+            DEEPGRAM_API_KEY="sk-test",
+            DEEPGRAM_MIP_OPT_OUT=True,
         )
     )
     assert isinstance(provider, DeepgramTTSProvider)

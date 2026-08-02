@@ -26,7 +26,7 @@ async def test_generate_memory_graph_service():
         }
     ]
     graph = await generate_memory_graph(session_id, settings, turns=sample_turns)
-    
+
     assert graph.session_id == session_id
     assert len(graph.nodes) >= 2
     assert len(graph.edges) >= 1

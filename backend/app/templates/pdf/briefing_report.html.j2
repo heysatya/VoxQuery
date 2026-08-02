@@ -77,12 +77,12 @@
 
   <h1>VoxQuery Morning Briefing</h1>
   <div class="subtitle">
-    Date: {{ briefing.date }} | Tenant: {{ tenant_name }} | Generated: {{ generated_at }}
+    Date: {{ briefing.date if briefing.date else "—" }} | Tenant: {{ tenant_name if tenant_name else "—" }} | Generated: {{ generated_at if generated_at else "—" }}
   </div>
 
   <div class="narrative">
     <strong>Executive Summary:</strong><br/>
-    {{ briefing.summary_narrative }}
+    {{ briefing.summary_narrative if briefing.summary_narrative else "No executive summary available." }}
   </div>
 
   <div class="section-title">Key Performance Indicators</div>
@@ -99,11 +99,11 @@
     <tbody>
       {% for kpi in briefing.kpis %}
       <tr>
-        <td><strong>{{ kpi.label }}</strong></td>
-        <td>{{ kpi.value }}</td>
-        <td>{{ kpi.change_pct }}%</td>
-        <td>{{ kpi.trend | upper }}</td>
-        <td>{{ kpi.insight }}</td>
+        <td><strong>{{ kpi.label if kpi.label else "—" }}</strong></td>
+        <td>{{ kpi.value if kpi.value is not none else "—" }}</td>
+        <td>{% if kpi.change_pct is not none and kpi.change_pct != "" %}{{ kpi.change_pct }}%{% else %}—{% endif %}</td>
+        <td>{{ kpi.trend | upper if kpi.trend else "—" }}</td>
+        <td>{{ kpi.insight if kpi.insight else "—" }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -122,7 +122,7 @@
   <div class="section-title">Detected Statistical Outliers</div>
   <ul>
     {% for anomaly in briefing.anomalies %}
-    <li><strong>[{{ anomaly.severity | upper }}]</strong> {{ anomaly.title }}: {{ anomaly.description }}</li>
+    <li><strong>[{{ anomaly.severity | upper if anomaly.severity else "INFO" }}]</strong> {{ anomaly.title if anomaly.title else "Untitled" }}: {{ anomaly.description if anomaly.description else "" }}</li>
     {% endfor %}
   </ul>
   {% endif %}

@@ -10,10 +10,12 @@ from app.config import get_settings
 # We do not want Langfuse internals to raise to the pipeline.
 # We wrap it in a class that catches exceptions and logs them to our telemetry tier 2.
 
+
 class LangfuseTracer:
     def __init__(self):
         try:
             from app.config import get_settings
+
             if get_settings().app_env == "test":
                 self.langfuse = None
             else:
@@ -37,7 +39,7 @@ class LangfuseTracer:
         if self.langfuse is None:
             yield None
             return
-        
+
         is_yielded = False
         try:
             with propagate_attributes(
@@ -48,12 +50,10 @@ class LangfuseTracer:
                     "tenant_id": str(turn.tenant_id) if turn.tenant_id else None,
                     "input_modality": turn.input_modality,
                     "model_name": get_settings().canonical_sql_model,
-                }
+                },
             ):
                 with self.langfuse.start_as_current_observation(
-                    name="voice_turn",
-                    as_type="span",
-                    trace_context={"trace_id": turn.turn_id.hex}
+                    name="voice_turn", as_type="span", trace_context={"trace_id": turn.turn_id.hex}
                 ) as trace:
                     is_yielded = True
                     yield trace
@@ -63,14 +63,19 @@ class LangfuseTracer:
             emit("langfuse.error", tier=2, error=str(e), func="start_trace")
             yield None
 
-    def span_stt_capture(self, trace, raw_transcript: str | None, submitted_text: str, confidence: float | None):
+    def span_stt_capture(
+        self, trace, raw_transcript: str | None, submitted_text: str, confidence: float | None
+    ):
         if not trace:
             return
         import difflib
+
         edit_distance_ratio = None
         if raw_transcript and submitted_text:
-            edit_distance_ratio = difflib.SequenceMatcher(None, raw_transcript.lower(), submitted_text.lower()).ratio()
-            
+            edit_distance_ratio = difflib.SequenceMatcher(
+                None, raw_transcript.lower(), submitted_text.lower()
+            ).ratio()
+
         def _span():
             child = trace.start_observation(
                 name="stt_capture",
@@ -79,15 +84,17 @@ class LangfuseTracer:
                     "raw_transcript": raw_transcript,
                     "submitted_text": submitted_text,
                     "deepgram_confidence_raw": confidence,
-                    "edit_distance_ratio": edit_distance_ratio
-                }
+                    "edit_distance_ratio": edit_distance_ratio,
+                },
             )
             child.end()
+
         self._safe_call(_span)
 
     def span_memory_retrieval(self, trace, truncated: bool, turns_dropped: int, token_count: int):
         if not trace:
             return
+
         def _span():
             child = trace.start_observation(
                 name="memory_retrieval",
@@ -95,45 +102,62 @@ class LangfuseTracer:
                 output={
                     "truncated": truncated,
                     "turns_dropped": turns_dropped,
-                    "token_count": token_count
-                }
+                    "token_count": token_count,
+                },
             )
             child.end()
+
         self._safe_call(_span)
 
     def span_history_injection(self, trace, total_prompt_tokens: int):
         if not trace:
             return
+
         def _span():
             child = trace.start_observation(
                 name="history_injection",
                 as_type="span",
-                output={
-                    "total_prompt_tokens": total_prompt_tokens
-                }
+                output={"total_prompt_tokens": total_prompt_tokens},
             )
             child.end()
+
         self._safe_call(_span)
 
-    def span_ambiguity_detection(self, trace, signals_detected: list, signals_suppressed: list, dominant_signal: str | None):
+    def span_ambiguity_detection(
+        self, trace, signals_detected: list, signals_suppressed: list, dominant_signal: str | None
+    ):
         if not trace:
             return
+
         def _span():
             child = trace.start_observation(
                 name="ambiguity_detection",
                 as_type="span",
                 output={
-                    "signals_detected": [s.__dict__ if hasattr(s, "__dict__") else str(s) for s in signals_detected],
-                    "signals_suppressed": [s.__dict__ if hasattr(s, "__dict__") else str(s) for s in signals_suppressed],
-                    "dominant_signal": dominant_signal
-                }
+                    "signals_detected": [
+                        s.__dict__ if hasattr(s, "__dict__") else str(s) for s in signals_detected
+                    ],
+                    "signals_suppressed": [
+                        s.__dict__ if hasattr(s, "__dict__") else str(s) for s in signals_suppressed
+                    ],
+                    "dominant_signal": dominant_signal,
+                },
             )
             child.end()
+
         self._safe_call(_span)
 
-    def span_confidence_computation(self, trace, composite_score: float, confidence_tier: str, clarification_triggered: bool, formula_weights: dict):
+    def span_confidence_computation(
+        self,
+        trace,
+        composite_score: float,
+        confidence_tier: str,
+        clarification_triggered: bool,
+        formula_weights: dict,
+    ):
         if not trace:
             return
+
         def _span():
             child = trace.start_observation(
                 name="confidence_computation",
@@ -142,40 +166,39 @@ class LangfuseTracer:
                     "composite_score": composite_score,
                     "confidence_tier": confidence_tier,
                     "clarification_triggered": clarification_triggered,
-                    "formula_weights": formula_weights
-                }
+                    "formula_weights": formula_weights,
+                },
             )
             child.end()
+
         self._safe_call(_span)
-        
+
     def span_rag_retrieval(self, trace, rag_score: float, chunk_count: int):
         if not trace:
             return
+
         def _span():
             child = trace.start_observation(
                 name="rag_retrieval",
                 as_type="span",
-                output={
-                    "rag_score": rag_score,
-                    "chunk_count": chunk_count
-                }
+                output={"rag_score": rag_score, "chunk_count": chunk_count},
             )
             child.end()
+
         self._safe_call(_span)
 
     def span_clarification_issued(self, trace, question: str, options: list[str]):
         if not trace:
             return
+
         def _span():
             child = trace.start_observation(
                 name="clarification_issued",
                 as_type="span",
-                output={
-                    "question": question,
-                    "options": options
-                }
+                output={"question": question, "options": options},
             )
             child.end()
+
         self._safe_call(_span)
 
     def span_snowflake_executing(
@@ -190,6 +213,7 @@ class LangfuseTracer:
     ):
         if not trace:
             return
+
         def _span():
             child = trace.start_observation(
                 name="snowflake_executing",
@@ -208,16 +232,17 @@ class LangfuseTracer:
             if not success:
                 child.update(level="ERROR", status_message=error_type or "warehouse_error")
             child.end()
+
         self._safe_call(_span)
 
-    def span_turn_completed(self, trace, latency_ms: int, success: bool = True, error_code: str | None = None):
+    def span_turn_completed(
+        self, trace, latency_ms: int, success: bool = True, error_code: str | None = None
+    ):
         if not trace:
             return
+
         def _span():
-            trace_metadata = {
-                "latency_ms": latency_ms,
-                "success": success
-            }
+            trace_metadata = {"latency_ms": latency_ms, "success": success}
             if error_code:
                 trace_metadata["error_code"] = error_code
 
@@ -225,18 +250,24 @@ class LangfuseTracer:
             child = trace.start_observation(
                 name="turn_completed",
                 as_type="span",
-                output={
-                    "latency_ms": latency_ms,
-                    "success": success,
-                    "error_code": error_code
-                }
+                output={"latency_ms": latency_ms, "success": success, "error_code": error_code},
             )
             child.end()
+
         self._safe_call(_span)
-        
-    def score_feedback(self, turn_id: UUID, rating: int, composite_score: float, confidence_tier: str, clarification_triggered: bool, option_selected: str | None):
+
+    def score_feedback(
+        self,
+        turn_id: UUID,
+        rating: int,
+        composite_score: float,
+        confidence_tier: str,
+        clarification_triggered: bool,
+        option_selected: str | None,
+    ):
         if self.langfuse is None:
             return
+
         def _score():
             comment = "thumbs-up" if rating == 1 else "thumbs-down"
             self.langfuse.create_score(
@@ -251,12 +282,14 @@ class LangfuseTracer:
                     "confidence_tier": confidence_tier,
                     "clarification_triggered": clarification_triggered,
                     "option_selected": option_selected,
-                }
+                },
             )
+
         self._safe_call(_score)
-        
+
     def flush(self):
         if self.langfuse:
             self._safe_call(self.langfuse.flush)
+
 
 tracer = LangfuseTracer()

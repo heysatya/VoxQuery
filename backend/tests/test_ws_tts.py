@@ -27,7 +27,9 @@ def test_ws_tts_requires_auth():
     session_id = uuid4()
     turn_id = uuid4()
     with pytest.raises(Exception):
-        with client.websocket_connect(f"/ws/tts?session_id={session_id}&turn_id={turn_id}") as websocket:
+        with client.websocket_connect(
+            f"/ws/tts?session_id={session_id}&turn_id={turn_id}"
+        ) as websocket:
             websocket.receive_bytes()
 
 
@@ -35,7 +37,7 @@ def test_ws_tts_session_not_found(auth_token):
     client = TestClient(app)
     session_id = uuid4()
     turn_id = uuid4()
-    
+
     with pytest.raises(Exception):
         with client.websocket_connect(
             f"/ws/tts?session_id={session_id}&turn_id={turn_id}&token={auth_token}"
@@ -47,7 +49,7 @@ def test_ws_tts_session_not_found(auth_token):
 
 def test_ws_tts_turn_not_found(auth_token):
     client = TestClient(app)
-    
+
     # Create a session
     response = client.post(
         "/api/session",
@@ -57,7 +59,7 @@ def test_ws_tts_turn_not_found(auth_token):
     assert response.status_code == 201
     session_id = response.json()["session_id"]
     turn_id = uuid4()  # Does not exist
-    
+
     with pytest.raises(Exception):
         with client.websocket_connect(
             f"/ws/tts?session_id={session_id}&turn_id={turn_id}&token={auth_token}"
@@ -67,7 +69,7 @@ def test_ws_tts_turn_not_found(auth_token):
 
 def test_ws_tts_success(auth_token, override_tts_fake):
     client = TestClient(app)
-    
+
     # Create a session
     response = client.post(
         "/api/session",
@@ -76,13 +78,14 @@ def test_ws_tts_success(auth_token, override_tts_fake):
     )
     assert response.status_code == 201
     session_id = response.json()["session_id"]
-    
+
     # Manually inject a turn into the session for testing
     from app.main import app as main_app
+
     fake_user_id = "00000000-0000-0000-0000-000000000001"
     fake_tenant_id = "00000000-0000-0000-0000-000000000101"
     from app.models.contracts import InputModality, TurnRecord
-    
+
     turn_id = uuid4()
     dummy_turn = TurnRecord(
         turn_id=turn_id,
@@ -96,7 +99,7 @@ def test_ws_tts_success(auth_token, override_tts_fake):
     )
     # Insert into the pipeline's in-memory turn store
     main_app.state.pipeline.turns[turn_id] = dummy_turn
-    
+
     # Now connect
     with client.websocket_connect(
         f"/ws/tts?session_id={session_id}&turn_id={turn_id}&token={auth_token}"

@@ -11,31 +11,54 @@ These defaults are:
 To add or change the default glossary, edit this file only.
 Do NOT add synonyms directly to query_rewriter.py or webhooks.py.
 """
+
 from __future__ import annotations
 
 DEFAULT_METRIC_SYNONYMS: dict[str, list[str]] = {
     "revenue": [
-        "revenue", "sales", "net sales", "topline",
-        "income", "earnings", "gross revenue", "net revenue",
+        "revenue",
+        "sales",
+        "net sales",
+        "topline",
+        "income",
+        "earnings",
+        "gross revenue",
+        "net revenue",
     ],
     "order_count": [
-        "orders", "order count", "number of orders",
-        "purchases", "transactions", "order volume",
+        "orders",
+        "order count",
+        "number of orders",
+        "purchases",
+        "transactions",
+        "order volume",
     ],
     "average_order_value": [
-        "aov", "average order value", "avg order",
-        "basket size", "average ticket",
+        "aov",
+        "average order value",
+        "avg order",
+        "basket size",
+        "average ticket",
     ],
     "active_customers": [
-        "customers", "unique customers", "buyers",
-        "active customers", "active buyers",
+        "customers",
+        "unique customers",
+        "buyers",
+        "active customers",
+        "active buyers",
     ],
     "units_sold": [
-        "units", "quantity", "volume", "units sold",
+        "units",
+        "quantity",
+        "volume",
+        "units sold",
     ],
     "discount_rate": [
-        "discount", "discount rate", "promotion",
-        "markdown", "promo",
+        "discount",
+        "discount rate",
+        "promotion",
+        "markdown",
+        "promo",
     ],
 }
 

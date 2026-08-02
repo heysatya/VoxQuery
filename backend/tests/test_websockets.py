@@ -22,7 +22,9 @@ def test_fake_audio_socket_returns_final_transcript():
 
 def test_pipeline_socket_receives_result_ready_for_clear_query():
     session = client.post("/api/session", json={"tenant_id": TENANT_ID}).json()
-    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
+    with client.websocket_connect(
+        f"/ws/pipeline?session_id={session['session_id']}&token=fake"
+    ) as ws:
         query = client.post(
             "/api/query",
             json={
@@ -42,7 +44,9 @@ def test_pipeline_socket_receives_result_ready_for_clear_query():
 
 def test_pipeline_socket_receives_clarification_and_result_after_selection():
     session = client.post("/api/session", json={"tenant_id": TENANT_ID}).json()
-    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
+    with client.websocket_connect(
+        f"/ws/pipeline?session_id={session['session_id']}&token=fake"
+    ) as ws:
         query = client.post(
             "/api/query",
             json={
@@ -71,7 +75,9 @@ def test_pipeline_socket_receives_clarification_and_result_after_selection():
 
 def test_pipeline_socket_clarifies_vague_top_item_query():
     session = client.post("/api/session", json={"tenant_id": TENANT_ID}).json()
-    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
+    with client.websocket_connect(
+        f"/ws/pipeline?session_id={session['session_id']}&token=fake"
+    ) as ws:
         query = client.post(
             "/api/query",
             json={
@@ -85,8 +91,6 @@ def test_pipeline_socket_clarifies_vague_top_item_query():
         assert query.status_code == 202
         assert clarification["turn_id"] == query.json()["turn_id"]
         assert clarification["type"] == "clarification_request"
-
-
 
 
 def receive_until(ws, event_type: str):

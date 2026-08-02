@@ -18,7 +18,7 @@ async def test_get_row_drilldown_service():
     settings = get_settings()
     turn_id = uuid4()
     rows = await get_row_drilldown(turn_id, settings)
-    
+
     # Requirement 2.3: Never fall back to fabricated rows if turn SQL/record is missing
     assert isinstance(rows, list)
     assert len(rows) == 0

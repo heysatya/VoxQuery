@@ -3,6 +3,7 @@
 Periodically checks user preferences and dispatches due executive briefing emails.
 Enforces idempotency via briefing_send_log table and Redis job store.
 """
+
 from __future__ import annotations
 from datetime import datetime
 import logging
@@ -36,7 +37,7 @@ def get_scheduler(settings: Settings | None = None) -> AsyncIOScheduler:
 
                 parsed = urlparse(settings.upstash_redis_url)
                 if parsed.hostname:
-                    is_ssl = (parsed.scheme == "rediss")
+                    is_ssl = parsed.scheme == "rediss"
                     redis_kwargs = {
                         "jobs_key": "voxquery:briefing_jobs",
                         "host": parsed.hostname,
@@ -50,7 +51,9 @@ def get_scheduler(settings: Settings | None = None) -> AsyncIOScheduler:
 
                     jobstores["default"] = RedisJobStore(**redis_kwargs)
             except Exception as exc:
-                logger.warning("Redis jobstore initialization failed, falling back to memory: %s", exc)
+                logger.warning(
+                    "Redis jobstore initialization failed, falling back to memory: %s", exc
+                )
 
         _scheduler = AsyncIOScheduler(jobstores=jobstores if jobstores else None)
     return _scheduler
@@ -78,7 +81,9 @@ def start_briefing_scheduler(
         logger.info("Morning briefing scheduler started.")
 
 
-async def check_and_dispatch_due_briefings(pool: asyncpg.Pool | None = None, settings: Settings | None = None) -> int:
+async def check_and_dispatch_due_briefings(
+    pool: asyncpg.Pool | None = None, settings: Settings | None = None
+) -> int:
     """Checks for users whose configured delivery_time matches current local time in their timezone."""
     target_pool = pool or _db_pool
     target_settings = settings or get_settings()

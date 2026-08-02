@@ -18,7 +18,9 @@ _VERIFIER_CACHE: dict[tuple[str | None, ...], "ClerkJwtVerifier"] = {}
 class ClerkJwtVerifier:
     def __init__(self, settings: Settings, jwks_client: PyJWKClient | None = None) -> None:
         if not settings.clerk_issuer or not settings.clerk_jwks_url:
-            raise ApiError(ErrorCode.auth_invalid, status_code=401, detail="Clerk is not configured.")
+            raise ApiError(
+                ErrorCode.auth_invalid, status_code=401, detail="Clerk is not configured."
+            )
         self.settings = settings
         self.jwks_client = jwks_client or PyJWKClient(settings.clerk_jwks_url)
 
@@ -75,7 +77,7 @@ class ClerkJwtVerifier:
             tenant_id_val = org_claim.get("id")
             raw_role = org_claim.get("rol")
             tenant_name_val = org_claim.get("name") or org_claim.get("slug")
-        
+
         if not tenant_id_val:
             tenant_id_val = payload.get("org_id")
             if not raw_role:
@@ -222,7 +224,11 @@ async def get_current_user(
     if not authorization:
         raise ApiError(ErrorCode.auth_missing, status_code=401)
     if not authorization.startswith("Bearer "):
-        raise ApiError(ErrorCode.auth_invalid, status_code=401, detail=f"Invalid Authorization header format: {authorization[:20]}")
+        raise ApiError(
+            ErrorCode.auth_invalid,
+            status_code=401,
+            detail=f"Invalid Authorization header format: {authorization[:20]}",
+        )
     token = authorization.removeprefix("Bearer ").strip()
     if not token:
         raise ApiError(ErrorCode.auth_missing, status_code=401)
@@ -268,5 +274,3 @@ async def authenticate_websocket_message(
         except Exception:
             pass
         return None
-
-

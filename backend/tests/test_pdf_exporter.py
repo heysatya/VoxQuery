@@ -40,3 +40,34 @@ async def test_generate_briefing_pdf_output():
         if "PDF generation unavailable" in str(exc):
             pytest.skip("WeasyPrint system libraries (Pango/Cairo) not installed on local host")
         raise
+
+
+@pytest.mark.asyncio
+async def test_briefing_template_rendering_with_nulls():
+    from app.services.pdf_exporter import env
+
+    briefing_with_nulls = ExecutiveBriefingResponse(
+        date="2026-08-02",
+        greeting="Good morning",
+        kpis=[
+            BriefingKpi(
+                label="Orders",
+                value="10,000",
+                change_pct=None,
+                trend=None,
+                insight="",
+            )
+        ],
+        summary_narrative="Test summary narrative",
+        anomalies=[],
+        proactive_insights=[],
+    )
+    template = env.get_template("briefing_report.html.j2")
+    rendered_html = template.render(
+        briefing=briefing_with_nulls,
+        tenant_name=None,
+        generated_at="2026-08-02 18:00 UTC",
+    )
+    assert "Orders" in rendered_html
+    assert "—" in rendered_html
+    assert "None" not in rendered_html

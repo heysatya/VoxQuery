@@ -1,4 +1,5 @@
 """User Preferences Service backed by Postgres."""
+
 from __future__ import annotations
 from typing import Any
 import asyncpg
@@ -45,7 +46,11 @@ async def update_user_preferences(
                 timezone = EXCLUDED.timezone,
                 updated_at = NOW()
             """,
-            user_id_str, email_briefing_enabled, email, delivery_time, timezone
+            user_id_str,
+            email_briefing_enabled,
+            email,
+            delivery_time,
+            timezone,
         )
     return UserPreferences(
         user_id=user_id_str,

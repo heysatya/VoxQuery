@@ -15,16 +15,27 @@ describe("ExecutiveAudioPlayer", () => {
 
     render(<ExecutiveAudioPlayer textToSpeak="Test briefing" />);
     expect(screen.getByText("Morning Voice Podcast Summary")).toBeInTheDocument();
-    expect(screen.getByText("Native Speech Synthesis (Fallback)")).toBeInTheDocument();
+    expect(screen.getByText("Executive Briefing Audio")).toBeInTheDocument();
+    // No voiceUrl → no <audio> element
+    expect(document.querySelector("audio")).toBeNull();
   });
 
-  it("renders VoxQuery Voice (Asteria) when voiceUrl is provided", () => {
+  it("renders an audio element when voiceUrl is provided", () => {
     vi.stubGlobal("speechSynthesis", {
       cancel: vi.fn(),
       speak: vi.fn(),
     });
 
-    render(<ExecutiveAudioPlayer textToSpeak="Test briefing" voiceUrl="http://localhost/audio.mp3" />);
-    expect(screen.getByText("VoxQuery Voice (Asteria)")).toBeInTheDocument();
+    render(
+      <ExecutiveAudioPlayer
+        textToSpeak="Test briefing"
+        voiceUrl="http://localhost/audio.mp3"
+      />
+    );
+    expect(screen.getByText("Morning Voice Podcast Summary")).toBeInTheDocument();
+    // With voiceUrl the component mounts an <audio> element
+    const audio = document.querySelector("audio");
+    expect(audio).not.toBeNull();
+    expect(audio?.getAttribute("src")).toBe("http://localhost/audio.mp3");
   });
 });

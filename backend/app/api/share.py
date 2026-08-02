@@ -7,6 +7,7 @@ Cross-tenant access is blocked at the repository level.
 Default: only authenticated users within the same tenant may view shared results.
 Unauthenticated public sharing is not enabled.
 """
+
 from __future__ import annotations
 
 import logging
@@ -48,13 +49,22 @@ async def create_share_link(
     """
     db_pool = _get_db_pool(request)
     if db_pool is None:
-        raise ApiError(ErrorCode.service_unavailable, status_code=503, detail="Share link storage unavailable.")
+        raise ApiError(
+            ErrorCode.service_unavailable, status_code=503, detail="Share link storage unavailable."
+        )
 
-    from app.repositories.share_repository import ShareRepository, DEFAULT_TTL_HOURS, MAX_TTL_HOURS, MIN_TTL_HOURS
+    from app.repositories.share_repository import (
+        ShareRepository,
+        DEFAULT_TTL_HOURS,
+        MAX_TTL_HOURS,
+        MIN_TTL_HOURS,
+    )
+
     ttl = body.ttl_hours if body.ttl_hours is not None else DEFAULT_TTL_HOURS
     if not (MIN_TTL_HOURS <= ttl <= MAX_TTL_HOURS):
         raise ApiError(
-            ErrorCode.internal_error, status_code=400,
+            ErrorCode.internal_error,
+            status_code=400,
             detail=f"ttl_hours must be between {MIN_TTL_HOURS} and {MAX_TTL_HOURS}.",
         )
 
@@ -67,7 +77,8 @@ async def create_share_link(
     )
     if result is None:
         raise ApiError(
-            ErrorCode.turn_not_found, status_code=404,
+            ErrorCode.turn_not_found,
+            status_code=404,
             detail="Turn not found, not completed, or not in your tenant.",
         )
 
@@ -96,9 +107,12 @@ async def get_shared_result(
     """
     db_pool = _get_db_pool(request)
     if db_pool is None:
-        raise ApiError(ErrorCode.service_unavailable, status_code=503, detail="Share link storage unavailable.")
+        raise ApiError(
+            ErrorCode.service_unavailable, status_code=503, detail="Share link storage unavailable."
+        )
 
     from app.repositories.share_repository import ShareRepository
+
     repo = ShareRepository(db_pool)
     result = await repo.get_share_by_token(token, claims.tenant_id)
 
@@ -107,11 +121,19 @@ async def get_shared_result(
 
     error_state = result.get("_error")
     if error_state == "expired":
-        raise ApiError(ErrorCode.session_expired, status_code=410, detail="This share link has expired.")
+        raise ApiError(
+            ErrorCode.session_expired, status_code=410, detail="This share link has expired."
+        )
     if error_state == "revoked":
-        raise ApiError(ErrorCode.turn_forbidden, status_code=403, detail="This share link has been revoked.")
+        raise ApiError(
+            ErrorCode.turn_forbidden, status_code=403, detail="This share link has been revoked."
+        )
     if error_state == "not_found":
-        raise ApiError(ErrorCode.turn_not_found, status_code=404, detail="The shared result is no longer available.")
+        raise ApiError(
+            ErrorCode.turn_not_found,
+            status_code=404,
+            detail="The shared result is no longer available.",
+        )
 
     return SharedResultResponse(
         link_id=result["link_id"],
@@ -136,13 +158,20 @@ async def revoke_share_link(
     """Revoke a share link. Only the creator can revoke their own links."""
     db_pool = _get_db_pool(request)
     if db_pool is None:
-        raise ApiError(ErrorCode.service_unavailable, status_code=503, detail="Share link storage unavailable.")
+        raise ApiError(
+            ErrorCode.service_unavailable, status_code=503, detail="Share link storage unavailable."
+        )
 
     from app.repositories.share_repository import ShareRepository
+
     repo = ShareRepository(db_pool)
     revoked = await repo.revoke_share_link(claims, link_id)
     if not revoked:
-        raise ApiError(ErrorCode.turn_not_found, status_code=404, detail="Share link not found or already revoked.")
+        raise ApiError(
+            ErrorCode.turn_not_found,
+            status_code=404,
+            detail="Share link not found or already revoked.",
+        )
     return StatusResponse(status="revoked")
 
 
@@ -157,6 +186,7 @@ async def list_share_links(
         return ShareLinkListResponse(items=[])
 
     from app.repositories.share_repository import ShareRepository
+
     repo = ShareRepository(db_pool)
     links = await repo.list_active_share_links(claims)
 

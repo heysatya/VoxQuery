@@ -109,7 +109,8 @@ async def clerk_webhook(
                     INSERT INTO tenants (id, name) VALUES ($1, $2)
                     ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
                     """,
-                    org_id, name
+                    org_id,
+                    name,
                 )
 
                 await conn.execute(
@@ -126,6 +127,7 @@ async def clerk_webhook(
                 if settings.snowflake_dsn and settings.fernet_key:
                     try:
                         from cryptography.fernet import Fernet
+
                         f = Fernet(settings.fernet_key.encode())
                         encrypted_dsn = f.encrypt(settings.snowflake_dsn.encode()).decode()
                         await conn.execute(
@@ -134,7 +136,8 @@ async def clerk_webhook(
                             VALUES ($1, $2)
                             ON CONFLICT (tenant_id) DO NOTHING
                             """,
-                            org_id, encrypted_dsn
+                            org_id,
+                            encrypted_dsn,
                         )
                     except Exception as e:
                         logger.error(f"Failed to seed tenant connection for org {org_id}: {e}")
@@ -151,7 +154,8 @@ async def clerk_webhook(
                         INSERT INTO tenants (id, name) VALUES ($1, $2)
                         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, deleted_at = NULL
                         """,
-                        org_id, name
+                        org_id,
+                        name,
                     )
                     logger.info(f"Updated Clerk Org: {org_id}")
 
@@ -162,11 +166,10 @@ async def clerk_webhook(
                     # Soft-delete memberships and remove connection
                     await conn.execute(
                         "UPDATE tenant_memberships SET deleted_at = NOW() WHERE tenant_id = $1",
-                        org_id
+                        org_id,
                     )
                     await conn.execute(
-                        "DELETE FROM tenant_connections WHERE tenant_id = $1",
-                        org_id
+                        "DELETE FROM tenant_connections WHERE tenant_id = $1", org_id
                     )
                     logger.info(f"Deactivated Clerk Org: {org_id}")
 
@@ -186,7 +189,8 @@ async def clerk_webhook(
                         INSERT INTO users (id, email) VALUES ($1, $2)
                         ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, deleted_at = NULL
                         """,
-                        user_id, email
+                        user_id,
+                        email,
                     )
                     # Upsert membership
                     await conn.execute(
@@ -196,9 +200,14 @@ async def clerk_webhook(
                         ON CONFLICT (tenant_id, user_id) DO UPDATE
                         SET role = EXCLUDED.role, permissions = EXCLUDED.permissions, updated_at = NOW(), deleted_at = NULL
                         """,
-                        tenant_id, user_id, role, json.dumps(permissions)
+                        tenant_id,
+                        user_id,
+                        role,
+                        json.dumps(permissions),
                     )
-                    logger.info(f"Upserted membership user={user_id} tenant={tenant_id} role={role}")
+                    logger.info(
+                        f"Upserted membership user={user_id} tenant={tenant_id} role={role}"
+                    )
 
             # 5. organizationMembership.updated
             elif event_type == "organizationMembership.updated":
@@ -216,7 +225,10 @@ async def clerk_webhook(
                         ON CONFLICT (tenant_id, user_id) DO UPDATE
                         SET role = EXCLUDED.role, permissions = EXCLUDED.permissions, updated_at = NOW(), deleted_at = NULL
                         """,
-                        tenant_id, user_id, role, json.dumps(permissions)
+                        tenant_id,
+                        user_id,
+                        role,
+                        json.dumps(permissions),
                     )
                     logger.info(f"Updated membership user={user_id} tenant={tenant_id} role={role}")
 
@@ -229,7 +241,8 @@ async def clerk_webhook(
                 if tenant_id and user_id:
                     await conn.execute(
                         "UPDATE tenant_memberships SET deleted_at = NOW() WHERE tenant_id = $1 AND user_id = $2",
-                        tenant_id, user_id
+                        tenant_id,
+                        user_id,
                     )
                     logger.info(f"Soft-deleted membership user={user_id} tenant={tenant_id}")
 
@@ -243,7 +256,8 @@ async def clerk_webhook(
                         INSERT INTO users (id, email) VALUES ($1, $2)
                         ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, deleted_at = NULL
                         """,
-                        user_id, email
+                        user_id,
+                        email,
                     )
                     logger.info(f"Upserted user profile: {user_id} ({email})")
 
@@ -257,7 +271,8 @@ async def clerk_webhook(
                         INSERT INTO users (id, email, updated_at, deleted_at) VALUES ($1, $2, NOW(), NULL)
                         ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, updated_at = NOW(), deleted_at = NULL
                         """,
-                        user_id, email
+                        user_id,
+                        email,
                     )
                     logger.info(f"Updated user profile: {user_id}")
 
@@ -265,13 +280,10 @@ async def clerk_webhook(
             elif event_type == "user.deleted":
                 user_id = data.get("id")
                 if user_id:
-                    await conn.execute(
-                        "UPDATE users SET deleted_at = NOW() WHERE id = $1",
-                        user_id
-                    )
+                    await conn.execute("UPDATE users SET deleted_at = NOW() WHERE id = $1", user_id)
                     await conn.execute(
                         "UPDATE tenant_memberships SET deleted_at = NOW() WHERE user_id = $1",
-                        user_id
+                        user_id,
                     )
                     logger.info(f"Soft-deleted user: {user_id}")
 

@@ -25,14 +25,16 @@ class RedisClientProtocol(Protocol):
     async def get(self, name: str) -> str | bytes | None: ...
 
     async def setex(self, name: str, time: int, value: str) -> object: ...
-    
+
     async def delete(self, *names: str) -> int: ...
 
     async def ping(self) -> object: ...
 
 
 class InMemorySessionStore:
-    def __init__(self, settings: Settings | None = None, counter: TokenCounter | None = None) -> None:
+    def __init__(
+        self, settings: Settings | None = None, counter: TokenCounter | None = None
+    ) -> None:
         self.settings = settings or get_settings()
         self.counter = counter or TokenCounter()
         self._sessions: dict[tuple[str, UUID], VoiceSession] = {}
@@ -41,18 +43,19 @@ class InMemorySessionStore:
 
     async def start(self) -> None:
         import asyncio
+
         if self._sweep_task is None:
             self._sweep_task = asyncio.create_task(self._sweep_loop())
 
     async def _sweep_loop(self) -> None:
         import asyncio
+
         try:
             while True:
                 await asyncio.sleep(300)
                 now = datetime.now(UTC)
                 expired_keys = [
-                    key for key, expires_at in self._expires_at.items()
-                    if expires_at <= now
+                    key for key, expires_at in self._expires_at.items() if expires_at <= now
                 ]
                 for key in expired_keys:
                     self._sessions.pop(key, None)
@@ -64,6 +67,7 @@ class InMemorySessionStore:
         if hasattr(self, "_sweep_task") and self._sweep_task:
             self._sweep_task.cancel()
             import asyncio
+
             try:
                 await self._sweep_task
             except asyncio.CancelledError:
@@ -113,12 +117,15 @@ class InMemorySessionStore:
 
     async def context_block(self, session: VoiceSession) -> SessionContextBlock:
         resolved_token_count = self.counter.count_json(
-            {term: entity.model_dump(mode="json") for term, entity in session.resolved_entities.items()}
+            {
+                term: entity.model_dump(mode="json")
+                for term, entity in session.resolved_entities.items()
+            }
         )
         remaining = max(0, self.settings.token_budget - resolved_token_count)
-        
+
         ok_history = [t for t in session.history if t.quality_flag == QualityFlag.ok]
-        
+
         selected_reversed: list[SessionHistoryTurn] = []
         used = 0
         for turn in reversed(ok_history):
@@ -172,7 +179,9 @@ class InMemorySessionStore:
         await self.save(session)
         return entry
 
-    async def set_pending_clarification(self, session: VoiceSession, state: ClarificationState) -> None:
+    async def set_pending_clarification(
+        self, session: VoiceSession, state: ClarificationState
+    ) -> None:
         session.clarification_state = state
         await self.save(session)
 

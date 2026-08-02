@@ -39,7 +39,7 @@ async def tts_socket(
     try:
         turn = websocket.app.state.pipeline.get_turn_for_user(turn_id, claims)
     except Exception:
-        await websocket.close(code=4004) # Not found
+        await websocket.close(code=4004)  # Not found
         return
 
     text_to_speak = turn.tts_text
@@ -56,7 +56,7 @@ async def tts_socket(
         user_id=str(claims.user_id),
         turn_id=str(turn_id),
     )
-    
+
     telemetry.emit("tts.ws.lifecycle", tier=2, action="opened")
     provider_name = "deepgram" if settings.tts_provider == "deepgram" else "fake"
     provider = build_tts_provider(settings, logger=logger)
@@ -113,4 +113,3 @@ async def tts_socket(
             pass
     finally:
         telemetry.emit("tts.ws.lifecycle", tier=2, action="closed", close_code=close_code)
-

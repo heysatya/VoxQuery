@@ -6,6 +6,7 @@ from app.services.preferences import get_user_preferences, update_user_preferenc
 
 from unittest.mock import MagicMock
 
+
 @pytest.mark.asyncio
 async def test_user_preferences_db_persistence(db_pool: asyncpg.Pool):
     if isinstance(db_pool, MagicMock):
@@ -15,8 +16,15 @@ async def test_user_preferences_db_persistence(db_pool: asyncpg.Pool):
     email = f"pref-{uuid4()}@test.com"
 
     async with db_pool.acquire() as conn:
-        await conn.execute("INSERT INTO tenants (id, name) VALUES ($1, 'Pref Tenant') ON CONFLICT DO NOTHING", str(tenant_id))
-        await conn.execute("INSERT INTO users (id, email) VALUES ($1, $2) ON CONFLICT DO NOTHING", str(user_id), email)
+        await conn.execute(
+            "INSERT INTO tenants (id, name) VALUES ($1, 'Pref Tenant') ON CONFLICT DO NOTHING",
+            str(tenant_id),
+        )
+        await conn.execute(
+            "INSERT INTO users (id, email) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            str(user_id),
+            email,
+        )
 
     # Initial get returns defaults
     defaults = await get_user_preferences(user_id, db_pool)

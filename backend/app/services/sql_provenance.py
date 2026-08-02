@@ -1,6 +1,7 @@
 """Parses executed SQL to extract provenance: source tables and filter predicates.
 Used to build memory-graph entity/filter nodes and to construct safe drilldown queries.
 """
+
 from __future__ import annotations
 from typing import Any
 import sqlglot
@@ -43,11 +44,13 @@ def parse_sql_provenance(sql: str) -> tuple[list[str], list[dict[str, Any]]]:
             if val and (val.startswith("'") and val.endswith("'")):
                 val = val[1:-1]
 
-            predicates.append({
-                "column": col.name,
-                "operator": op_key,
-                "value": val,
-            })
+            predicates.append(
+                {
+                    "column": col.name,
+                    "operator": op_key,
+                    "value": val,
+                }
+            )
     return tables, predicates
 
 

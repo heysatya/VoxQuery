@@ -11,6 +11,7 @@ Only stores memory types that can be explained plainly to the user:
 - filter_preference: a recurring filter selection
 - clarification_resolution: an explicit choice the user made to resolve ambiguity
 """
+
 from __future__ import annotations
 
 import logging
@@ -24,13 +25,15 @@ from app.models.contracts import AuthClaims
 
 logger = logging.getLogger("voxquery.repositories.memory")
 
-VALID_MEMORY_TYPES = frozenset({
-    "metric_interest",
-    "dimension_interest",
-    "time_range",
-    "filter_preference",
-    "clarification_resolution",
-})
+VALID_MEMORY_TYPES = frozenset(
+    {
+        "metric_interest",
+        "dimension_interest",
+        "time_range",
+        "filter_preference",
+        "clarification_resolution",
+    }
+)
 
 
 class MemoryRepository:
@@ -245,24 +248,28 @@ def extract_memory_candidates(
     # Metric interest — only from clearly identified metrics
     if metric_name and len(metric_name) <= 80:
         normalized = metric_name.strip().lower().replace(" ", "_")
-        candidates.append({
-            "memory_type": "metric_interest",
-            "subject": normalized,
-            "label": metric_name.strip(),
-            "confidence": min(1.0, confidence + 0.1),
-        })
+        candidates.append(
+            {
+                "memory_type": "metric_interest",
+                "subject": normalized,
+                "label": metric_name.strip(),
+                "confidence": min(1.0, confidence + 0.1),
+            }
+        )
 
     # Dimension interest — from source tables (not raw SQL names, but display names)
     for table in source_tables[:3]:
         if table and len(table) <= 60:
             normalized = table.strip().lower()
             display = table.strip().replace("_", " ").title()
-            candidates.append({
-                "memory_type": "dimension_interest",
-                "subject": normalized,
-                "label": f"Data from {display}",
-                "confidence": confidence,
-            })
+            candidates.append(
+                {
+                    "memory_type": "dimension_interest",
+                    "subject": normalized,
+                    "label": f"Data from {display}",
+                    "confidence": confidence,
+                }
+            )
 
     # Time range — detect common patterns in user_input
     lowered = user_input.lower()
@@ -278,12 +285,14 @@ def extract_memory_candidates(
     ]
     for phrase, subj, lbl in time_hints:
         if phrase in lowered:
-            candidates.append({
-                "memory_type": "time_range",
-                "subject": subj,
-                "label": lbl,
-                "confidence": confidence,
-            })
+            candidates.append(
+                {
+                    "memory_type": "time_range",
+                    "subject": subj,
+                    "label": lbl,
+                    "confidence": confidence,
+                }
+            )
             break  # only one time range per turn
 
     # Filter preference — from explicit filter predicates
@@ -294,11 +303,13 @@ def extract_memory_candidates(
         val = str(pred.get("value") or "").strip()
         if col and val and len(col) <= 60 and len(val) <= 80:
             normalized = f"{col}={val}".lower()
-            candidates.append({
-                "memory_type": "filter_preference",
-                "subject": normalized,
-                "label": f"{col.replace('_', ' ').title()} filtered to {val}",
-                "confidence": max(0.5, confidence - 0.1),
-            })
+            candidates.append(
+                {
+                    "memory_type": "filter_preference",
+                    "subject": normalized,
+                    "label": f"{col.replace('_', ' ').title()} filtered to {val}",
+                    "confidence": max(0.5, confidence - 0.1),
+                }
+            )
 
     return candidates

@@ -44,21 +44,33 @@ async def check_tenant(tenant_id: str) -> list[CheckResult]:
     else:
         try:
             fernet = Fernet(fernet_key.encode())
-            results.append(_result("fernet_key_configured", True, "FERNET_KEY is syntactically valid"))
+            results.append(
+                _result("fernet_key_configured", True, "FERNET_KEY is syntactically valid")
+            )
         except Exception as exc:
-            results.append(_result("fernet_key_configured", False, f"FERNET_KEY is invalid: {type(exc).__name__}"))
+            results.append(
+                _result(
+                    "fernet_key_configured", False, f"FERNET_KEY is invalid: {type(exc).__name__}"
+                )
+            )
             fernet = None
 
     try:
         conn = await asyncpg.connect(db_url, statement_cache_size=0)
     except Exception as exc:
-        results.append(_result("database_connected", False, f"Database connection failed: {type(exc).__name__}"))
+        results.append(
+            _result(
+                "database_connected", False, f"Database connection failed: {type(exc).__name__}"
+            )
+        )
         return results
 
     results.append(_result("database_connected", True, "Connected to Supabase Postgres"))
 
     try:
-        tenant_exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM tenants WHERE id = $1)", tenant_id)
+        tenant_exists = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM tenants WHERE id = $1)", tenant_id
+        )
         results.append(_result("tenant_exists", bool(tenant_exists), f"tenant_id={tenant_id}"))
 
         connection_row = await conn.fetchrow(
@@ -69,7 +81,9 @@ async def check_tenant(tenant_id: str) -> list[CheckResult]:
             _result(
                 "tenant_connection_exists",
                 connection_row is not None,
-                "tenant_connections row found" if connection_row else "tenant_connections row missing",
+                "tenant_connections row found"
+                if connection_row
+                else "tenant_connections row missing",
             )
         )
 
@@ -120,7 +134,9 @@ async def check_tenant(tenant_id: str) -> list[CheckResult]:
             "SELECT EXISTS(SELECT 1 FROM tenant_glossary WHERE tenant_id = $1)",
             tenant_id,
         )
-        results.append(_result("tenant_glossary_exists", bool(glossary_exists), f"tenant_id={tenant_id}"))
+        results.append(
+            _result("tenant_glossary_exists", bool(glossary_exists), f"tenant_id={tenant_id}")
+        )
 
         memberships = await _fetch_count(
             conn,
@@ -136,7 +152,13 @@ async def check_tenant(tenant_id: str) -> list[CheckResult]:
             )
         )
     except Exception as exc:
-        results.append(_result("schema_queries_completed", False, f"Provisioning query failed: {type(exc).__name__}"))
+        results.append(
+            _result(
+                "schema_queries_completed",
+                False,
+                f"Provisioning query failed: {type(exc).__name__}",
+            )
+        )
     finally:
         await conn.close()
 
@@ -152,8 +174,12 @@ def _print_text(tenant_id: str, results: list[CheckResult]) -> None:
 
 
 async def main() -> int:
-    parser = argparse.ArgumentParser(description="Check VoxQuery tenant provisioning for a Clerk org ID.")
-    parser.add_argument("--tenant-id", required=True, help="Clerk Organization ID, for example org_...")
+    parser = argparse.ArgumentParser(
+        description="Check VoxQuery tenant provisioning for a Clerk org ID."
+    )
+    parser.add_argument(
+        "--tenant-id", required=True, help="Clerk Organization ID, for example org_..."
+    )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     args = parser.parse_args()
 

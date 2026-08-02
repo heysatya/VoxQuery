@@ -198,9 +198,13 @@ class QueryRequest(BaseModel):
             raise ValueError("voice input requires raw_transcript")
         if self.stt_confidence is None:
             raise ValueError("voice input requires stt_confidence")
-        expected_edited = _normalize_transcript(self.submitted_text) != _normalize_transcript(self.raw_transcript)
+        expected_edited = _normalize_transcript(self.submitted_text) != _normalize_transcript(
+            self.raw_transcript
+        )
         if self.transcript_edited != expected_edited:
-            raise ValueError("transcript_edited must match submitted_text/raw_transcript difference")
+            raise ValueError(
+                "transcript_edited must match submitted_text/raw_transcript difference"
+            )
         return self
 
 
@@ -308,7 +312,9 @@ def infer_result_column_semantic(
     values = [row[index] for row in rows if index < len(row)]
     value_type = infer_result_value_type(values)
     lowered = name.lower()
-    if any(token in lowered for token in ("date", "month", "year", "quarter", "week", "day", "time")):
+    if any(
+        token in lowered for token in ("date", "month", "year", "quarter", "week", "day", "time")
+    ):
         role: Literal["dimension", "metric", "time", "identifier", "unknown"] = "time"
     elif lowered.endswith("_id") or lowered == "id":
         role = "identifier"
@@ -405,22 +411,23 @@ class SchemaChunk(BaseModel):
 
 class MetricDefinition(BaseModel):
     """Definition of a certified business metric."""
+
     name: str
     display_name: str
     description: str
 
-    formula: str                             # SQL expression
+    formula: str  # SQL expression
     source_table: str
     additional_tables: list[str] = Field(default_factory=list)
 
     synonyms: list[str] = Field(default_factory=list)
     related_metrics: list[str] = Field(default_factory=list)
     default_dimensions: list[str] = Field(default_factory=list)
-    default_grain: str = "day"              # day, week, month, quarter, year
+    default_grain: str = "day"  # day, week, month, quarter, year
 
     certified: bool = False
     owner: str | None = None
-    format: str | None = None           # currency, percentage, number
+    format: str | None = None  # currency, percentage, number
 
     @property
     def all_names(self) -> list[str]:
@@ -430,8 +437,7 @@ class MetricDefinition(BaseModel):
     def to_metric_text(self) -> str:
         """Render metric as human-readable text for embedding."""
         lines = [
-            f"Metric: {self.display_name}"
-            + (" [CERTIFIED]" if self.certified else ""),
+            f"Metric: {self.display_name}" + (" [CERTIFIED]" if self.certified else ""),
             f"Name: {self.name}",
             f"Description: {self.description}",
             f"Formula: {self.formula}",
@@ -440,9 +446,7 @@ class MetricDefinition(BaseModel):
         if self.synonyms:
             lines.append(f"Synonyms: {', '.join(self.synonyms)}")
         if self.default_dimensions:
-            lines.append(
-                f"Default dimensions: {', '.join(self.default_dimensions)}"
-            )
+            lines.append(f"Default dimensions: {', '.join(self.default_dimensions)}")
         if self.format:
             lines.append(f"Format: {self.format}")
         return "\n".join(lines)
@@ -563,7 +567,6 @@ class ClarificationRequestEvent(BaseModel):
     turn_id: UUID
     question: str
     options: list[str]
-
 
 
 class ResultReadyEvent(BaseModel):
@@ -695,6 +698,7 @@ class UserPreferences(BaseModel):
 
 # ── Executive Memory contracts ─────────────────────────────────
 
+
 class MemoryItem(BaseModel):
     id: str
     memory_type: Literal[
@@ -718,6 +722,7 @@ class MemorySummaryResponse(BaseModel):
 
 
 # ── Share link contracts ──────────────────────────────────────
+
 
 class ShareLinkCreateRequest(BaseModel):
     turn_id: UUID
@@ -762,6 +767,7 @@ class ShareLinkListResponse(BaseModel):
 
 # ── Admin query history contracts ──────────────────────────────
 
+
 class QueryHistorySummary(BaseModel):
     turn_id: str
     user_display: str
@@ -803,6 +809,7 @@ class QueryHistoryDetail(BaseModel):
 
 
 # ── Tenant analytics contracts ────────────────────────────────
+
 
 class DailyQueryCount(BaseModel):
     date: str
@@ -867,6 +874,7 @@ class SystemHealthResponse(BaseModel):
 
 # ── Workspace detail contract ──────────────────────────────────
 
+
 class WorkspaceDetail(BaseModel):
     workspace_name: str
     tenant_status: str
@@ -877,5 +885,3 @@ class WorkspaceDetail(BaseModel):
     has_glossary: bool
     recent_query_count_7d: int
     total_queries: int
-
-

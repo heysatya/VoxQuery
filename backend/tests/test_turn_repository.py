@@ -4,11 +4,18 @@ from uuid import uuid4
 import asyncpg
 
 from app.models.contracts import (
-    TurnRecord, AuthClaims, InputModality, ChartType, ConfidenceTier, ResultPayload, ResultShape
+    TurnRecord,
+    AuthClaims,
+    InputModality,
+    ChartType,
+    ConfidenceTier,
+    ResultPayload,
+    ResultShape,
 )
 from app.repositories.turn_repository import TurnRepository
 
 from unittest.mock import MagicMock
+
 
 @pytest.mark.asyncio
 async def test_turn_repository_save_and_retrieve(db_pool: asyncpg.Pool):
@@ -33,14 +40,16 @@ async def test_turn_repository_save_and_retrieve(db_pool: asyncpg.Pool):
     async with db_pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO tenants (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
-            tenant_id, "Tenant A"
+            tenant_id,
+            "Tenant A",
         )
         await conn.execute(
             """
             INSERT INTO users (id, email) VALUES ($1, $2)
             ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email
             """,
-            user_id, claims.email
+            user_id,
+            claims.email,
         )
 
     turn = TurnRecord(
@@ -105,21 +114,45 @@ async def test_turn_repository_cross_tenant_isolation(db_pool: asyncpg.Pool):
     email_a = f"a-{uuid4()}@t.com"
     email_b = f"b-{uuid4()}@t.com"
 
-    claims_a = AuthClaims(user_id=user_a, tenant_id=tenant_a, email=email_a, role="admin", snowflake_role="ANALYST")
-    claims_b = AuthClaims(user_id=user_b, tenant_id=tenant_b, email=email_b, role="admin", snowflake_role="ANALYST")
+    claims_a = AuthClaims(
+        user_id=user_a, tenant_id=tenant_a, email=email_a, role="admin", snowflake_role="ANALYST"
+    )
+    claims_b = AuthClaims(
+        user_id=user_b, tenant_id=tenant_b, email=email_b, role="admin", snowflake_role="ANALYST"
+    )
 
     async with db_pool.acquire() as conn:
-        await conn.execute("INSERT INTO tenants (id, name) VALUES ($1, 'TA'), ($2, 'TB') ON CONFLICT DO NOTHING", tenant_a, tenant_b)
-        await conn.execute("INSERT INTO users (id, email) VALUES ($1, $2) ON CONFLICT DO NOTHING", user_a, email_a)
-        await conn.execute("INSERT INTO users (id, email) VALUES ($1, $2) ON CONFLICT DO NOTHING", user_b, email_b)
+        await conn.execute(
+            "INSERT INTO tenants (id, name) VALUES ($1, 'TA'), ($2, 'TB') ON CONFLICT DO NOTHING",
+            tenant_a,
+            tenant_b,
+        )
+        await conn.execute(
+            "INSERT INTO users (id, email) VALUES ($1, $2) ON CONFLICT DO NOTHING", user_a, email_a
+        )
+        await conn.execute(
+            "INSERT INTO users (id, email) VALUES ($1, $2) ON CONFLICT DO NOTHING", user_b, email_b
+        )
 
     turn_a = TurnRecord(
-        turn_id=uuid4(), session_id=session_a, conversation_id=uuid4(), user_id=user_a, tenant_id=tenant_a,
-        user_input="Tenant A Query", input_modality=InputModality.text, completed=True,
+        turn_id=uuid4(),
+        session_id=session_a,
+        conversation_id=uuid4(),
+        user_id=user_a,
+        tenant_id=tenant_a,
+        user_input="Tenant A Query",
+        input_modality=InputModality.text,
+        completed=True,
     )
     turn_b = TurnRecord(
-        turn_id=uuid4(), session_id=session_b, conversation_id=uuid4(), user_id=user_b, tenant_id=tenant_b,
-        user_input="Tenant B Query", input_modality=InputModality.text, completed=True,
+        turn_id=uuid4(),
+        session_id=session_b,
+        conversation_id=uuid4(),
+        user_id=user_b,
+        tenant_id=tenant_b,
+        user_input="Tenant B Query",
+        input_modality=InputModality.text,
+        completed=True,
     )
 
     await repo.save(turn_a, source_tables=["table_a"], filter_predicates=[])
@@ -144,17 +177,32 @@ async def test_turn_repository_process_restart_survival(db_pool: asyncpg.Pool):
     turn_id = uuid4()
     email = f"restart-{uuid4()}@test.com"
 
-    claims = AuthClaims(user_id=user_id, tenant_id=tenant_id, email=email, role="admin", snowflake_role="ANALYST")
+    claims = AuthClaims(
+        user_id=user_id, tenant_id=tenant_id, email=email, role="admin", snowflake_role="ANALYST"
+    )
 
     async with db_pool.acquire() as conn:
-        await conn.execute("INSERT INTO tenants (id, name) VALUES ($1, 'Restart Tenant') ON CONFLICT DO NOTHING", tenant_id)
-        await conn.execute("INSERT INTO users (id, email) VALUES ($1, $2) ON CONFLICT DO NOTHING", user_id, claims.email)
+        await conn.execute(
+            "INSERT INTO tenants (id, name) VALUES ($1, 'Restart Tenant') ON CONFLICT DO NOTHING",
+            tenant_id,
+        )
+        await conn.execute(
+            "INSERT INTO users (id, email) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            user_id,
+            claims.email,
+        )
 
     # Initial process saves turn
     repo_1 = TurnRepository(db_pool)
     turn = TurnRecord(
-        turn_id=turn_id, session_id=session_id, conversation_id=uuid4(), user_id=user_id, tenant_id=tenant_id,
-        user_input="Persisted across restart", input_modality=InputModality.text, completed=True,
+        turn_id=turn_id,
+        session_id=session_id,
+        conversation_id=uuid4(),
+        user_id=user_id,
+        tenant_id=tenant_id,
+        user_input="Persisted across restart",
+        input_modality=InputModality.text,
+        completed=True,
     )
     await repo_1.save(turn, source_tables=["orders"], filter_predicates=[])
 

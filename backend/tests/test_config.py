@@ -1,6 +1,7 @@
 import pytest
 from app.config import Settings
 
+
 def test_production_guardrails_reject_fake_providers():
     base_kwargs = {
         "APP_ENV": "production",
@@ -13,7 +14,7 @@ def test_production_guardrails_reject_fake_providers():
         "DEEPGRAM_API_KEY": "dummy",
         "OPENAI_API_KEY": "dummy",
     }
-    
+
     # Test AUTH_MODE
     with pytest.raises(RuntimeError, match="AUTH_MODE=fake is only allowed"):
         Settings(**base_kwargs, AUTH_MODE="fake").validate_startup()
@@ -54,6 +55,7 @@ def test_production_guardrails_reject_fake_providers():
     with pytest.raises(RuntimeError, match="WAREHOUSE_PROVIDER=fake is not allowed"):
         Settings(**{**valid_prod_kwargs, "WAREHOUSE_PROVIDER": "fake"}).validate_startup()
 
+
 def test_development_allows_fake_providers():
     # Should not raise
     Settings(
@@ -65,6 +67,7 @@ def test_development_allows_fake_providers():
         RAG_PROVIDER="fake",
         WAREHOUSE_PROVIDER="fake",
     ).validate_startup()
+
 
 def test_production_guardrails_require_keys():
     """
@@ -91,7 +94,7 @@ def test_production_guardrails_require_keys():
         "RAG_PROVIDER": "pgvector",
         "WAREHOUSE_PROVIDER": "snowflake",
     }
-    
+
     # Missing FERNET_KEY
     with pytest.raises(RuntimeError, match="FERNET_KEY is required in staging/production"):
         Settings(**{**base_prod_kwargs, "FERNET_KEY": None}).validate_startup()
@@ -102,4 +105,3 @@ def test_production_guardrails_require_keys():
 
     # Valid config passes
     Settings(**base_prod_kwargs).validate_startup()
-

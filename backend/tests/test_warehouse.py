@@ -10,6 +10,7 @@ Verifies:
   6. Empty DSN is rejected at construction
   7. Canonical SQL is enforced before connection opens
 """
+
 import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -17,11 +18,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import snowflake.connector as sf_connector
 
 from app.models.contracts import SchemaTable, ColumnInfo, ApiError
-from app.warehouse.sql_policy import SqlPolicyError, canonicalize_readonly_sql, build_allowlist, SchemaAllowlist
+from app.warehouse.sql_policy import (
+    SqlPolicyError,
+    canonicalize_readonly_sql,
+    build_allowlist,
+    SchemaAllowlist,
+)
 from app.warehouse.snowflake import SnowflakeWarehouseConnector, _redact_dsn
 
 
 # ── sql_policy tests ──────────────────────────────────────────────────────────
+
 
 def test_canonicalize_readonly_sql_applies_row_limit_policy():
     no_limit = canonicalize_readonly_sql("SELECT * FROM test")
@@ -54,29 +61,36 @@ SELECT * FROM test
     assert res.sql == "SELECT * FROM test LIMIT 10000"
 
 
-
 def test_schema_allowlist_validation_success():
     schema = [
-        SchemaTable(table_name="orders", columns=[ColumnInfo(name="id", data_type="int"), ColumnInfo(name="amount", data_type="float")])
+        SchemaTable(
+            table_name="orders",
+            columns=[
+                ColumnInfo(name="id", data_type="int"),
+                ColumnInfo(name="amount", data_type="float"),
+            ],
+        )
     ]
     allowlist = build_allowlist(schema)
-    
+
     # Valid query
     sql = "SELECT id, amount FROM orders"
     res = canonicalize_readonly_sql(sql, allowlist=allowlist)
     assert res.sql.startswith("SELECT id, amount FROM orders")
 
+
 def test_schema_allowlist_unknown_table():
     schema = [SchemaTable(table_name="orders", columns=[ColumnInfo(name="id", data_type="int")])]
     allowlist = build_allowlist(schema)
-    
+
     with pytest.raises(SqlPolicyError, match="isn't part of the connected schema"):
         canonicalize_readonly_sql("SELECT id FROM users", allowlist=allowlist)
+
 
 def test_schema_allowlist_unknown_column():
     schema = [SchemaTable(table_name="orders", columns=[ColumnInfo(name="id", data_type="int")])]
     allowlist = build_allowlist(schema)
-    
+
     with pytest.raises(SqlPolicyError, match="doesn't exist in the connected schema"):
         canonicalize_readonly_sql("SELECT fake_col FROM orders", allowlist=allowlist)
 
@@ -86,7 +100,7 @@ def test_canonicalize_readonly_sql_allows_set_operations():
     res = canonicalize_readonly_sql("SELECT id FROM a UNION SELECT id FROM b")
     assert "LIMIT 10000" in res.sql
     assert "UNION" in res.sql
-    
+
     # Intersect
     res = canonicalize_readonly_sql("SELECT id FROM a INTERSECT SELECT id FROM b")
     assert "INTERSECT" in res.sql
@@ -99,7 +113,7 @@ def test_canonicalize_readonly_sql_allows_set_operations():
 def test_canonicalize_readonly_sql_rejects_non_select():
     with pytest.raises(SqlPolicyError):
         canonicalize_readonly_sql("DELETE FROM test")
-    
+
     with pytest.raises(SqlPolicyError):
         canonicalize_readonly_sql("SELECT id FROM a UNION DELETE FROM b")
 
@@ -131,6 +145,7 @@ def test_canonicalize_readonly_sql_is_idempotent():
 
 # ── Phase 5.1: DSN redaction ──────────────────────────────────────────────────
 
+
 def test_redact_dsn_hides_password():
     """5. DSN credentials are redacted in errors/logs."""
     dsn = "snowflake://myuser:supersecretpassword@account123/mydb/myschema"
@@ -148,6 +163,7 @@ def test_redact_dsn_dsn_without_password():
 
 # ── Phase 5.1: Empty DSN rejected at construction ────────────────────────────
 
+
 def test_snowflake_connector_rejects_empty_dsn():
     """6. Connector must not accept an empty or None DSN."""
     with pytest.raises(ValueError, match="must not be empty"):
@@ -155,7 +171,9 @@ def test_snowflake_connector_rejects_empty_dsn():
 
 
 def test_snowflake_connector_parses_dsn_with_complex_password():
-    connector = SnowflakeWarehouseConnector(dsn="snowflake://myuser:complex@pass@word@myaccount/mydb/myschema")
+    connector = SnowflakeWarehouseConnector(
+        dsn="snowflake://myuser:complex@pass@word@myaccount/mydb/myschema"
+    )
     parsed = connector._parse_dsn()
     assert parsed["user"] == "myuser"
     assert parsed["password"] == "complex@pass@word"
@@ -165,6 +183,7 @@ def test_snowflake_connector_parses_dsn_with_complex_password():
 
 
 # ── Phase 5.1: Non-SELECT rejected before connector call ─────────────────────
+
 
 @pytest.mark.asyncio
 @patch("app.warehouse.snowflake.snowflake.connector.connect")
@@ -179,6 +198,7 @@ async def test_snowflake_warehouse_connector_rejects_noncanonical_sql(mock_conne
 
 
 # ── Phase 5.1: Role passthrough + real query execution ──────────────────────
+
 
 @pytest.mark.asyncio
 @patch("app.warehouse.snowflake.snowflake.connector.connect")
@@ -199,8 +219,7 @@ async def test_snowflake_warehouse_connector_passes_role_to_connect(mock_connect
     connector = SnowflakeWarehouseConnector(dsn=dsn)
 
     result_payload, result_shape = await connector.execute_readonly(
-        "SELECT region, revenue FROM sales LIMIT 10000",
-        snowflake_role="analyst_role"
+        "SELECT region, revenue FROM sales LIMIT 10000", snowflake_role="analyst_role"
     )
 
     mock_connect.assert_called_once()
@@ -240,8 +259,7 @@ async def test_snowflake_warehouse_connector_executes_real_query(mock_connect):
     connector = SnowflakeWarehouseConnector(dsn=dsn)
 
     result_payload, _ = await connector.execute_readonly(
-        "SELECT region, revenue FROM sales LIMIT 10000",
-        snowflake_role="test_role"
+        "SELECT region, revenue FROM sales LIMIT 10000", snowflake_role="test_role"
     )
 
     mock_connect.assert_called_once()
@@ -256,19 +274,18 @@ async def test_snowflake_warehouse_connector_executes_real_query(mock_connect):
 
 # ── Phase 5.1: Timeout returns structured error with redacted DSN ─────────────
 
+
 @pytest.mark.asyncio
 async def test_snowflake_connector_timeout_returns_structured_error():
     """4. Timeout returns structured warehouse timeout error (DSN redacted)."""
     connector = SnowflakeWarehouseConnector(
-        dsn="snowflake://admin:topsecret@acme-account/production/public",
-        timeout_seconds=1
+        dsn="snowflake://admin:topsecret@acme-account/production/public", timeout_seconds=1
     )
 
     with patch("asyncio.to_thread", side_effect=asyncio.TimeoutError()):
         with pytest.raises(ApiError) as exc_info:
             await connector.execute_readonly(
-                "SELECT region, revenue FROM sales LIMIT 10000",
-                snowflake_role="analyst"
+                "SELECT region, revenue FROM sales LIMIT 10000", snowflake_role="analyst"
             )
 
     error_msg = exc_info.value.detail or str(exc_info.value)
@@ -279,6 +296,7 @@ async def test_snowflake_connector_timeout_returns_structured_error():
 
 
 # ── Phase 5.1: DSN redacted in connector error output ─────────────────────────
+
 
 @pytest.mark.asyncio
 @patch("app.warehouse.snowflake.snowflake.connector.connect")
@@ -292,13 +310,13 @@ async def test_snowflake_connector_dsn_redacted_in_errors(mock_connect):
 
     with pytest.raises(ApiError) as exc_info:
         await connector.execute_readonly(
-            "SELECT * FROM orders LIMIT 10000",
-            snowflake_role="readonly_role"
+            "SELECT * FROM orders LIMIT 10000", snowflake_role="readonly_role"
         )
 
     error_msg = exc_info.value.detail or str(exc_info.value)
     assert "highly_secret_pw" not in error_msg
     assert "prod_user" in error_msg  # user prefix is preserved for debugging
+
 
 @patch("app.warehouse.snowflake.snowflake.connector.connect")
 def test_snowflake_connector_fetch_schema_snapshot(mock_connect):
@@ -314,7 +332,7 @@ def test_snowflake_connector_fetch_schema_snapshot(mock_connect):
     mock_cursor.fetchall.return_value = [
         ("ORDERS", "ID", "NUMBER"),
         ("ORDERS", "AMOUNT", "FLOAT"),
-        ("USERS", "EMAIL", "VARCHAR")
+        ("USERS", "EMAIL", "VARCHAR"),
     ]
 
     connector = SnowflakeWarehouseConnector(dsn="snowflake://user:pass@account/db/schema")
@@ -324,7 +342,7 @@ def test_snowflake_connector_fetch_schema_snapshot(mock_connect):
     orders_table = next(t for t in schema_tables if t.table_name == "ORDERS")
     assert len(orders_table.columns) == 2
     assert orders_table.columns[0].name == "ID"
-    
+
     users_table = next(t for t in schema_tables if t.table_name == "USERS")
     assert len(users_table.columns) == 1
     assert users_table.columns[0].name == "EMAIL"

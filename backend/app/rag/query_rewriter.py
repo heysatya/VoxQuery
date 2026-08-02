@@ -39,6 +39,7 @@ class RewrittenQuery:
     Output of the query rewriter.
     Contains the original query plus enriched signals.
     """
+
     original: str
     rewritten: str
 
@@ -88,30 +89,32 @@ TIME_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\btoday\b", re.IGNORECASE), "today"),
     (re.compile(r"\blast\s+(\d+)\s+days?\b", re.IGNORECASE), "last N days"),
     (re.compile(r"\bq[1-4]\s*\d{4}\b", re.IGNORECASE), "specific quarter"),
-    (re.compile(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\b",
-                re.IGNORECASE), "month name"),
+    (
+        re.compile(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\b", re.IGNORECASE),
+        "month name",
+    ),
 ]
 
 # Domain keyword → domain name
 DOMAIN_SIGNALS: dict[str, str] = {
-    "revenue":    "sales",
-    "sales":      "sales",
-    "orders":     "sales",
-    "customer":   "customers",
-    "churn":      "customers",
-    "retention":  "customers",
-    "product":    "products",
-    "margin":     "products",
-    "seller":     "sellers",
-    "vendor":     "sellers",
-    "delivery":   "operations",
-    "shipping":   "operations",
-    "payment":    "payments",
-    "review":     "reviews",
-    "rating":     "reviews",
+    "revenue": "sales",
+    "sales": "sales",
+    "orders": "sales",
+    "customer": "customers",
+    "churn": "customers",
+    "retention": "customers",
+    "product": "products",
+    "margin": "products",
+    "seller": "sellers",
+    "vendor": "sellers",
+    "delivery": "operations",
+    "shipping": "operations",
+    "payment": "payments",
+    "review": "reviews",
+    "rating": "reviews",
     "geographic": "geography",
-    "region":     "geography",
-    "state":      "geography",
+    "region": "geography",
+    "state": "geography",
 }
 
 
@@ -286,12 +289,12 @@ class QueryRewriter:
             expanded.update(synonyms)
 
         # Add canonical names and synonyms for detected tables
-        
+
         # Also include tables related to detected metrics
         tables_to_expand = set(detected_tables)
         for metric in detected_metrics:
             tables_to_expand.update(DEFAULT_METRIC_TO_TABLES.get(metric, []))
-            
+
         for table in tables_to_expand:
             expanded.add(table)
             synonyms = self.table_synonyms.get(table, [])
@@ -299,9 +302,6 @@ class QueryRewriter:
 
         # Remove terms already in the query to avoid redundancy
         query_lower = query.lower()
-        expanded = {
-            term for term in expanded
-            if term.lower() not in query_lower
-        }
+        expanded = {term for term in expanded if term.lower() not in query_lower}
 
         return sorted(expanded)

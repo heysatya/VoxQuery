@@ -28,7 +28,9 @@ def compute_confidence(
     settings: Settings | None = None,
 ) -> ConfidenceResult:
     settings = settings or get_settings()
-    effective_threshold = threshold if threshold is not None else settings.confidence_threshold_primary
+    effective_threshold = (
+        threshold if threshold is not None else settings.confidence_threshold_primary
+    )
     payload = ConfidenceInput(
         rag_score=rag_score,
         validation_passed=validation_passed,
@@ -36,7 +38,7 @@ def compute_confidence(
         ambiguity_signals=ambiguity_signals,
         threshold=effective_threshold,
     )
-    
+
     # Determine active weights and renormalize
     active_weights = {
         "rag": DEFAULT_WEIGHTS["rag"],
@@ -44,10 +46,10 @@ def compute_confidence(
     }
     if payload.llm_self_confidence is not None:
         active_weights["llm"] = DEFAULT_WEIGHTS["llm"]
-        
+
     total_weight = sum(active_weights.values())
     normalized_weights = {k: v / total_weight for k, v in active_weights.items()}
-    
+
     validation_score = 1.0 if payload.validation_passed else 0.0
     base_score = (
         normalized_weights["rag"] * payload.rag_score

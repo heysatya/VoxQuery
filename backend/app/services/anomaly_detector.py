@@ -45,13 +45,22 @@ def check_turn_anomaly(result_payload: Any) -> Any:
     If no value clears the z-score threshold (or insufficient rows), returns None.
     """
     from app.models.contracts import BriefingAnomaly
-    if not result_payload or not getattr(result_payload, "rows", None) or len(result_payload.rows) < 3:
+
+    if (
+        not result_payload
+        or not getattr(result_payload, "rows", None)
+        or len(result_payload.rows) < 3
+    ):
         return None
 
     num_col_idx = None
     for idx, col in enumerate(result_payload.columns):
         for row in result_payload.rows:
-            if idx < len(row) and isinstance(row[idx], (int, float)) and not isinstance(row[idx], bool):
+            if (
+                idx < len(row)
+                and isinstance(row[idx], (int, float))
+                and not isinstance(row[idx], bool)
+            ):
                 num_col_idx = idx
                 break
         if num_col_idx is not None:
@@ -66,7 +75,9 @@ def check_turn_anomaly(result_payload: Any) -> Any:
     for row in result_payload.rows:
         if num_col_idx < len(row) and isinstance(row[num_col_idx], (int, float)):
             values.append(float(row[num_col_idx]))
-            label_val = str(row[dim_idx]) if dim_idx < len(row) and row[dim_idx] is not None else "Segment"
+            label_val = (
+                str(row[dim_idx]) if dim_idx < len(row) and row[dim_idx] is not None else "Segment"
+            )
             labels.append(label_val)
 
     outliers = detect_outliers(values, threshold=1.5)
@@ -87,4 +98,3 @@ def check_turn_anomaly(result_payload: Any) -> Any:
         title=f"Variance in {label}",
         description=f"{metric_name} ({val:,.2f}) is {abs(pct_diff)}% {direction} average.",
     )
-

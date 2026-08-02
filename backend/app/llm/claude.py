@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 def extract_sql_and_confidence(response_text: str) -> tuple[str, float | None]:
     """Extract clean SQL and self-confidence float from raw LLM text response.
-    
+
     Handles XML tags (<sql>, <confidence>), unclosed tags, and markdown code fences
     (e.g. ```xml, ```sql, ```) in any order or combination.
     """
@@ -24,7 +24,9 @@ def extract_sql_and_confidence(response_text: str) -> tuple[str, float | None]:
 
     # 1. Extract confidence if present
     llm_self_confidence = None
-    confidence_match = re.search(r"<confidence>\s*([0-9\.]+)\s*</confidence>", text, flags=re.IGNORECASE | re.DOTALL)
+    confidence_match = re.search(
+        r"<confidence>\s*([0-9\.]+)\s*</confidence>", text, flags=re.IGNORECASE | re.DOTALL
+    )
     if confidence_match:
         try:
             llm_self_confidence = float(confidence_match.group(1).strip())
@@ -32,7 +34,9 @@ def extract_sql_and_confidence(response_text: str) -> tuple[str, float | None]:
             pass
 
     # Remove confidence block before SQL extraction
-    text_no_conf = re.sub(r"<confidence>.*?</confidence>", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+    text_no_conf = re.sub(
+        r"<confidence>.*?</confidence>", "", text, flags=re.IGNORECASE | re.DOTALL
+    ).strip()
 
     # 2. Extract SQL portion
     sql_match = re.search(r"<sql>(.*?)</sql>", text_no_conf, flags=re.IGNORECASE | re.DOTALL)
@@ -78,12 +82,12 @@ class ClaudeAdapter(LlmAdapter):
 
     @observe(as_type="generation", capture_input=False, capture_output=False)
     async def generate_sql(
-        self, 
-        submitted_text: str, 
+        self,
+        submitted_text: str,
         schema_chunks: list[SchemaChunk],
         conversation_history: list[SessionHistoryTurn],
-        *, 
-        resolved_entities: dict[str, Any] | None = None, 
+        *,
+        resolved_entities: dict[str, Any] | None = None,
         feedback: str | None = None,
         previous_sql: str | None = None,
     ) -> SqlGenerationResult:
@@ -97,12 +101,14 @@ class ClaudeAdapter(LlmAdapter):
                 "feedback": feedback,
                 "previous_sql": previous_sql,
             },
-            model=self.model_name
+            model=self.model_name,
         )
 
         schema_context = "\n".join([f"- {c.source_ref}: {c.content}" for c in schema_chunks])
-        history_context = "\n".join([f"User: {t.user_query}\nSQL: {t.generated_sql}" for t in conversation_history])
-        
+        history_context = "\n".join(
+            [f"User: {t.user_query}\nSQL: {t.generated_sql}" for t in conversation_history]
+        )
+
         system_prompt = """You are an expert Snowflake SQL generator. Generate a read-only SQL query for the following request.
 Always LIMIT to 10000 rows maximum.
 IMPORTANT DIALECT & TYPE RULES:
@@ -126,11 +132,13 @@ Conversation History:
 {history_context}
 
 Request: {submitted_text}"""
-        
+
         if resolved_entities:
-            entities_str = ", ".join([f"{k} = {v.resolution}" for k, v in resolved_entities.items()])
+            entities_str = ", ".join(
+                [f"{k} = {v.resolution}" for k, v in resolved_entities.items()]
+            )
             user_prompt += f"\n\nNote: The user clarified the following entities: {entities_str}"
-            
+
         if previous_sql:
             user_prompt += f"\n\nPrevious SQL attempt: {previous_sql}"
         if feedback:
@@ -141,9 +149,7 @@ Request: {submitted_text}"""
                 model=self.model_name,
                 max_tokens=1000,
                 system=system_prompt,
-                messages=[
-                    {"role": "user", "content": user_prompt}
-                ]
+                messages=[{"role": "user", "content": user_prompt}],
             )
         except anthropic.AnthropicError as e:
             logger.error(f"LLM Generation failed: {e}")
@@ -158,12 +164,12 @@ Request: {submitted_text}"""
         try:
             # Parse as snowflake dialect
             parsed = sqlglot.parse_one(sql, read="snowflake")
-            
+
             # Simple check for read-only
             if not isinstance(parsed, sqlglot.exp.Select):
                 validation_passed = False
                 validation_error = "Generated SQL is not a SELECT statement."
-                
+
         except Exception as e:
             logger.warning(f"SQL validation failed: {e}")
             validation_passed = False
@@ -173,31 +179,39 @@ Request: {submitted_text}"""
             sql=sql,
             validation_passed=validation_passed,
             llm_self_confidence=llm_self_confidence,
-            validation_error=validation_error
+            validation_error=validation_error,
         )
-        _safe_update_current_generation(output={"sql": result.sql, "confidence": result.llm_self_confidence, "validation_passed": validation_passed})
+        _safe_update_current_generation(
+            output={
+                "sql": result.sql,
+                "confidence": result.llm_self_confidence,
+                "validation_passed": validation_passed,
+            }
+        )
         return result
 
     @observe(as_type="generation", capture_input=False, capture_output=False)
-    async def generate_clarification(self, dominant_signal: Any, user_input: str = "") -> tuple[str, list[str]]:
+    async def generate_clarification(
+        self, dominant_signal: Any, user_input: str = ""
+    ) -> tuple[str, list[str]]:
         signal_name = getattr(dominant_signal, "name", str(dominant_signal))
         _safe_update_current_generation(
             name="claude-clarification-generation",
             input={"dominant_signal": signal_name, "user_input": user_input},
-            model=self.model_name
+            model=self.model_name,
         )
-        
+
         ambiguity_descriptions = {
             "entity_ambiguity": "It's unclear which specific customer, product, region, or business entity they are referring to.",
             "metric_ambiguity": "They asked for a metric (e.g., revenue, sales, active users) but it's not clear exactly which specific definition or formula to use.",
             "missing_join_path": "The requested data spans multiple domains, and it's unclear how they should be related or filtered.",
             "pronoun_reference_failure": "They used a pronoun (e.g., 'it', 'that', 'those') but it's unclear what it refers to in this context.",
             "temporal_ambiguity": "They asked about a time period (e.g., 'recent', 'last quarter') but the exact date range is unclear.",
-            "scope_ambiguity": "The request is too broad or vaguely worded to translate into a precise data query."
+            "scope_ambiguity": "The request is too broad or vaguely worded to translate into a precise data query.",
         }
-        
+
         description = ambiguity_descriptions.get(signal_name, signal_name.replace("_", " "))
-        
+
         system_prompt = """You are an expert Data Analyst AI. The user just asked a data question, but the request was ambiguous.
 Generate a polite, helpful clarification question to ask the user to resolve this ambiguity.
 Provide 2 to 4 distinct, actionable options for them to choose from. Make the options human-readable and specific (e.g. "Total Gross Revenue" instead of "metric_1").
@@ -218,16 +232,14 @@ Specifically, the ambiguity is: {description}"""
                 model=self.model_name,
                 max_tokens=300,
                 system=system_prompt,
-                messages=[
-                    {"role": "user", "content": user_prompt}
-                ]
+                messages=[{"role": "user", "content": user_prompt}],
             )
         except anthropic.AnthropicError as e:
             logger.error(f"LLM Clarification failed: {e}")
             raise ApiError(ErrorCode.llm_unavailable, status_code=503) from e
-        
+
         content = response.content[0].text.strip()
-        
+
         try:
             if content.startswith("```json"):
                 content = content[7:]
@@ -236,7 +248,7 @@ Specifically, the ambiguity is: {description}"""
             if content.endswith("```"):
                 content = content[:-3]
             content = content.strip()
-            
+
             data = json.loads(content)
             question = data.get("question", f"Could you clarify regarding {dominant_signal}?")
             options = data.get("options", ["Option A", "Option B", "Skip"])
@@ -246,7 +258,9 @@ Specifically, the ambiguity is: {description}"""
             logger.error(f"Failed to parse clarification JSON: {e}")
             question = f"Could you clarify regarding {dominant_signal}?"
             options = ["Option A", "Option B", "Skip"]
-            _safe_update_current_generation(output={"question": question, "options": options, "error": str(e)})
+            _safe_update_current_generation(
+                output={"question": question, "options": options, "error": str(e)}
+            )
             return question, options
 
 
@@ -260,7 +274,7 @@ class ClaudeStoryteller(Storyteller):
         _safe_update_current_generation(
             name="claude-story-summarization",
             input={"user_query": user_query, "result_shape": result_shape.model_dump(mode="json")},
-            model=self.model_name
+            model=self.model_name,
         )
         system_prompt = """You are an expert Data Storyteller. Based on the user's query and the resulting data shape below, generate a STRICT 1-3 sentence narrative.
 If the data reveals a significant trend, spike, or drop, you MUST explicitly highlight this anomaly and concisely state what drove the change (anomaly narration).
@@ -278,33 +292,33 @@ Chart Type: {result_shape.chart_type}"""
                 model=self.model_name,
                 max_tokens=300,
                 system=system_prompt,
-                messages=[
-                    {"role": "user", "content": user_prompt}
-                ]
+                messages=[{"role": "user", "content": user_prompt}],
             )
         except anthropic.AnthropicError as e:
             logger.error(f"LLM Summarization failed: {e}")
             raise ApiError(ErrorCode.llm_unavailable, status_code=503) from e
-        
+
         summary = response.content[0].text.strip()
         summary = summary.replace("*", "").replace("#", "")
-        
+
         # Ensure it's not overly verbose by simple truncation if the LLM hallucinates longer text
         # But we trust the LLM mostly with this strong prompt.
         _safe_update_current_generation(output={"summary": summary})
         return summary
 
     @observe(as_type="generation", capture_input=False, capture_output=False)
-    async def generate_proactive_questions(self, result_shape: ResultShape, user_query: str) -> list[str]:
+    async def generate_proactive_questions(
+        self, result_shape: ResultShape, user_query: str
+    ) -> list[str]:
         _safe_update_current_generation(
             name="claude-proactive-questions",
             input={"user_query": user_query, "result_shape": result_shape.model_dump(mode="json")},
-            model=self.model_name
+            model=self.model_name,
         )
         system_prompt = """You are an expert Data Analyst. Based on the user's original query and the resulting data shape below, suggest exactly 3 proactive follow-up questions that the user might want to ask next.
 These questions should dive deeper into the data, explore anomalies, or break down the results by available dimensions.
 Return ONLY a valid JSON array of 3 strings. Example: ["What is the breakdown by region?", "Are there any seasonal trends?"]"""
-        
+
         user_prompt = f"""User Query: {user_query}
 Data Shape Summary: {result_shape.aggregate_summary}
 Row Count: {result_shape.row_count}
@@ -315,9 +329,7 @@ Chart Type: {result_shape.chart_type}"""
                 model=self.model_name,
                 max_tokens=200,
                 system=system_prompt,
-                messages=[
-                    {"role": "user", "content": user_prompt}
-                ]
+                messages=[{"role": "user", "content": user_prompt}],
             )
         except Exception as e:
             logger.error(f"LLM Proactive questions failed: {e}")
@@ -326,14 +338,14 @@ Chart Type: {result_shape.chart_type}"""
                 "How does this compare to the previous period?",
                 "Can we break this down by dimension?",
             ]
-            
+
         content = response.content[0].text.strip()
         if content.startswith("```json"):
             content = content[7:]
         if content.endswith("```"):
             content = content[:-3]
         content = content.strip()
-        
+
         try:
             questions = json.loads(content)
             if not isinstance(questions, list) or not questions:

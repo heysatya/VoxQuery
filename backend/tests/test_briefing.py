@@ -18,7 +18,7 @@ async def test_generate_morning_briefing_service():
     settings = get_settings()
     tenant_id = str(uuid4())
     briefing = await generate_morning_briefing(tenant_id, settings, user_name="Executive Test")
-    
+
     assert briefing.date is not None
     assert briefing.greeting == "Business pulse unavailable"
     assert briefing.kpis == []
@@ -36,13 +36,17 @@ async def test_generate_morning_briefing_live_with_nulls():
     settings = get_settings()
     tenant_id = str(uuid4())
     mock_warehouse = MagicMock()
-    
+
     # Mock query 1 returning row with NULL for tot_rev and aov
-    payload1 = ResultPayload(columns=["tot_rev", "aov", "orders", "customers"], rows=[[None, None, 50, 10]], row_count=1)
+    payload1 = ResultPayload(
+        columns=["tot_rev", "aov", "orders", "customers"], rows=[[None, None, 50, 10]], row_count=1
+    )
     payload2 = ResultPayload(columns=["week", "rev"], rows=[], row_count=0)
     mock_warehouse.execute_readonly = AsyncMock(side_effect=[(payload1, 10), (payload2, 10)])
 
-    briefing = await generate_morning_briefing(tenant_id, settings, user_name="Live Exec", warehouse=mock_warehouse)
+    briefing = await generate_morning_briefing(
+        tenant_id, settings, user_name="Live Exec", warehouse=mock_warehouse
+    )
 
     assert briefing.is_live is True
     assert briefing.data_source == "live"
@@ -82,8 +86,12 @@ async def test_generate_morning_briefing_anomaly_cap_and_date_formatting():
     tenant_id = str(uuid4())
     mock_warehouse = MagicMock()
 
-    payload1 = ResultPayload(columns=["tot_rev", "aov", "orders", "customers"], rows=[[50000.0, 100.0, 500, 200]], row_count=1)
-    
+    payload1 = ResultPayload(
+        columns=["tot_rev", "aov", "orders", "customers"],
+        rows=[[50000.0, 100.0, 500, 200]],
+        row_count=1,
+    )
+
     # 15 weeks with 5 huge spikes
     rows2 = [
         [date(2025, 1, 1), 100.0],
@@ -99,10 +107,14 @@ async def test_generate_morning_briefing_anomaly_cap_and_date_formatting():
         [date(2025, 3, 12), 2500.0],  # Outlier 4
         [date(2025, 3, 19), 3000.0],  # Outlier 5
     ]
-    payload2 = ResultPayload(columns=["order_week", "weekly_revenue"], rows=rows2, row_count=len(rows2))
+    payload2 = ResultPayload(
+        columns=["order_week", "weekly_revenue"], rows=rows2, row_count=len(rows2)
+    )
     mock_warehouse.execute_readonly = AsyncMock(side_effect=[(payload1, 10), (payload2, 10)])
 
-    briefing = await generate_morning_briefing(tenant_id, settings, user_name="Exec Test", warehouse=mock_warehouse)
+    briefing = await generate_morning_briefing(
+        tenant_id, settings, user_name="Exec Test", warehouse=mock_warehouse
+    )
 
     # (b) Cap to top 3 most significant anomalies
     assert len(briefing.anomalies) == 3

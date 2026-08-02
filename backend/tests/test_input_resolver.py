@@ -10,9 +10,7 @@ def test_resolve_input_clean_pass_through():
     resolution = resolve_input(
         text="what is the net revenue",
         schema_chunks=[
-            SchemaChunk(
-                content="net_revenue definition", source_ref="file", similarity=0.9
-            )
+            SchemaChunk(content="net_revenue definition", source_ref="file", similarity=0.9)
         ],
         session_history=[],
         resolved_entities={},
@@ -26,12 +24,8 @@ def test_resolve_input_metric_non_blocking():
     resolution = resolve_input(
         text="what is the revenue",
         schema_chunks=[
-            SchemaChunk(
-                content="net_revenue definition", source_ref="file", similarity=0.9
-            ),
-            SchemaChunk(
-                content="gross_revenue definition", source_ref="file", similarity=0.9
-            ),
+            SchemaChunk(content="net_revenue definition", source_ref="file", similarity=0.9),
+            SchemaChunk(content="gross_revenue definition", source_ref="file", similarity=0.9),
         ],
         session_history=[],
         resolved_entities={},
@@ -68,4 +62,6 @@ def test_resolve_input_pronoun_blocking():
     )
     assert resolution.should_block is True
     assert resolution.pre_sql_ambiguity is not None
-    assert AmbiguitySignal.pronoun_reference_failure in resolution.pre_sql_ambiguity.signals_detected
+    assert (
+        AmbiguitySignal.pronoun_reference_failure in resolution.pre_sql_ambiguity.signals_detected
+    )

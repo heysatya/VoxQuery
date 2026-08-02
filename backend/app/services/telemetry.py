@@ -42,12 +42,16 @@ def _utcnow_iso() -> str:
 
 import re
 
-_SECRET_PATTERN = re.compile(r'(sk-[a-zA-Z0-9]+|sk_test_[a-zA-Z0-9]+|Bearer\s+[a-zA-Z0-9\-\._~+/]+=*|Basic\s+[a-zA-Z0-9\+/]+=*)')
+_SECRET_PATTERN = re.compile(
+    r"(sk-[a-zA-Z0-9]+|sk_test_[a-zA-Z0-9]+|Bearer\s+[a-zA-Z0-9\-\._~+/]+=*|Basic\s+[a-zA-Z0-9\+/]+=*)"
+)
+
 
 def _scrub_value(val: Any) -> Any:
     if isinstance(val, str) and _SECRET_PATTERN.search(val):
         return "***SCRUBBED***"
     return val
+
 
 def _safe_dumps(payload: dict[str, Any]) -> str:
     """
@@ -71,7 +75,9 @@ def _safe_dumps(payload: dict[str, Any]) -> str:
         try:
             return json.dumps(safe)
         except Exception:
-            return json.dumps({"event": payload.get("event", "unknown"), "error": "serialization_failed"})
+            return json.dumps(
+                {"event": payload.get("event", "unknown"), "error": "serialization_failed"}
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -96,12 +102,14 @@ def emit(event: str, tier: int = 2, **payload: Any) -> None:
     stdout in a test harness), the exception is silently swallowed.
     """
     try:
-        line = _safe_dumps({
-            "event": event,
-            "tier": tier,
-            "ts": _utcnow_iso(),
-            **payload,
-        })
+        line = _safe_dumps(
+            {
+                "event": event,
+                "tier": tier,
+                "ts": _utcnow_iso(),
+                **payload,
+            }
+        )
         print(line, file=sys.stdout, flush=True)
     except Exception:
         # Absolute last-resort guard. Do not re-raise — telemetry must never

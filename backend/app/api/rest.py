@@ -89,7 +89,11 @@ async def create_session(
     pipeline: PipelineOrchestrator = Depends(get_pipeline),
 ) -> SessionCreateResponse:
     if request.tenant_id and request.tenant_id != claims.tenant_id:
-        raise ApiError(ErrorCode.auth_invalid, status_code=401, detail="Requested tenant_id does not match authorization claims")
+        raise ApiError(
+            ErrorCode.auth_invalid,
+            status_code=401,
+            detail="Requested tenant_id does not match authorization claims",
+        )
     # ensure it always uses claims.tenant_id going forward if omitted
     request.tenant_id = claims.tenant_id
 
@@ -126,7 +130,7 @@ async def delete_session(
 async def get_prior_session_summary(
     current_session_id: UUID | None = None,
     claims: AuthClaims = Depends(get_current_user),
-    db_pool = Depends(get_db_pool),
+    db_pool=Depends(get_db_pool),
 ) -> PriorSessionSummaryResponse:
     """
     Retrieve 2-3 most recent distinct questions from the user's prior session.
@@ -134,8 +138,11 @@ async def get_prior_session_summary(
     if not db_pool:
         return PriorSessionSummaryResponse(questions=[])
     from app.repositories.turn_repository import TurnRepository
+
     repo = TurnRepository(db_pool)
-    questions = await repo.get_prior_session_questions(claims, current_session_id=current_session_id, limit=3)
+    questions = await repo.get_prior_session_questions(
+        claims, current_session_id=current_session_id, limit=3
+    )
     return PriorSessionSummaryResponse(questions=questions)
 
 
@@ -147,7 +154,7 @@ async def submit_query(
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> QueryAcceptedResponse:
     await _check_rate_limit(rate_limiter, claims)
-        
+
     turn = await pipeline.submit_query(request, claims)
     return QueryAcceptedResponse(turn_id=turn.turn_id)
 
@@ -161,10 +168,11 @@ async def submit_clarification(
     sessions: InMemorySessionStore = Depends(get_sessions),
 ) -> ClarificationResponse:
     await _check_rate_limit(rate_limiter, claims)
-        
+
     session = await sessions.get_for_claims(claims, request.session_id)
     if session and session.clarification_state and session.clarification_state.pending:
         from datetime import UTC, datetime, timedelta
+
         if datetime.now(UTC) - session.clarification_state.issued_at > timedelta(minutes=10):
             await sessions.clear_pending_clarification(session)
             pipeline.turns.pop(request.turn_id, None)
@@ -180,14 +188,12 @@ async def submit_clarification(
     return ClarificationResponse(turn_id=request.turn_id)
 
 
-
-
 @router.get("/api/result/{turn_id}", response_model=ResultResponse)
 async def get_result(
     turn_id: UUID,
     claims: AuthClaims = Depends(get_current_user),
     pipeline: PipelineOrchestrator = Depends(get_pipeline),
-    db_pool = Depends(get_db_pool),
+    db_pool=Depends(get_db_pool),
 ) -> ResultResponse:
     turn = await _get_turn_for_user(turn_id, claims, pipeline, db_pool)
     if not turn.completed:
@@ -196,6 +202,7 @@ async def get_result(
         raise ApiError(ErrorCode.turn_processing, status_code=202)
     confidence_reasons = confidence_reasons_for_turn(turn)
     from app.services.anomaly_detector import check_turn_anomaly
+
     anomaly = check_turn_anomaly(turn.full_result)
     return ResultResponse(
         turn_id=turn.turn_id,
@@ -221,7 +228,7 @@ async def submit_feedback(
     claims: AuthClaims = Depends(get_current_user),
     pipeline: PipelineOrchestrator = Depends(get_pipeline),
     sessions: InMemorySessionStore = Depends(get_sessions),
-    db_pool = Depends(get_db_pool),
+    db_pool=Depends(get_db_pool),
 ) -> StatusResponse:
     turn = await _get_turn_for_user(request.turn_id, claims, pipeline, db_pool)
     if turn.feedback_submitted:
@@ -230,7 +237,7 @@ async def submit_feedback(
     if session is None:
         raise ApiError(ErrorCode.session_not_found, status_code=404)
     from app.observability.langfuse import tracer
-    
+
     quality_flag = "low" if request.rating == -1 else "ok"
     if request.rating == -1:
         await sessions.mark_low_quality(session, request.turn_id)
@@ -238,6 +245,7 @@ async def submit_feedback(
     turn.quality_flag = quality_flag
     if db_pool:
         from app.repositories.turn_repository import TurnRepository
+
         feedback_status = await TurnRepository(db_pool).record_feedback(
             request.turn_id,
             claims,
@@ -249,7 +257,7 @@ async def submit_feedback(
             pipeline.audit.enqueue_feedback(str(request.turn_id), quality_flag)
     else:
         pipeline.audit.enqueue_feedback(str(request.turn_id), quality_flag)
-    
+
     # Optional option_selected resolution for the metadata
     option_selected = None
     if turn.clarification_triggered:
@@ -257,16 +265,16 @@ async def submit_feedback(
             if hasattr(entity_value, "option_selected") and entity_value.option_selected:
                 option_selected = entity_value.option_selected
                 break
-    
+
     tracer.score_feedback(
         request.turn_id,
         request.rating,
         turn.composite_score,
         turn.confidence_tier,
         turn.clarification_triggered,
-        option_selected
+        option_selected,
     )
-    
+
     return StatusResponse(status="recorded")
 
 
@@ -283,44 +291,55 @@ async def get_feedback(
     limit: int = 50,
     offset: int = 0,
     claims: AuthClaims = Depends(get_current_user),
-    audit = Depends(get_audit),
+    audit=Depends(get_audit),
 ):
     # Enforce admin role for this route
     if claims.role != "admin":
         raise ApiError(ErrorCode.auth_invalid, status_code=403, detail="Admin access required")
-        
-    feedback = await audit.get_low_quality_feedback(limit=limit, offset=offset, tenant_id=claims.tenant_id)
+
+    feedback = await audit.get_low_quality_feedback(
+        limit=limit, offset=offset, tenant_id=claims.tenant_id
+    )
     return {"data": feedback}
 
 
 @router.get("/api/admin/glossary")
 async def get_glossary(
     claims: AuthClaims = Depends(get_current_user),
-    pool = Depends(get_db_pool),
+    pool=Depends(get_db_pool),
 ):
     if claims.role != "admin":
         raise ApiError(ErrorCode.auth_invalid, status_code=403, detail="Admin access required")
     if not pool:
         return {"data": []}
-        
+
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT tenant_id, workspace_name, metric_synonyms, table_synonyms, synonym_hits, total_hits, updated_at FROM admin_glossary_view WHERE tenant_id = $1 ORDER BY updated_at DESC",
-            claims.tenant_id
+            claims.tenant_id,
         )
-        
+
     import json
+
     results = []
     for r in rows:
-        results.append({
-            "tenant_id": str(r["tenant_id"]),
-            "workspace_name": str(r["workspace_name"]),
-            "metric_synonyms": json.loads(r["metric_synonyms"]) if isinstance(r["metric_synonyms"], str) else r["metric_synonyms"],
-            "table_synonyms": json.loads(r["table_synonyms"]) if isinstance(r["table_synonyms"], str) else r["table_synonyms"],
-            "synonym_hits": json.loads(r["synonym_hits"]) if isinstance(r["synonym_hits"], str) else r["synonym_hits"],
-            "total_hits": r["total_hits"],
-            "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None
-        })
+        results.append(
+            {
+                "tenant_id": str(r["tenant_id"]),
+                "workspace_name": str(r["workspace_name"]),
+                "metric_synonyms": json.loads(r["metric_synonyms"])
+                if isinstance(r["metric_synonyms"], str)
+                else r["metric_synonyms"],
+                "table_synonyms": json.loads(r["table_synonyms"])
+                if isinstance(r["table_synonyms"], str)
+                else r["table_synonyms"],
+                "synonym_hits": json.loads(r["synonym_hits"])
+                if isinstance(r["synonym_hits"], str)
+                else r["synonym_hits"],
+                "total_hits": r["total_hits"],
+                "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+            }
+        )
     return {"data": results}
 
 
@@ -329,33 +348,41 @@ async def preview_glossary(
     text: str,
     tenant_id: str | None = None,
     claims: AuthClaims = Depends(get_current_user),
-    pool = Depends(get_db_pool),
+    pool=Depends(get_db_pool),
 ):
     """Run QueryRewriter with active tenant's glossary and return the enriched result."""
     if claims.role != "admin":
         raise ApiError(ErrorCode.auth_invalid, status_code=403, detail="Admin access required")
     if tenant_id and tenant_id != claims.tenant_id:
         raise ApiError(ErrorCode.auth_invalid, status_code=403, detail="Tenant ID mismatch")
-    
+
     effective_tenant_id = claims.tenant_id
 
     import json
     from app.rag.query_rewriter import QueryRewriter
-    
+
     metric_synonyms, table_synonyms = None, None
     if pool:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT metric_synonyms, table_synonyms FROM tenant_glossary WHERE tenant_id = $1",
-                effective_tenant_id
+                effective_tenant_id,
             )
             if row:
-                metric_synonyms = json.loads(row["metric_synonyms"]) if isinstance(row["metric_synonyms"], str) else row["metric_synonyms"]
-                table_synonyms = json.loads(row["table_synonyms"]) if isinstance(row["table_synonyms"], str) else row["table_synonyms"]
-    
+                metric_synonyms = (
+                    json.loads(row["metric_synonyms"])
+                    if isinstance(row["metric_synonyms"], str)
+                    else row["metric_synonyms"]
+                )
+                table_synonyms = (
+                    json.loads(row["table_synonyms"])
+                    if isinstance(row["table_synonyms"], str)
+                    else row["table_synonyms"]
+                )
+
     rewriter = QueryRewriter(metric_synonyms=metric_synonyms, table_synonyms=table_synonyms)
     result = rewriter.rewrite(text)
-    
+
     return {
         "original": text,
         "rewritten": result.rewritten,
@@ -368,17 +395,17 @@ async def preview_glossary(
 @router.get("/api/admin/workspaces")
 async def get_workspaces(
     claims: AuthClaims = Depends(get_current_user),
-    pool = Depends(get_db_pool),
+    pool=Depends(get_db_pool),
 ):
     if claims.role != "admin":
         raise ApiError(ErrorCode.auth_invalid, status_code=403, detail="Admin access required")
     if not pool:
         return {"data": []}
-    
+
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT id::text, workspace_name, has_glossary, total_turns, last_active_at FROM admin_workspaces_view WHERE id = $1 ORDER BY last_active_at DESC NULLS LAST",
-            claims.tenant_id
+            claims.tenant_id,
         )
     return {"data": [dict(r) for r in rows]}
 
@@ -386,11 +413,11 @@ async def get_workspaces(
 @router.get("/api/admin/stats")
 async def get_stats(
     claims: AuthClaims = Depends(get_current_user),
-    pool = Depends(get_db_pool),
+    pool=Depends(get_db_pool),
 ):
     settings = get_settings()
     is_fake_mode = settings.auth_mode == "fake"
-    
+
     if claims.role != "admin" and not is_fake_mode:
         raise ApiError(ErrorCode.auth_invalid, status_code=403, detail="Admin access required")
     if not pool:
@@ -402,9 +429,10 @@ async def get_stats(
             "queries_today": 0,
             "error_rate_pct": 0.0,
         }
-    
+
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("""
+        row = await conn.fetchrow(
+            """
             SELECT 
               (SELECT COUNT(*) FROM tenants WHERE id = $1) AS total_workspaces,
               (SELECT COUNT(*) FROM tenant_glossary WHERE tenant_id = $1) AS total_glossaries,
@@ -414,8 +442,10 @@ async def get_stats(
               ROUND(100.0 * COUNT(*) FILTER (WHERE quality_flag = 'low') / NULLIF(COUNT(*), 0), 1) AS error_rate_pct
             FROM turns
             WHERE tenant_id = $1
-        """, claims.tenant_id)
-        
+        """,
+            claims.tenant_id,
+        )
+
     return {
         "total_workspaces": row["total_workspaces"] or 0,
         "total_glossaries": row["total_glossaries"] or 0,
@@ -430,14 +460,15 @@ async def get_stats(
 async def update_glossary(
     request: Request,
     claims: AuthClaims = Depends(get_current_user),
-    pool = Depends(get_db_pool),
+    pool=Depends(get_db_pool),
 ):
     if claims.role != "admin":
         raise ApiError(ErrorCode.auth_invalid, status_code=403, detail="Admin access required")
     if not pool:
         raise ApiError(ErrorCode.internal_error, status_code=500, detail="Database not configured")
-        
+
     import json
+
     data = await request.json()
     req_tenant_id = data.get("tenant_id")
     if req_tenant_id and req_tenant_id != claims.tenant_id:
@@ -446,7 +477,7 @@ async def update_glossary(
     effective_tenant_id = claims.tenant_id
     metric_synonyms = data.get("metric_synonyms", {})
     table_synonyms = data.get("table_synonyms", {})
-    
+
     async with pool.acquire() as conn:
         await conn.execute(
             """
@@ -459,22 +490,26 @@ async def update_glossary(
             """,
             effective_tenant_id,
             json.dumps(metric_synonyms),
-            json.dumps(table_synonyms)
+            json.dumps(table_synonyms),
         )
-        
+
     return StatusResponse(status="recorded")
+
 
 @router.get("/api/preferences", response_model=UserPreferences)
 async def get_preferences(
     claims: AuthClaims = Depends(get_current_user),
-    db_pool = Depends(get_db_pool),
+    db_pool=Depends(get_db_pool),
 ) -> UserPreferences:
     """
     Get user preferences.
     """
     from app.services.preferences import get_user_preferences
+
     if db_pool is None:
-        raise ApiError(ErrorCode.service_unavailable, status_code=501, detail="Database pool unavailable")
+        raise ApiError(
+            ErrorCode.service_unavailable, status_code=501, detail="Database pool unavailable"
+        )
     return await get_user_preferences(claims.user_id, db_pool)
 
 
@@ -482,14 +517,17 @@ async def get_preferences(
 async def patch_preferences(
     request: Request,
     claims: AuthClaims = Depends(get_current_user),
-    db_pool = Depends(get_db_pool),
+    db_pool=Depends(get_db_pool),
 ) -> UserPreferences:
     """
     Update user preferences.
     """
     from app.services.preferences import update_user_preferences
+
     if db_pool is None:
-        raise ApiError(ErrorCode.service_unavailable, status_code=501, detail="Database pool unavailable")
+        raise ApiError(
+            ErrorCode.service_unavailable, status_code=501, detail="Database pool unavailable"
+        )
     data = await request.json()
     return await update_user_preferences(
         claims.user_id,
@@ -505,15 +543,16 @@ async def patch_preferences(
 async def get_drilldown(
     turn_id: UUID,
     claims: AuthClaims = Depends(get_current_user),
-    settings = Depends(get_settings),
+    settings=Depends(get_settings),
     pipeline: PipelineOrchestrator = Depends(get_pipeline),
-    db_pool = Depends(get_db_pool),
+    db_pool=Depends(get_db_pool),
 ) -> list[dict]:
     """
     Fetch top 10 raw transaction rows for a given turn scoped to tenant claims.
     """
     from app.services.drilldown import get_row_drilldown
     from app.repositories.turn_repository import TurnRepository
+
     turn_repo = TurnRepository(db_pool) if db_pool else None
     return await get_row_drilldown(
         turn_id,
@@ -527,11 +566,12 @@ async def get_drilldown(
 
 # ── Admin: real query history ─────────────────────────────────────────────────
 
+
 @router.get("/api/admin/history")
 async def get_admin_history(
     request: Request,
     claims: AuthClaims = Depends(get_current_user),
-    pool = Depends(get_db_pool),
+    pool=Depends(get_db_pool),
     page: int = 1,
     page_size: int = 50,
     search: str = "",
@@ -550,7 +590,10 @@ async def get_admin_history(
 
     if not pool:
         from app.models.contracts import QueryHistoryPage
-        return QueryHistoryPage(items=[], total_count=0, page=page, page_size=page_size, has_more=False)
+
+        return QueryHistoryPage(
+            items=[], total_count=0, page=page, page_size=page_size, has_more=False
+        )
 
     from app.repositories.turn_repository import TurnRepository
     from app.models.contracts import QueryHistoryPage
@@ -574,7 +617,7 @@ async def get_admin_history(
 async def get_admin_history_detail(
     turn_id: UUID,
     claims: AuthClaims = Depends(get_current_user),
-    pool = Depends(get_db_pool),
+    pool=Depends(get_db_pool),
 ):
     """
     Detail view of a single turn for admin. Includes generated_sql (admin-visible).
@@ -585,7 +628,9 @@ async def get_admin_history_detail(
         raise ApiError(ErrorCode.auth_invalid, status_code=403, detail="Admin access required")
 
     if not pool:
-        raise ApiError(ErrorCode.service_unavailable, status_code=503, detail="Database unavailable")
+        raise ApiError(
+            ErrorCode.service_unavailable, status_code=503, detail="Database unavailable"
+        )
 
     from app.repositories.turn_repository import TurnRepository
     from app.models.contracts import QueryHistoryDetail
@@ -614,7 +659,9 @@ async def get_admin_history_detail(
         quality_flag=str(row.get("quality_flag") or "ok"),
         latency_ms=int(row.get("latency_ms") or 0),
         row_count=result_json.get("row_count"),
-        created_at=row["created_at"].isoformat() if hasattr(row.get("created_at"), "isoformat") else str(row.get("created_at", "")),
+        created_at=row["created_at"].isoformat()
+        if hasattr(row.get("created_at"), "isoformat")
+        else str(row.get("created_at", "")),
         completed=bool(row.get("completed", False)),
         clarification_triggered=bool(row.get("clarification_triggered", False)),
         input_modality=str(row.get("input_modality") or "text"),
@@ -624,10 +671,11 @@ async def get_admin_history_detail(
 
 # ── Admin: real tenant analytics ──────────────────────────────────────────────
 
+
 @router.get("/api/admin/analytics")
 async def get_admin_analytics(
     claims: AuthClaims = Depends(get_current_user),
-    pool = Depends(get_db_pool),
+    pool=Depends(get_db_pool),
     days: int = 30,
 ):
     """
@@ -642,7 +690,12 @@ async def get_admin_analytics(
     days = max(1, min(days, 90))
 
     if not pool:
-        from app.models.contracts import TenantAnalytics, ConfidenceDistribution, FeedbackDistribution
+        from app.models.contracts import (
+            TenantAnalytics,
+            ConfidenceDistribution,
+            FeedbackDistribution,
+        )
+
         return TenantAnalytics(
             period_days=days,
             total_queries=0,
@@ -661,17 +714,19 @@ async def get_admin_analytics(
         )
 
     from app.repositories.turn_repository import TurnRepository
+
     repo = TurnRepository(pool)
     return await repo.get_tenant_analytics(claims, days=days)
 
 
 # ── Admin: real system health ─────────────────────────────────────────────────
 
+
 @router.get("/api/admin/health")
 async def get_admin_health(
     request: Request,
     claims: AuthClaims = Depends(get_current_user),
-    pool = Depends(get_db_pool),
+    pool=Depends(get_db_pool),
 ):
     """
     Real system health check for admin dashboard.
@@ -692,7 +747,11 @@ async def get_admin_health(
     checks: list[HealthCheckItem] = []
 
     # API: always healthy (we're responding)
-    checks.append(HealthCheckItem(name="API", status="healthy", detail="Accepting requests", checked_at=now_iso))
+    checks.append(
+        HealthCheckItem(
+            name="API", status="healthy", detail="Accepting requests", checked_at=now_iso
+        )
+    )
 
     # PostgreSQL
     postgres_status: str = "not_configured"
@@ -736,7 +795,14 @@ async def get_admin_health(
             warehouse_detail = "Snowflake account or database not set"
     except Exception:
         warehouse_status = "unavailable"
-    checks.append(HealthCheckItem(name="Data Warehouse", status=warehouse_status, detail=warehouse_detail, checked_at=now_iso))
+    checks.append(
+        HealthCheckItem(
+            name="Data Warehouse",
+            status=warehouse_status,
+            detail=warehouse_detail,
+            checked_at=now_iso,
+        )
+    )
 
     # LLM config
     llm_status: str = "not_configured"
@@ -762,7 +828,11 @@ async def get_admin_health(
     # TTS
     tts_status: str = "not_configured"
     try:
-        tts_key = getattr(settings, "elevenlabs_api_key", None) or getattr(settings, "openai_api_key", None) or ""
+        tts_key = (
+            getattr(settings, "elevenlabs_api_key", None)
+            or getattr(settings, "openai_api_key", None)
+            or ""
+        )
         if tts_key:
             tts_status = "healthy"
     except Exception:
@@ -787,6 +857,7 @@ async def get_admin_health(
     version: str | None = None
     try:
         from app.api.version import _read_version
+
         version = _read_version()
     except Exception:
         pass
@@ -811,10 +882,11 @@ async def get_admin_health(
 
 # ── Admin: typed workspace detail ─────────────────────────────────────────────
 
+
 @router.get("/api/admin/workspaces")
 async def get_workspaces(
     claims: AuthClaims = Depends(get_current_user),
-    pool = Depends(get_db_pool),
+    pool=Depends(get_db_pool),
 ):
     """
     Return typed workspace detail for the current tenant.
@@ -828,15 +900,19 @@ async def get_workspaces(
         raise ApiError(ErrorCode.auth_invalid, status_code=403, detail="Admin access required")
 
     if not pool:
-        return {"data": [WorkspaceDetail(
-            workspace_name="Your Workspace",
-            tenant_status="unknown",
-            provisioning_status="unknown",
-            connection_health="not_configured",
-            has_glossary=False,
-            recent_query_count_7d=0,
-            total_queries=0,
-        )]}
+        return {
+            "data": [
+                WorkspaceDetail(
+                    workspace_name="Your Workspace",
+                    tenant_status="unknown",
+                    provisioning_status="unknown",
+                    connection_health="not_configured",
+                    has_glossary=False,
+                    recent_query_count_7d=0,
+                    total_queries=0,
+                )
+            ]
+        }
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(

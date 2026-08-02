@@ -210,15 +210,15 @@ export type MemorySummaryResponse = {
 
 export type PinnedAnalysis = {
   id: string;
-  turn_id: string;
   title: string;
-  created_at: string;
-  chart_type: string;
-  layout_x?: number;
-  layout_y?: number;
-  layout_w?: number;
-  layout_h?: number;
-  result: ResultResponse["result"];
+  note?: string | null;
+  original_question?: string;
+  chart_type?: string;
+  saved_at?: string;
+  result?: ResultResponse["result"] | null;
+  data_status: "available" | "no_snapshot";
+  snapshot_headline_value?: number | null;
+  snapshot_headline_label?: string | null;
 };
 
 export type QueryHistoryItem = {

@@ -42,9 +42,7 @@ def resolve_input(
         AmbiguitySignal.pronoun_reference_failure,
     }
 
-    has_blocking_signal = any(
-        sig in blocking_signals for sig in ambiguity_result.signals_detected
-    )
+    has_blocking_signal = any(sig in blocking_signals for sig in ambiguity_result.signals_detected)
 
     should_block = has_blocking_signal
 

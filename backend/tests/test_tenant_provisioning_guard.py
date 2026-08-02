@@ -9,6 +9,7 @@ Verifies:
   3. A tenant whose warehouse reports is_provisioned() == False is rejected with
      ErrorCode.tenant_not_provisioned before a session is ever created.
 """
+
 from uuid import uuid4
 
 import pytest

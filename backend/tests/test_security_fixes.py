@@ -10,6 +10,7 @@ Regression tests for the security/correctness fixes made after the UX/code audit
      ApiError instead of relying on a bare `assert` (which is stripped when
      Python runs with -O).
 """
+
 import uuid
 
 import pytest

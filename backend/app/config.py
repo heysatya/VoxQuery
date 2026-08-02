@@ -48,7 +48,9 @@ class Settings(BaseSettings):
         default="http://localhost:3000,http://127.0.0.1:3000",
         alias="BACKEND_CORS_ORIGINS",
     )
-    canonical_sql_model: str = Field(default="claude-haiku-4-5-20251001", alias="CANONICAL_SQL_MODEL")
+    canonical_sql_model: str = Field(
+        default="claude-haiku-4-5-20251001", alias="CANONICAL_SQL_MODEL"
+    )
     llm_provider: str = Field(default="fake", alias="LLM_PROVIDER")
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
@@ -56,7 +58,7 @@ class Settings(BaseSettings):
     warehouse_provider: str = Field(default="fake", alias="WAREHOUSE_PROVIDER")
     snowflake_dsn: str | None = Field(default=None, alias="SNOWFLAKE_DSN")
     fernet_key: str | None = Field(default=None, alias="FERNET_KEY")
-
+    rate_limit_per_minute: int = Field(default=60, alias="RATE_LIMIT_PER_MINUTE")
 
     @field_validator("auth_mode")
     @classmethod
@@ -148,7 +150,7 @@ class Settings(BaseSettings):
                 raise RuntimeError("RAG_PROVIDER=fake is not allowed in staging/production.")
             if self.warehouse_provider == "fake":
                 raise RuntimeError("WAREHOUSE_PROVIDER=fake is not allowed in staging/production.")
-                
+
         if self.auth_mode == "clerk" and (not self.clerk_issuer or not self.clerk_jwks_url):
             raise RuntimeError("CLERK_ISSUER and CLERK_JWKS_URL are required when AUTH_MODE=clerk.")
         if (
@@ -176,22 +178,28 @@ class Settings(BaseSettings):
             raise RuntimeError("UPSTASH_REDIS_URL must use rediss:// in staging/production.")
         if self.stt_provider == "deepgram" and not self.deepgram_api_key:
             raise RuntimeError("DEEPGRAM_API_KEY is required when STT_PROVIDER=deepgram.")
-            
+
         if self.rag_provider == "pgvector" and not self.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is required when RAG_PROVIDER=pgvector.")
-            
+
         if self.app_env in {"staging", "production"}:
             if not self.fernet_key:
                 raise RuntimeError("FERNET_KEY is required in staging/production.")
             if self.warehouse_provider == "snowflake" and not self.supabase_database_url:
-                raise RuntimeError("SUPABASE_DATABASE_URL is required for tenant-routed Snowflake in staging/production.")
+                raise RuntimeError(
+                    "SUPABASE_DATABASE_URL is required for tenant-routed Snowflake in staging/production."
+                )
             if not self.public_app_url.startswith("https://"):
                 raise RuntimeError("PUBLIC_APP_URL must use https:// in staging/production.")
         if self.briefing_email_provider == "resend":
             if not self.resend_api_key:
-                raise RuntimeError("RESEND_API_KEY is required when BRIEFING_EMAIL_PROVIDER=resend.")
+                raise RuntimeError(
+                    "RESEND_API_KEY is required when BRIEFING_EMAIL_PROVIDER=resend."
+                )
             if not self.briefing_email_from:
-                raise RuntimeError("BRIEFING_EMAIL_FROM is required when BRIEFING_EMAIL_PROVIDER=resend.")
+                raise RuntimeError(
+                    "BRIEFING_EMAIL_FROM is required when BRIEFING_EMAIL_PROVIDER=resend."
+                )
 
 
 @lru_cache

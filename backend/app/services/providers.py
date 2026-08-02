@@ -3,7 +3,15 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from app.models.contracts import ChartType, ResultPayload, ResultShape, SchemaChunk, SessionHistoryTurn, SchemaTable, ColumnInfo
+from app.models.contracts import (
+    ChartType,
+    ResultPayload,
+    ResultShape,
+    SchemaChunk,
+    SessionHistoryTurn,
+    SchemaTable,
+    ColumnInfo,
+)
 from app.rag.retriever import SchemaRetriever
 from app.llm.adapter import LlmAdapter, SqlGenerationResult
 from app.warehouse.connector import WarehouseConnector
@@ -87,7 +95,7 @@ class FakeSqlGenerator(LlmAdapter):
             for k, v in resolved_entities.items():
                 if k in ("metric_ambiguity", "revenue"):
                     resolved_metric = v.resolution
-        
+
         metric = _metric_column(resolved_metric or submitted_text)
         dimension = _dimension_column(submitted_text)
         confidence = 0.87 if resolved_metric or "revenue" not in submitted_text.lower() else 0.58
@@ -97,12 +105,16 @@ class FakeSqlGenerator(LlmAdapter):
             validation_passed=True,
         )
 
-    async def generate_clarification(self, dominant_signal: Any, user_input: str = "") -> tuple[str, list[str]]:
+    async def generate_clarification(
+        self, dominant_signal: Any, user_input: str = ""
+    ) -> tuple[str, list[str]]:
         return clarification_options_for_signal()
 
 
 class FakeWarehouseConnector(WarehouseConnector):
-    async def execute_readonly(self, sql: str, *, snowflake_role: str, tenant_id: UUID | None = None) -> tuple[ResultPayload, ResultShape]:
+    async def execute_readonly(
+        self, sql: str, *, snowflake_role: str, tenant_id: UUID | None = None
+    ) -> tuple[ResultPayload, ResultShape]:
         if "customer_segment" in sql:
             columns = ["customer_segment", "total_net_revenue"]
             rows = [["Enterprise", 1240000], ["Consumer", 830000], ["Small Business", 410000]]
@@ -126,15 +138,27 @@ class FakeWarehouseConnector(WarehouseConnector):
 
     def fetch_schema_snapshot(self, tenant_id: UUID | None = None) -> list[SchemaTable]:
         return [
-            SchemaTable(table_name="orders", columns=[ColumnInfo(name="order_id", data_type="varchar")]),
-            SchemaTable(table_name="order_items", columns=[ColumnInfo(name="order_id", data_type="varchar"), ColumnInfo(name="price", data_type="float")]),
+            SchemaTable(
+                table_name="orders", columns=[ColumnInfo(name="order_id", data_type="varchar")]
+            ),
+            SchemaTable(
+                table_name="order_items",
+                columns=[
+                    ColumnInfo(name="order_id", data_type="varchar"),
+                    ColumnInfo(name="price", data_type="float"),
+                ],
+            ),
         ]
 
 
 class FakeChartSelector:
     def select(self, result: ResultPayload) -> tuple[ChartType, str]:
         semantics = result.semantic_columns
-        numeric = [column for column in semantics if column.value_type == "number" or column.role == "metric"]
+        numeric = [
+            column
+            for column in semantics
+            if column.value_type == "number" or column.role == "metric"
+        ]
         time_columns = [column for column in semantics if column.role == "time"]
         dimensions = [column for column in semantics if column.role == "dimension"]
         if result.row_count == 1 and numeric:
@@ -142,7 +166,10 @@ class FakeChartSelector:
         if time_columns and numeric:
             return ChartType.line, f"Showing change over time using {numeric[0].display_name}."
         if dimensions and numeric:
-            return ChartType.bar, f"Comparing {numeric[0].display_name} across {dimensions[0].display_name}."
+            return (
+                ChartType.bar,
+                f"Comparing {numeric[0].display_name} across {dimensions[0].display_name}.",
+            )
         return ChartType.table, "A table is the clearest view for this result shape."
 
 
@@ -150,7 +177,9 @@ class FakeStoryteller:
     async def summarize(self, result_shape: ResultShape, user_query: str) -> str:
         return result_shape.aggregate_summary
 
-    async def generate_proactive_questions(self, result_shape: ResultShape, user_query: str) -> list[str]:
+    async def generate_proactive_questions(
+        self, result_shape: ResultShape, user_query: str
+    ) -> list[str]:
         return [
             "What are the top drivers for this result?",
             "How does this compare to the prior month?",

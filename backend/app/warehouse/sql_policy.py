@@ -41,7 +41,9 @@ def validate_against_allowlist(parsed: exp.Expression, allowlist: SchemaAllowlis
     for table in parsed.find_all(exp.Table):
         table_name = table.name.lower()
         if table_name not in allowlist.tables:
-            raise SqlPolicyError(f'Query references a table ("{table_name}") that isn\'t part of the connected schema.')
+            raise SqlPolicyError(
+                f'Query references a table ("{table_name}") that isn\'t part of the connected schema.'
+            )
         referenced_tables.add(table_name)
 
     # Walk referenced columns against the allowlist.
@@ -49,22 +51,26 @@ def validate_against_allowlist(parsed: exp.Expression, allowlist: SchemaAllowlis
         col_name = column.name.lower()
         if col_name == "*":
             continue
-            
+
         table_ref = column.table.lower() if column.table else None
-        
+
         if table_ref:
             if table_ref in allowlist.tables:
                 if col_name not in allowlist.tables[table_ref]:
-                    raise SqlPolicyError(f'Query references a column ("{table_ref}.{col_name}") that doesn\'t exist in the connected schema.')
+                    raise SqlPolicyError(
+                        f'Query references a column ("{table_ref}.{col_name}") that doesn\'t exist in the connected schema.'
+                    )
         else:
             found = False
             for t in referenced_tables:
                 if col_name in allowlist.tables[t]:
                     found = True
                     break
-            
+
             if not found:
-                raise SqlPolicyError(f'Query references a column ("{col_name}") that doesn\'t exist in the connected schema.')
+                raise SqlPolicyError(
+                    f'Query references a column ("{col_name}") that doesn\'t exist in the connected schema.'
+                )
 
 
 def _is_readonly_query(node: exp.Expression) -> bool:
@@ -81,16 +87,22 @@ def auto_fix_snowflake_types(parsed: exp.Expression) -> exp.Expression:
     1. Wraps date parameters in DATE_TRUNC, DATEADD, DATEDIFF with TRY_TO_TIMESTAMP(...) to prevent VARCHAR compilation errors.
     2. Converts division operations (a / b) to DIV0(a, b) to prevent Division by Zero runtime crashes.
     """
+
     def _is_already_timestamp_cast(node: exp.Expression) -> bool:
         if isinstance(node, (exp.Cast, exp.TryCast)):
             return True
         if isinstance(node, exp.Anonymous) and node.name.upper() in (
-            "TRY_TO_TIMESTAMP", "TO_TIMESTAMP", "TRY_TO_DATE", "TO_DATE", "TRY_TO_TIME", "TO_TIME"
+            "TRY_TO_TIMESTAMP",
+            "TO_TIMESTAMP",
+            "TRY_TO_DATE",
+            "TO_DATE",
+            "TRY_TO_TIME",
+            "TO_TIME",
         ):
             return True
-        if isinstance(node, exp.Func) and str(node).upper().startswith((
-            "TRY_TO_TIMESTAMP", "TO_TIMESTAMP", "TRY_TO_DATE", "TO_DATE"
-        )):
+        if isinstance(node, exp.Func) and str(node).upper().startswith(
+            ("TRY_TO_TIMESTAMP", "TO_TIMESTAMP", "TRY_TO_DATE", "TO_DATE")
+        ):
             return True
         return False
 
@@ -111,7 +123,11 @@ def auto_fix_snowflake_types(parsed: exp.Expression) -> exp.Expression:
 
     # 1. Fix date/time function arguments
     for node in parsed.find_all(exp.DateTrunc):
-        if node.this and not isinstance(node.this, (exp.Literal, exp.DateTrunc)) and not _is_already_timestamp_cast(node.this):
+        if (
+            node.this
+            and not isinstance(node.this, (exp.Literal, exp.DateTrunc))
+            and not _is_already_timestamp_cast(node.this)
+        ):
             node.set("this", _wrap(node.this))
 
     for node in list(parsed.find_all(exp.Anonymous)):
@@ -136,22 +152,26 @@ def auto_fix_snowflake_types(parsed: exp.Expression) -> exp.Expression:
         left = div_node.this
         right = div_node.expression
         if left and right:
-            div0_ast = sqlglot.parse_one(f"DIV0({left.sql(dialect='snowflake')}, {right.sql(dialect='snowflake')})", read="snowflake")
+            div0_ast = sqlglot.parse_one(
+                f"DIV0({left.sql(dialect='snowflake')}, {right.sql(dialect='snowflake')})",
+                read="snowflake",
+            )
             div_node.replace(div0_ast)
 
     return parsed
 
 
 def canonicalize_readonly_sql(
-    sql: str, 
-    *, 
-    dialect: str = "snowflake", 
+    sql: str,
+    *,
+    dialect: str = "snowflake",
     row_limit: int = 10000,
-    allowlist: SchemaAllowlist | None = None
+    allowlist: SchemaAllowlist | None = None,
 ) -> CanonicalSql:
     """Return read-only SQL with the top-level row limit made explicit, optionally checking schema."""
     if sql:
         import re
+
         sql = sql.strip()
         # Strip XML tags if present
         sql_match = re.search(r"<sql>(.*?)</sql>", sql, flags=re.IGNORECASE | re.DOTALL)
@@ -164,7 +184,11 @@ def canonicalize_readonly_sql(
         # Strip markdown fences
         sql = re.sub(r"^```[a-zA-Z]*\n?", "", sql.strip())
         sql = re.sub(r"\n?```$", "", sql.strip())
-        lines = [line for line in sql.splitlines() if line.strip().lower() not in ("<sql>", "</sql>", "```", "```sql", "```xml")]
+        lines = [
+            line
+            for line in sql.splitlines()
+            if line.strip().lower() not in ("<sql>", "</sql>", "```", "```sql", "```xml")
+        ]
         sql = "\n".join(lines).strip()
 
     try:
@@ -223,7 +247,9 @@ def validate_no_cartesian_joins(parsed: exp.Expression) -> None:
     """Reject generated SQL that can multiply rows through unconstrained joins."""
     for join in parsed.find_all(exp.Join):
         if join.args.get("kind") == "CROSS":
-            raise SqlPolicyError("Query contains an explicit CROSS JOIN; add a constrained join condition.")
+            raise SqlPolicyError(
+                "Query contains an explicit CROSS JOIN; add a constrained join condition."
+            )
         if join.args.get("on") is None and join.args.get("using") is None:
             raise SqlPolicyError("Query joins tables without an ON or USING condition.")
 

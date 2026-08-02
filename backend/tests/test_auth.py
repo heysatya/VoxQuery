@@ -118,21 +118,26 @@ def test_blank_clerk_audience_is_treated_as_unset(key_pair):
     verifier = ClerkJwtVerifier(settings, jwks_client=FakeJwksClient(public_key))
 
     assert settings.clerk_audience is None
-    assert verifier.claims_from_payload(verifier.verify(signed_token(private_key))).tenant_id == TENANT_ID
+    assert (
+        verifier.claims_from_payload(verifier.verify(signed_token(private_key))).tenant_id
+        == TENANT_ID
+    )
 
 
 def test_clerk_verifier_allows_small_clock_skew(key_pair, clerk_settings):
     private_key, public_key = key_pair
     verifier = ClerkJwtVerifier(clerk_settings, jwks_client=FakeJwksClient(public_key))
 
-    claims = verifier.claims_from_payload(verifier.verify(signed_token(private_key, iat=datetime.now(UTC) + timedelta(seconds=30))))
+    claims = verifier.claims_from_payload(
+        verifier.verify(signed_token(private_key, iat=datetime.now(UTC) + timedelta(seconds=30)))
+    )
 
     assert claims.user_id == USER_ID
 
 
 def test_access_log_redacts_websocket_token_query_param():
     redacted = redact_token_query_params(
-        'WebSocket /ws/audio?session_id=session-1&token=header.payload.signature&x=1'
+        "WebSocket /ws/audio?session_id=session-1&token=header.payload.signature&x=1"
     )
 
     assert "header.payload.signature" not in redacted

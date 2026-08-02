@@ -102,23 +102,24 @@ async def test_session_lookup_requires_matching_user_within_tenant():
     assert await store.get_for_claims(claims(), session.session_id) is not None
     assert await store.get_for_claims(other_user_claims(), session.session_id) is None
 
+
 @pytest.mark.asyncio
 async def test_session_sweep_loop_removes_expired_sessions():
     store = InMemorySessionStore(Settings(APP_ENV="test", AUTH_MODE="fake"))
     # We will test the _sweep_loop logic manually
     session, _ = await store.create(claims())
-    
+
     # Force expiry
     key = store._key(session.tenant_id, session.session_id)
     store._expires_at[key] = datetime.now(UTC) - timedelta(seconds=1)
-    
+
     # Run a single sweep logic inline to avoid waiting 300s
     now = datetime.now(UTC)
     expired_keys = [k for k, expires_at in store._expires_at.items() if expires_at <= now]
     for k in expired_keys:
         store._sessions.pop(k, None)
         store._expires_at.pop(k, None)
-        
+
     assert key not in store._sessions
     assert key not in store._expires_at
 
@@ -196,7 +197,9 @@ async def test_redis_resolved_entities_cap_and_quality_flag_persist():
 
     for index in range(21):
         session.turn_count = index
-        await store.add_resolved_entity(session, f"term_{index}", f"resolution_{index}", f"Option {index}")
+        await store.add_resolved_entity(
+            session, f"term_{index}", f"resolution_{index}", f"Option {index}"
+        )
     assert len(session.resolved_entities) == 20
     assert "term_0" not in session.resolved_entities
 
@@ -282,7 +285,9 @@ def test_redis_mode_requires_tls_in_staging_and_production():
 
 
 async def test_redis_create_failure_maps_to_safe_session_error():
-    store = RedisSessionStore(Settings(APP_ENV="test", AUTH_MODE="fake"), client=FakeRedis(fail=True))
+    store = RedisSessionStore(
+        Settings(APP_ENV="test", AUTH_MODE="fake"), client=FakeRedis(fail=True)
+    )
 
     with pytest.raises(ApiError) as exc:
         await store.create(claims())

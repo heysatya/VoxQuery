@@ -1,4 +1,5 @@
 """Durable turn persistence repository. Replaces in-memory PipelineOrchestrator.turns."""
+
 from __future__ import annotations
 import json
 import logging
@@ -47,7 +48,11 @@ class TurnRepository:
             full_result_json = capped_result.model_dump_json()
 
         result_json_str = turn.result_json.model_dump_json() if turn.result_json else "{}"
-        modality_str = turn.input_modality.value if hasattr(turn.input_modality, "value") else str(turn.input_modality)
+        modality_str = (
+            turn.input_modality.value
+            if hasattr(turn.input_modality, "value")
+            else str(turn.input_modality)
+        )
         chart_type_str = turn.chart_type.value if turn.chart_type else None
         confidence_tier_str = turn.confidence_tier.value if turn.confidence_tier else None
 
@@ -56,7 +61,8 @@ class TurnRepository:
             tenant_display = tenant_name or f"Tenant {turn.tenant_id[:8]}"
             await conn.execute(
                 "INSERT INTO tenants (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
-                turn.tenant_id, tenant_display,
+                turn.tenant_id,
+                tenant_display,
             )
             await conn.execute(
                 """
@@ -64,7 +70,8 @@ class TurnRepository:
                 VALUES ($1, $2)
                 ON CONFLICT (id) DO NOTHING
                 """,
-                turn.user_id, f"user-{turn.user_id}@system.local",
+                turn.user_id,
+                f"user-{turn.user_id}@system.local",
             )
             await conn.execute(
                 """
@@ -72,7 +79,9 @@ class TurnRepository:
                 VALUES ($1, $2, $3, NOW())
                 ON CONFLICT (session_id) DO UPDATE SET last_active_at = NOW()
                 """,
-                turn.session_id, turn.tenant_id, turn.user_id,
+                turn.session_id,
+                turn.tenant_id,
+                turn.user_id,
             )
             await conn.execute(
                 """
@@ -80,7 +89,9 @@ class TurnRepository:
                 VALUES ($1, $2, $3, 'Voice Session')
                 ON CONFLICT (id) DO NOTHING
                 """,
-                turn.conversation_id, turn.user_id, turn.tenant_id,
+                turn.conversation_id,
+                turn.user_id,
+                turn.tenant_id,
             )
 
             await conn.execute(
@@ -109,20 +120,37 @@ class TurnRepository:
                     latency_ms = EXCLUDED.latency_ms,
                     completed = EXCLUDED.completed
                 """,
-                turn.turn_id, turn.session_id, turn.conversation_id, turn.parent_turn_id,
-                turn.tenant_id, turn.user_id, turn.user_input, modality_str, turn.generated_sql,
-                source_tables, json.dumps(filter_predicates),
-                chart_type_str, turn.chart_rationale or "",
-                confidence_tier_str, turn.composite_score or 1.0,
+                turn.turn_id,
+                turn.session_id,
+                turn.conversation_id,
+                turn.parent_turn_id,
+                turn.tenant_id,
+                turn.user_id,
+                turn.user_input,
+                modality_str,
+                turn.generated_sql,
+                source_tables,
+                json.dumps(filter_predicates),
+                chart_type_str,
+                turn.chart_rationale or "",
+                confidence_tier_str,
+                turn.composite_score or 1.0,
                 result_json_str,
                 full_result_json,
                 json.dumps([]),
                 json.dumps(turn.proactive_questions),
-                turn.quality_flag.value if hasattr(turn.quality_flag, "value") else str(turn.quality_flag),
-                turn.latency_ms, turn.created_at, turn.completed, turn.feedback_submitted,
+                turn.quality_flag.value
+                if hasattr(turn.quality_flag, "value")
+                else str(turn.quality_flag),
+                turn.latency_ms,
+                turn.created_at,
+                turn.completed,
+                turn.feedback_submitted,
             )
 
-    async def get_session_turns(self, session_id: UUID, claims: AuthClaims, *, limit: int = 50) -> list[dict[str, Any]]:
+    async def get_session_turns(
+        self, session_id: UUID, claims: AuthClaims, *, limit: int = 50
+    ) -> list[dict[str, Any]]:
         """Tenant-scoped turn fetch — enforces tenant_id = claims.tenant_id."""
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
@@ -132,7 +160,9 @@ class TurnRepository:
                 ORDER BY created_at ASC
                 LIMIT $3
                 """,
-                session_id, claims.tenant_id, limit,
+                session_id,
+                claims.tenant_id,
+                limit,
             )
         return [self._parse_row(r) for r in rows]
 
@@ -141,7 +171,8 @@ class TurnRepository:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM turns WHERE turn_id = $1 AND tenant_id = $2",
-                turn_id, claims.tenant_id,
+                turn_id,
+                claims.tenant_id,
             )
         return self._parse_row(row) if row else None
 
@@ -150,7 +181,8 @@ class TurnRepository:
         async with self._pool.acquire() as conn:
             await conn.execute(
                 "UPDATE turns SET anomalies = $2 WHERE turn_id = $1",
-                turn_id, json.dumps(anomalies),
+                turn_id,
+                json.dumps(anomalies),
             )
 
     async def record_feedback(
@@ -213,7 +245,9 @@ class TurnRepository:
                 ORDER BY last_active_at DESC
                 LIMIT 1
                 """,
-                claims.tenant_id, claims.user_id, current_session_id,
+                claims.tenant_id,
+                claims.user_id,
+                current_session_id,
             )
             if not prior_session_row:
                 return []
@@ -226,7 +260,8 @@ class TurnRepository:
                 WHERE session_id = $1 AND tenant_id = $2
                 ORDER BY created_at DESC
                 """,
-                prior_sid, claims.tenant_id,
+                prior_sid,
+                claims.tenant_id,
             )
 
         seen: set[str] = set()
@@ -400,24 +435,30 @@ class TurnRepository:
                 except Exception:
                     result_json_val = {}
 
-            row_count = result_json_val.get("row_count") if isinstance(result_json_val, dict) else None
+            row_count = (
+                result_json_val.get("row_count") if isinstance(result_json_val, dict) else None
+            )
             created_at = row["created_at"]
-            created_at_str = created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at)
+            created_at_str = (
+                created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at)
+            )
 
-            items.append(QueryHistorySummary(
-                turn_id=str(row["turn_id"]),
-                user_display=user_display,
-                user_input=str(row.get("user_input") or ""),
-                chart_type=row.get("chart_type"),
-                confidence_tier=row.get("confidence_tier"),
-                quality_flag=str(row.get("quality_flag") or "ok"),
-                latency_ms=int(row.get("latency_ms") or 0),
-                row_count=row_count,
-                created_at=created_at_str,
-                completed=bool(row.get("completed", False)),
-                clarification_triggered=bool(row.get("clarification_triggered", False)),
-                input_modality=str(row.get("input_modality") or "text"),
-            ))
+            items.append(
+                QueryHistorySummary(
+                    turn_id=str(row["turn_id"]),
+                    user_display=user_display,
+                    user_input=str(row.get("user_input") or ""),
+                    chart_type=row.get("chart_type"),
+                    confidence_tier=row.get("confidence_tier"),
+                    quality_flag=str(row.get("quality_flag") or "ok"),
+                    latency_ms=int(row.get("latency_ms") or 0),
+                    row_count=row_count,
+                    created_at=created_at_str,
+                    completed=bool(row.get("completed", False)),
+                    clarification_triggered=bool(row.get("clarification_triggered", False)),
+                    input_modality=str(row.get("input_modality") or "text"),
+                )
+            )
 
         page_size = limit
         page = (offset // max(1, page_size)) + 1
@@ -471,7 +512,8 @@ class TurnRepository:
                 WHERE tenant_id = $1
                   AND created_at > NOW() - ($2 || ' days')::INTERVAL
                 """,
-                claims.tenant_id, str(days),
+                claims.tenant_id,
+                str(days),
             )
 
             conf_rows = await conn.fetch(
@@ -483,7 +525,8 @@ class TurnRepository:
                   AND confidence_tier IS NOT NULL
                 GROUP BY confidence_tier
                 """,
-                claims.tenant_id, str(days),
+                claims.tenant_id,
+                str(days),
             )
 
             daily_rows = await conn.fetch(
@@ -495,7 +538,8 @@ class TurnRepository:
                 GROUP BY DATE(created_at)
                 ORDER BY day ASC
                 """,
-                claims.tenant_id, str(days),
+                claims.tenant_id,
+                str(days),
             )
 
             top_q_rows = await conn.fetch(
@@ -510,15 +554,19 @@ class TurnRepository:
                 ORDER BY cnt DESC
                 LIMIT 10
                 """,
-                claims.tenant_id, str(days),
+                claims.tenant_id,
+                str(days),
             )
 
             saved_count: int = 0
             try:
-                saved_count = await conn.fetchval(
-                    "SELECT COUNT(*) FROM pinned_analyses WHERE tenant_id = $1",
-                    claims.tenant_id,
-                ) or 0
+                saved_count = (
+                    await conn.fetchval(
+                        "SELECT COUNT(*) FROM pinned_analyses WHERE tenant_id = $1",
+                        claims.tenant_id,
+                    )
+                    or 0
+                )
             except Exception:
                 pass
 
@@ -551,9 +599,15 @@ class TurnRepository:
             failed_queries=int(agg["failed_queries"] or 0),
             success_rate_pct=round(100.0 * completed / max(1, total), 1),
             avg_latency_ms=round(float(agg["avg_latency_ms"] or 0), 1),
-            p50_latency_ms=round(float(agg["p50_latency_ms"]), 1) if agg.get("p50_latency_ms") else None,
-            p95_latency_ms=round(float(agg["p95_latency_ms"]), 1) if agg.get("p95_latency_ms") else None,
-            queries_per_day=[DailyQueryCount(date=r["day"], count=int(r["cnt"])) for r in daily_rows],
+            p50_latency_ms=round(float(agg["p50_latency_ms"]), 1)
+            if agg.get("p50_latency_ms")
+            else None,
+            p95_latency_ms=round(float(agg["p95_latency_ms"]), 1)
+            if agg.get("p95_latency_ms")
+            else None,
+            queries_per_day=[
+                DailyQueryCount(date=r["day"], count=int(r["cnt"])) for r in daily_rows
+            ],
             top_questions=[TopQuestion(user_input=r["q"], count=int(r["cnt"])) for r in top_q_rows],
             confidence_distribution=conf_dist,
             clarification_rate_pct=round(100.0 * clarification_count / max(1, total), 1),

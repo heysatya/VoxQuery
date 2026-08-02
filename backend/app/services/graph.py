@@ -14,6 +14,7 @@ Design goals (Wave 2, Item 1.1):
   • Public API surface of PipelineOrchestrator is unchanged; this graph is
     an internal implementation detail of _run_until_confidence_or_result.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -61,53 +62,55 @@ logger = logging.getLogger(__name__)
 # State schema
 # ---------------------------------------------------------------------------
 
+
 class PipelineGraphState(TypedDict, total=False):
     """Typed state container threaded through all graph nodes."""
 
     # ── set before the graph runs ──────────────────────────────────────────
-    session: Any                    # VoiceSession
-    turn: Any                       # TurnRecord
+    session: Any  # VoiceSession
+    turn: Any  # TurnRecord
     claims: AuthClaims
-    settings: Any                   # Settings
-    schema_retriever: Any           # SchemaRetriever
-    llm: Any                        # LlmAdapter
-    warehouse: Any                  # WarehouseConnector
-    chart: Any                      # FakeChartSelector
-    story: Any                      # Storyteller
-    sessions: Any                   # InMemorySessionStore
-    events: Any                     # PipelineEventBus
-    audit: Any                      # AuditStore
-    tracer: Any                     # LangfuseTracer
-    clarification_triggered: bool   # was this turn resumed from clarification?
-    clarification: Any              # AuditClarification | None
-    started: float                  # perf_counter() reference for elapsed_ms
-    graph_trace: Any                # Langfuse trace object (None in test mode)
-    audit_identity: Any             # AuditIdentity (built in pipeline.py before graph runs)
-    orchestrator_ref: Any           # PipelineOrchestrator backref for cache access
-    db_pool: Any                    # Database connection pool
+    settings: Any  # Settings
+    schema_retriever: Any  # SchemaRetriever
+    llm: Any  # LlmAdapter
+    warehouse: Any  # WarehouseConnector
+    chart: Any  # FakeChartSelector
+    story: Any  # Storyteller
+    sessions: Any  # InMemorySessionStore
+    events: Any  # PipelineEventBus
+    audit: Any  # AuditStore
+    tracer: Any  # LangfuseTracer
+    clarification_triggered: bool  # was this turn resumed from clarification?
+    clarification: Any  # AuditClarification | None
+    started: float  # perf_counter() reference for elapsed_ms
+    graph_trace: Any  # Langfuse trace object (None in test mode)
+    audit_identity: Any  # AuditIdentity (built in pipeline.py before graph runs)
+    orchestrator_ref: Any  # PipelineOrchestrator backref for cache access
+    db_pool: Any  # Database connection pool
 
     # ── populated by nodes ─────────────────────────────────────────────────
-    schema_chunks: list             # list[SchemaChunk]
+    schema_chunks: list  # list[SchemaChunk]
     rag_score: float
-    rewritten_query: Any            # RewrittenQuery
-    history: list                   # list[SessionHistoryTurn]
-    generation: Any                 # SqlGenerationResult
-    attempt_idx: int                # 0-based; max 1 (two total attempts)
+    rewritten_query: Any  # RewrittenQuery
+    history: list  # list[SessionHistoryTurn]
+    generation: Any  # SqlGenerationResult
+    attempt_idx: int  # 0-based; max 1 (two total attempts)
     feedback: str | None
     previous_sql: str | None
-    ambiguity: Any                  # AmbiguityDetectionResult
-    pre_sql_ambiguity: Any          # AmbiguityDetectionResult | None
-    confidence: Any                 # ConfidenceResult
-    cached_result: Any              # tuple[ResultPayload, ResultShape] | None
-    result: Any                     # ResultPayload
-    shape: Any                      # ResultShape
-    clarification_issued: bool      # True when a clarification event was emitted
-    error: Any                      # ApiError | None – set on irrecoverable failure
+    ambiguity: Any  # AmbiguityDetectionResult
+    pre_sql_ambiguity: Any  # AmbiguityDetectionResult | None
+    confidence: Any  # ConfidenceResult
+    cached_result: Any  # tuple[ResultPayload, ResultShape] | None
+    result: Any  # ResultPayload
+    shape: Any  # ResultShape
+    clarification_issued: bool  # True when a clarification event was emitted
+    error: Any  # ApiError | None – set on irrecoverable failure
 
 
 # ---------------------------------------------------------------------------
 # Helper — publish a progress event from inside a node
 # ---------------------------------------------------------------------------
+
 
 async def _publish_stage(state: PipelineGraphState, stage: PipelineStage) -> None:
     elapsed = int((perf_counter() - state["started"]) * 1000)
@@ -125,11 +128,12 @@ async def _publish_stage(state: PipelineGraphState, stage: PipelineStage) -> Non
 # Node: input_resolver
 # ---------------------------------------------------------------------------
 
+
 async def input_resolver_node(state: PipelineGraphState) -> dict:
     turn: TurnRecord = state["turn"]
     context = await state["sessions"].context_block(state["session"])
     history = context.history
-    
+
     # Run with empty schema to detect text-only blocking signals (pronouns, scope)
     resolution = resolve_input(
         text=turn.user_input,
@@ -139,39 +143,53 @@ async def input_resolver_node(state: PipelineGraphState) -> dict:
     )
     return {
         "pre_sql_ambiguity": resolution.pre_sql_ambiguity,
-        "ambiguity": resolution.pre_sql_ambiguity if resolution.should_block else state.get("ambiguity"),
+        "ambiguity": resolution.pre_sql_ambiguity
+        if resolution.should_block
+        else state.get("ambiguity"),
         "history": history,
     }
+
 
 # ---------------------------------------------------------------------------
 # Node: rewrite_query
 # ---------------------------------------------------------------------------
 
+
 async def rewrite_query_node(state: PipelineGraphState) -> dict:
     from app.rag.query_rewriter import QueryRewriter
+
     turn = state["turn"]
-    
+
     metric_synonyms = None
     table_synonyms = None
-    
+
     db_pool = state.get("db_pool")
     if db_pool:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT metric_synonyms, table_synonyms FROM tenant_glossary WHERE tenant_id = $1",
-                turn.tenant_id
+                turn.tenant_id,
             )
             if row:
-                metric_synonyms = json.loads(row["metric_synonyms"]) if isinstance(row["metric_synonyms"], str) else row["metric_synonyms"]
-                table_synonyms = json.loads(row["table_synonyms"]) if isinstance(row["table_synonyms"], str) else row["table_synonyms"]
-                
+                metric_synonyms = (
+                    json.loads(row["metric_synonyms"])
+                    if isinstance(row["metric_synonyms"], str)
+                    else row["metric_synonyms"]
+                )
+                table_synonyms = (
+                    json.loads(row["table_synonyms"])
+                    if isinstance(row["table_synonyms"], str)
+                    else row["table_synonyms"]
+                )
+
     rewriter = QueryRewriter(metric_synonyms=metric_synonyms, table_synonyms=table_synonyms)
     rewritten = rewriter.rewrite(turn.user_input)
-    
+
     if db_pool and (metric_synonyms or table_synonyms) and rewritten.detected_metrics:
         async with db_pool.acquire() as conn:
             for metric in rewritten.detected_metrics:
-                await conn.execute("""
+                await conn.execute(
+                    """
                     UPDATE tenant_glossary 
                     SET synonym_hits = jsonb_set(
                         synonym_hits,
@@ -180,14 +198,18 @@ async def rewrite_query_node(state: PipelineGraphState) -> dict:
                     ),
                     total_hits = total_hits + 1
                     WHERE tenant_id = $2
-                """, metric, turn.tenant_id)
-                
+                """,
+                    metric,
+                    turn.tenant_id,
+                )
+
     return {"rewritten_query": rewritten}
 
 
 # ---------------------------------------------------------------------------
 # Node: rag_retrieval
 # ---------------------------------------------------------------------------
+
 
 async def rag_retrieval_node(state: PipelineGraphState) -> dict:
     turn: TurnRecord = state["turn"]
@@ -229,6 +251,7 @@ async def rag_retrieval_node(state: PipelineGraphState) -> dict:
 # ---------------------------------------------------------------------------
 # Node: sql_generation
 # ---------------------------------------------------------------------------
+
 
 async def sql_generation_node(state: PipelineGraphState) -> dict:
     turn: TurnRecord = state["turn"]
@@ -280,6 +303,7 @@ async def sql_generation_node(state: PipelineGraphState) -> dict:
 # ---------------------------------------------------------------------------
 # Node: ambiguity_check
 # ---------------------------------------------------------------------------
+
 
 async def ambiguity_check_node(state: PipelineGraphState) -> dict:
     turn: TurnRecord = state["turn"]
@@ -374,9 +398,12 @@ async def ambiguity_check_node(state: PipelineGraphState) -> dict:
 # Node: clarification
 # ---------------------------------------------------------------------------
 
+
 async def clarification_node(state: PipelineGraphState) -> dict:
     turn: TurnRecord = state["turn"]
-    ambiguity: AmbiguityDetectionResult | None = state.get("ambiguity") or state.get("pre_sql_ambiguity")
+    ambiguity: AmbiguityDetectionResult | None = state.get("ambiguity") or state.get(
+        "pre_sql_ambiguity"
+    )
     tracer = state["tracer"]
     trace = state.get("graph_trace")
 
@@ -406,9 +433,7 @@ async def clarification_node(state: PipelineGraphState) -> dict:
             raw_transcript=turn.raw_transcript,
             stt_confidence=turn.deepgram_confidence_raw,
             input_modality=turn.input_modality,
-            ambiguous_term=(
-                ambiguity.ambiguous_terms[0] if ambiguity.ambiguous_terms else None
-            ),
+            ambiguous_term=(ambiguity.ambiguous_terms[0] if ambiguity.ambiguous_terms else None),
         ),
     )
     await state["events"].publish(
@@ -426,6 +451,7 @@ async def clarification_node(state: PipelineGraphState) -> dict:
 # ---------------------------------------------------------------------------
 # Node: execution
 # ---------------------------------------------------------------------------
+
 
 async def execution_node(state: PipelineGraphState) -> dict:
     turn: TurnRecord = state["turn"]
@@ -457,7 +483,9 @@ async def execution_node(state: PipelineGraphState) -> dict:
     orchestrator = state.get("orchestrator_ref")
     cached = None
     if orchestrator is not None:
-        cached = await orchestrator._get_cached_result(claims.tenant_id, sql_to_execute, claims.snowflake_role)
+        cached = await orchestrator._get_cached_result(
+            claims.tenant_id, sql_to_execute, claims.snowflake_role
+        )
 
     if cached is not None:
         result, shape = cached
@@ -502,6 +530,7 @@ async def execution_node(state: PipelineGraphState) -> dict:
 # Node: render
 # ---------------------------------------------------------------------------
 
+
 async def render_node(state: PipelineGraphState) -> dict:
     from app.services.pipeline import detect_possible_duplication
     from app.models.contracts import ResultReadyEvent
@@ -520,7 +549,7 @@ async def render_node(state: PipelineGraphState) -> dict:
     shape.chart_type = chart_type
     summary, proactive_questions = await asyncio.gather(
         state["story"].summarize(shape, turn.user_input),
-        state["story"].generate_proactive_questions(shape, turn.user_input)
+        state["story"].generate_proactive_questions(shape, turn.user_input),
     )
 
     turn.result_json = shape
@@ -544,13 +573,18 @@ async def render_node(state: PipelineGraphState) -> dict:
     # Never stores raw rows, SQL text, or user PII. Errors are silently skipped.
     if state.get("db_pool") and turn.completed:
         try:
-            from app.repositories.memory_repository import MemoryRepository, extract_memory_candidates
+            from app.repositories.memory_repository import (
+                MemoryRepository,
+                extract_memory_candidates,
+            )
             import re as _re
+
             _turn_meta: dict = {"source_tables": [], "filter_predicates": [], "metric_name": None}
             if turn.generated_sql:
                 _tables = _re.findall(
                     r"(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_.]*)",
-                    turn.generated_sql, flags=_re.IGNORECASE,
+                    turn.generated_sql,
+                    flags=_re.IGNORECASE,
                 )
                 _turn_meta["source_tables"] = list(dict.fromkeys(t.lower() for t in _tables[:5]))
             if turn.full_result and turn.full_result.semantic_columns:
@@ -602,9 +636,7 @@ async def render_node(state: PipelineGraphState) -> dict:
                 ],
                 "preview_row_count": result.preview_row_count,
                 "is_truncated": result.is_truncated,
-                "valid_visualizations": [
-                    c.value for c in valid_visualizations_for_result(result)
-                ],
+                "valid_visualizations": [c.value for c in valid_visualizations_for_result(result)],
                 "warnings": [w.model_dump(mode="json") for w in turn.result_warnings],
             },
             proactive_questions=turn.proactive_questions,
@@ -619,6 +651,7 @@ async def render_node(state: PipelineGraphState) -> dict:
 # ---------------------------------------------------------------------------
 # Routing edges
 # ---------------------------------------------------------------------------
+
 
 def _route_after_sql_generation(state: PipelineGraphState) -> str:
     """Retry once on validation failure; proceed to ambiguity after second attempt or pass."""
@@ -657,6 +690,7 @@ def _route_after_clarification(state: PipelineGraphState) -> str:
 # Graph factory
 # ---------------------------------------------------------------------------
 
+
 def build_pipeline_graph():
     """
     Compile the VoxQuery analytical pipeline as a LangGraph.
@@ -682,7 +716,7 @@ def build_pipeline_graph():
         # If we are resuming after a user answer, do not block again.
         if state.get("clarification_triggered"):
             return "rewrite_query_node"
-            
+
         if state.get("pre_sql_ambiguity") is not None:
             return "clarification_node"
         return "rewrite_query_node"

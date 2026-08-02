@@ -8,6 +8,8 @@ type ExecutiveAudioPlayerProps = {
   voiceUrl?: string;
   selectedVoice?: string;
   onVoiceChange?: (voice: string) => void;
+  isPlaying?: boolean;
+  onPlayStateChange?: (isPlaying: boolean) => void;
 };
 
 export function ExecutiveAudioPlayer({
@@ -15,9 +17,10 @@ export function ExecutiveAudioPlayer({
   voiceUrl,
   selectedVoice = "aura-asteria-en",
   onVoiceChange,
+  isPlaying: isPlayingProp,
+  onPlayStateChange,
 }: ExecutiveAudioPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
-  const [playbackRate, setPlaybackRate] = useState(1.0);
   const [progress, setProgress] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [hasAudioError, setHasAudioError] = useState(false);
@@ -45,20 +48,48 @@ export function ExecutiveAudioPlayer({
     setProgress(0);
   }, [voiceUrl]);
 
+  const updatePlayingState = (playing: boolean) => {
+    setIsPlaying(playing);
+    onPlayStateChange?.(playing);
+  };
+
+  useEffect(() => {
+    if (isPlayingProp === undefined) return;
+    if (isPlayingProp && !isPlaying) {
+      if (voiceUrl && !hasAudioError && audioRef.current) {
+        audioRef.current.muted = isMuted;
+        audioRef.current.play().then(() => updatePlayingState(true)).catch((err) => {
+          console.warn("Audio element play failed, falling back to SpeechSynthesis", err);
+          setHasAudioError(true);
+          speakWithSpeechSynthesis();
+        });
+      } else {
+        speakWithSpeechSynthesis();
+      }
+    } else if (!isPlayingProp && isPlaying) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+      if (synthRef.current) {
+        synthRef.current.pause();
+      }
+      updatePlayingState(false);
+    }
+  }, [isPlayingProp]);
+
   const speakWithSpeechSynthesis = () => {
     if (!synthRef.current) return;
 
     if (isPlaying) {
       synthRef.current.pause();
-      setIsPlaying(false);
+      updatePlayingState(false);
     } else {
       if (synthRef.current.paused) {
         synthRef.current.resume();
-        setIsPlaying(true);
+        updatePlayingState(true);
       } else {
         synthRef.current.cancel();
         const utterance = new SpeechSynthesisUtterance(cleanSpeechText);
-        utterance.rate = playbackRate;
         utterance.volume = isMuted ? 0 : 1;
 
         // Auto-select smooth natural female voice for browser fallback
@@ -77,15 +108,15 @@ export function ExecutiveAudioPlayer({
         }
 
         utterance.onend = () => {
-          setIsPlaying(false);
+          updatePlayingState(false);
           setProgress(100);
         };
         utterance.onerror = () => {
-          setIsPlaying(false);
+          updatePlayingState(false);
         };
         utteranceRef.current = utterance;
         synthRef.current.speak(utterance);
-        setIsPlaying(true);
+        updatePlayingState(true);
         setProgress(0);
       }
     }
@@ -95,11 +126,10 @@ export function ExecutiveAudioPlayer({
     if (voiceUrl && !hasAudioError && audioRef.current) {
       if (isPlaying) {
         audioRef.current.pause();
-        setIsPlaying(false);
+        updatePlayingState(false);
       } else {
-        audioRef.current.playbackRate = playbackRate;
         audioRef.current.muted = isMuted;
-        audioRef.current.play().then(() => setIsPlaying(true)).catch((err) => {
+        audioRef.current.play().then(() => updatePlayingState(true)).catch((err) => {
           console.warn("Audio element play failed, falling back to SpeechSynthesis", err);
           setHasAudioError(true);
           speakWithSpeechSynthesis();
@@ -121,31 +151,6 @@ export function ExecutiveAudioPlayer({
     }
   };
 
-  const handleSpeedChange = () => {
-    const rates = [1.0, 1.25, 1.5, 2.0];
-    const nextIdx = (rates.indexOf(playbackRate) + 1) % rates.length;
-    const nextRate = rates[nextIdx];
-    setPlaybackRate(nextRate);
-    if (audioRef.current) {
-      audioRef.current.playbackRate = nextRate;
-    }
-    if (synthRef.current && utteranceRef.current) {
-      const wasPlaying = isPlaying;
-      synthRef.current.cancel();
-      const utterance = new SpeechSynthesisUtterance(cleanSpeechText);
-      utterance.rate = nextRate;
-      utterance.volume = isMuted ? 0 : 1;
-      utterance.onend = () => {
-        setIsPlaying(false);
-        setProgress(100);
-      };
-      utteranceRef.current = utterance;
-      if (wasPlaying) {
-        synthRef.current.speak(utterance);
-      }
-    }
-  };
-
   const handleTimeUpdate = () => {
     if (audioRef.current && audioRef.current.duration) {
       const currentProgress = (audioRef.current.currentTime / audioRef.current.duration) * 100;
@@ -161,12 +166,12 @@ export function ExecutiveAudioPlayer({
           src={voiceUrl}
           onTimeUpdate={handleTimeUpdate}
           onEnded={() => {
-            setIsPlaying(false);
+            updatePlayingState(false);
             setProgress(100);
           }}
           onError={() => {
             setHasAudioError(true);
-            setIsPlaying(false);
+            updatePlayingState(false);
           }}
         />
       )}
@@ -207,21 +212,6 @@ export function ExecutiveAudioPlayer({
 
         {/* Controls */}
         <div className="flex items-center gap-3">
-          <span className="px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 font-mono text-xs border border-indigo-500/20 flex items-center gap-1.5">
-            <span className={`w-2 h-2 rounded-full ${voiceUrl && !hasAudioError ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
-            {voiceUrl && !hasAudioError ? "VoxQuery Voice (Asteria)" : "Native Speech Synthesis (Fallback)"}
-          </span>
-
-          {/* Playback speed */}
-          <button
-            type="button"
-            onClick={handleSpeedChange}
-            className="px-2.5 py-1 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 font-mono text-xs border border-indigo-500/20 transition-colors"
-            aria-label={`Playback speed: ${playbackRate.toFixed(2)}x`}
-          >
-            {playbackRate.toFixed(2)}x
-          </button>
-
           {/* Mute button */}
           <button
             type="button"

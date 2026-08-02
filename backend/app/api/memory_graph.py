@@ -30,7 +30,7 @@ async def get_memory_graph(
     Fetch the tenant-scoped analysis recap for a given session.
     """
     logger.info("Fetching analysis recap session_id=%s tenant_id=%s", session_id, claims.tenant_id)
-    
+
     turns: list[dict[str, Any]] = []
 
     db_pool = getattr(request.app.state, "db_pool", None)
@@ -45,7 +45,8 @@ async def get_memory_graph(
         pipeline = getattr(request.app.state, "pipeline", None)
         if pipeline and hasattr(pipeline, "turns"):
             mem_turns = [
-                t for t in pipeline.turns.values()
+                t
+                for t in pipeline.turns.values()
                 if t.session_id == session_id and t.tenant_id == claims.tenant_id
             ]
             mem_turns.sort(key=lambda x: x.created_at)

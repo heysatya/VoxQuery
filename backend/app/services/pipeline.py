@@ -78,7 +78,10 @@ class PipelineOrchestrator:
         if request.parent_turn_id is not None:
             if request.parent_turn_id not in self.turns and self.db_pool:
                 from app.repositories.turn_repository import TurnRepository
-                persisted_parent = await TurnRepository(self.db_pool).get_turn(request.parent_turn_id, claims)
+
+                persisted_parent = await TurnRepository(self.db_pool).get_turn(
+                    request.parent_turn_id, claims
+                )
                 if persisted_parent:
                     self.turns[request.parent_turn_id] = TurnRepository.to_model(persisted_parent)
             self._validate_parent_turn(request.parent_turn_id, session, claims)
@@ -99,11 +102,16 @@ class PipelineOrchestrator:
 
         if self.db_pool:
             from app.repositories.turn_repository import TurnRepository
+
             try:
                 await TurnRepository(self.db_pool).save(turn, tenant_name=claims.tenant_name)
             except Exception as exc:
                 self.turns.pop(turn.turn_id, None)
-                logger.exception("turn.initial_persist_failed turn_id=%s error=%s", turn.turn_id, type(exc).__name__)
+                logger.exception(
+                    "turn.initial_persist_failed turn_id=%s error=%s",
+                    turn.turn_id,
+                    type(exc).__name__,
+                )
                 raise ApiError(
                     ErrorCode.service_unavailable,
                     status_code=503,
@@ -111,16 +119,23 @@ class PipelineOrchestrator:
                 ) from exc
 
         self._in_flight.add(request.session_id)
-        self._schedule_pipeline_task(self._run_turn_background(session, turn, claims), session.session_id)
+        self._schedule_pipeline_task(
+            self._run_turn_background(session, turn, claims), session.session_id
+        )
         return turn
 
-    def _validate_parent_turn(self, parent_turn_id: UUID, session, claims: AuthClaims) -> TurnRecord:
+    def _validate_parent_turn(
+        self, parent_turn_id: UUID, session, claims: AuthClaims
+    ) -> TurnRecord:
         parent = self.turns.get(parent_turn_id)
         if parent is None:
             raise ApiError(ErrorCode.turn_not_found, status_code=404)
         if parent.user_id != claims.user_id or parent.tenant_id != claims.tenant_id:
             raise ApiError(ErrorCode.turn_forbidden, status_code=403)
-        if parent.session_id != session.session_id or parent.conversation_id != session.conversation_id:
+        if (
+            parent.session_id != session.session_id
+            or parent.conversation_id != session.conversation_id
+        ):
             raise ApiError(ErrorCode.turn_forbidden, status_code=403)
         if not parent.completed:
             raise ApiError(ErrorCode.turn_processing, status_code=409)
@@ -149,6 +164,7 @@ class PipelineOrchestrator:
 
         if turn_id not in self.turns and self.db_pool:
             from app.repositories.turn_repository import TurnRepository
+
             persisted_turn = await TurnRepository(self.db_pool).get_turn(turn_id, claims)
             if persisted_turn:
                 self.turns[turn_id] = TurnRepository.to_model(persisted_turn)
@@ -173,21 +189,15 @@ class PipelineOrchestrator:
             turn_id=turn_id,
             prompt_sent=state.question,
             user_choice=selection,
-            resolution_type=resolution_type
+            resolution_type=resolution_type,
         )
         self._schedule_pipeline_task(
             self._run_turn_background(
-                session,
-                turn,
-                claims,
-                clarification_triggered=True,
-                clarification=clarification
+                session, turn, claims, clarification_triggered=True, clarification=clarification
             ),
             session.session_id,
         )
         return turn
-
-
 
     def get_turn_for_user(self, turn_id: UUID, claims: AuthClaims) -> TurnRecord:
         turn = self.turns.get(turn_id)
@@ -202,13 +212,30 @@ class PipelineOrchestrator:
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
 
-    async def _run_turn_background(self, session, turn: TurnRecord, claims: AuthClaims, *, clarification_triggered: bool = False, clarification: AuditClarification | None = None) -> None:
+    async def _run_turn_background(
+        self,
+        session,
+        turn: TurnRecord,
+        claims: AuthClaims,
+        *,
+        clarification_triggered: bool = False,
+        clarification: AuditClarification | None = None,
+    ) -> None:
         await asyncio.sleep(0.05)
         with tracer.start_trace(turn) as trace:
             try:
-                await self._run_until_confidence_or_result(session, turn, claims, trace, clarification_triggered=clarification_triggered, clarification=clarification)
+                await self._run_until_confidence_or_result(
+                    session,
+                    turn,
+                    claims,
+                    trace,
+                    clarification_triggered=clarification_triggered,
+                    clarification=clarification,
+                )
             except ApiError as exc:
-                tracer.span_turn_completed(trace, turn.latency_ms, success=False, error_code=exc.code.value)
+                tracer.span_turn_completed(
+                    trace, turn.latency_ms, success=False, error_code=exc.code.value
+                )
                 await self.events.publish(
                     session.session_id,
                     PipelineErrorEvent(
@@ -240,13 +267,21 @@ class PipelineOrchestrator:
                     turn.turn_id,
                     session.session_id,
                     session.tenant_id,
-                    str(exc)
+                    str(exc),
                 )
                 raise exc
             finally:
                 self._in_flight.discard(session.session_id)
 
-    async def _run_until_confidence_or_result(self, session, turn: TurnRecord, claims: AuthClaims, trace: Any = None, clarification_triggered: bool = False, clarification: AuditClarification | None = None) -> None:
+    async def _run_until_confidence_or_result(
+        self,
+        session,
+        turn: TurnRecord,
+        claims: AuthClaims,
+        trace: Any = None,
+        clarification_triggered: bool = False,
+        clarification: AuditClarification | None = None,
+    ) -> None:
         """
         Execute the full analytical pipeline for one turn via the LangGraph graph.
 
@@ -258,7 +293,9 @@ class PipelineOrchestrator:
         from app.services.graph import run_pipeline_graph
         from app.audit.store import AuditIdentity
 
-        tracer.span_stt_capture(trace, turn.raw_transcript, turn.user_input, turn.deepgram_confidence_raw)
+        tracer.span_stt_capture(
+            trace, turn.raw_transcript, turn.user_input, turn.deepgram_confidence_raw
+        )
         started = perf_counter()
 
         identity = AuditIdentity(
@@ -294,7 +331,6 @@ class PipelineOrchestrator:
             db_pool=self.db_pool,
             started=started,
         )
-
 
     async def _get_cached_result(
         self, tenant_id: UUID, sql: str, snowflake_role: str

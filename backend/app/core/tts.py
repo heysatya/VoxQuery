@@ -16,6 +16,7 @@ DEEPGRAM_TTS_TIMEOUT = aiohttp.ClientTimeout(total=30, sock_connect=5, sock_read
 
 class TTSUnavailableError(Exception):
     """Raised when the TTS provider fails to connect or returns an error."""
+
     pass
 
 

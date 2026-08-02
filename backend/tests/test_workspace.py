@@ -9,6 +9,7 @@ from app.repositories.workspace_repository import WorkspaceRepository
 
 from unittest.mock import MagicMock
 
+
 @pytest.mark.asyncio
 async def test_workspace_widgets_crud(db_pool: asyncpg.Pool):
     if isinstance(db_pool, MagicMock):
@@ -21,17 +22,37 @@ async def test_workspace_widgets_crud(db_pool: asyncpg.Pool):
     session_id = uuid4()
     turn_id = uuid4()
 
-    claims = AuthClaims(user_id=user_id, tenant_id=tenant_id, email="ws@test.com", role="admin", snowflake_role="ANALYST")
+    claims = AuthClaims(
+        user_id=user_id,
+        tenant_id=tenant_id,
+        email="ws@test.com",
+        role="admin",
+        snowflake_role="ANALYST",
+    )
 
     turn = TurnRecord(
-        turn_id=turn_id, session_id=session_id, conversation_id=uuid4(), user_id=user_id, tenant_id=tenant_id,
-        user_input="Revenue Widget Turn", input_modality=InputModality.text, completed=True,
+        turn_id=turn_id,
+        session_id=session_id,
+        conversation_id=uuid4(),
+        user_id=user_id,
+        tenant_id=tenant_id,
+        user_input="Revenue Widget Turn",
+        input_modality=InputModality.text,
+        completed=True,
         full_result=ResultPayload(columns=["quarter", "rev"], rows=[["Q1", 500]], row_count=1),
     )
     await turn_repo.save(turn, source_tables=["orders"])
 
     # Create / Pin widget
-    widget = await ws_repo.create_widget(claims, turn_id=turn_id, title="Q1 Revenue Widget", layout_x=0, layout_y=0, layout_w=4, layout_h=3)
+    widget = await ws_repo.create_widget(
+        claims,
+        turn_id=turn_id,
+        title="Q1 Revenue Widget",
+        layout_x=0,
+        layout_y=0,
+        layout_w=4,
+        layout_h=3,
+    )
     widget_id = widget["id"]
     assert widget["title"] == "Q1 Revenue Widget"
 
@@ -42,7 +63,9 @@ async def test_workspace_widgets_crud(db_pool: asyncpg.Pool):
     assert widgets[0]["chart_type"] == "table"
 
     # Update layout
-    updated = await ws_repo.update_widget_layout(widget_id, claims, layout_x=4, layout_y=0, layout_w=6, layout_h=4)
+    updated = await ws_repo.update_widget_layout(
+        widget_id, claims, layout_x=4, layout_y=0, layout_w=6, layout_h=4
+    )
     assert updated is True
 
     # Delete widget
@@ -67,12 +90,22 @@ async def test_workspace_tenant_isolation(db_pool: asyncpg.Pool):
     user_b = str(uuid4())
     turn_a = uuid4()
 
-    claims_a = AuthClaims(user_id=user_a, tenant_id=tenant_a, email="a@w.com", role="admin", snowflake_role="ANALYST")
-    claims_b = AuthClaims(user_id=user_b, tenant_id=tenant_b, email="b@w.com", role="admin", snowflake_role="ANALYST")
+    claims_a = AuthClaims(
+        user_id=user_a, tenant_id=tenant_a, email="a@w.com", role="admin", snowflake_role="ANALYST"
+    )
+    claims_b = AuthClaims(
+        user_id=user_b, tenant_id=tenant_b, email="b@w.com", role="admin", snowflake_role="ANALYST"
+    )
 
     turn = TurnRecord(
-        turn_id=turn_a, session_id=uuid4(), conversation_id=uuid4(), user_id=user_a, tenant_id=tenant_a,
-        user_input="Secret Tenant A Turn", input_modality=InputModality.text, completed=True,
+        turn_id=turn_a,
+        session_id=uuid4(),
+        conversation_id=uuid4(),
+        user_id=user_a,
+        tenant_id=tenant_a,
+        user_input="Secret Tenant A Turn",
+        input_modality=InputModality.text,
+        completed=True,
     )
     await turn_repo.save(turn)
 

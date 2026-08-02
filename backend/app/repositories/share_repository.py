@@ -8,6 +8,7 @@ Design principles:
 - All operations are scoped to tenant_id to prevent cross-tenant access.
 - Shared results are snapshots of the turn result — no new warehouse queries.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -211,6 +212,7 @@ class ShareRepository:
 
         # Build safe snapshot — no raw warehouse credentials, no DSNs
         import json
+
         full_result = row["full_result"]
         if isinstance(full_result, str):
             try:

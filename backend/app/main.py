@@ -3,11 +3,11 @@ import re
 import warnings
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 warnings.filterwarnings(
-    "ignore",
-    message="Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater."
+    "ignore", message="Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater."
 )
 
 from contextlib import asynccontextmanager
@@ -88,24 +88,31 @@ llm_adapter = None
 warehouse_connector = None
 storyteller = None
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db_pool = None
     if settings.supabase_database_url:
         await run_migrations(settings.supabase_database_url)
-    
+
     global schema_retriever, llm_adapter, warehouse_connector, storyteller
-    
+
     if settings.rag_provider == "pgvector" and settings.supabase_database_url:
-        pool = await asyncpg.create_pool(settings.supabase_database_url, min_size=1, max_size=4, statement_cache_size=0)
+        pool = await asyncpg.create_pool(
+            settings.supabase_database_url, min_size=1, max_size=4, statement_cache_size=0
+        )
         openai_client = AsyncOpenAI()
         schema_retriever = PgVectorSchemaRetriever(openai_client=openai_client, db_pool=pool)
-        
+
     if settings.llm_provider == "claude":
-        anthropic_client = AsyncAnthropic(api_key=settings.anthropic_api_key) if settings.anthropic_api_key else AsyncAnthropic()
+        anthropic_client = (
+            AsyncAnthropic(api_key=settings.anthropic_api_key)
+            if settings.anthropic_api_key
+            else AsyncAnthropic()
+        )
         llm_adapter = ClaudeAdapter(client=anthropic_client)
         storyteller = ClaudeStoryteller(client=anthropic_client)
-        
+
     if settings.warehouse_provider == "snowflake":
         # Snowflake doesn't need an async initialization pool for this MVP slice
         # The connector will handle it during execute_readonly
@@ -113,10 +120,12 @@ async def lifespan(app: FastAPI):
         if settings.supabase_database_url:
             if not getattr(schema_retriever, "pool", None):
                 # Ensure we have a pool if not created by pgvector
-                pool = await asyncpg.create_pool(settings.supabase_database_url, min_size=1, max_size=4, statement_cache_size=0)
+                pool = await asyncpg.create_pool(
+                    settings.supabase_database_url, min_size=1, max_size=4, statement_cache_size=0
+                )
             else:
                 pool = schema_retriever.pool
-            
+
             # Do not create a global Snowflake pool here. Its credentials would
             # be shared across tenant connectors and could cross tenant data
             # boundaries. TenantRoutingWarehouseConnector resolves each
@@ -125,11 +134,13 @@ async def lifespan(app: FastAPI):
         else:
             dsn = settings.snowflake_dsn or "dummy_dsn"
             warehouse_connector = SnowflakeWarehouseConnector(dsn=dsn)
-            
-    app.state.db_pool = getattr(schema_retriever, "pool", None) or db_pool or (pool if "pool" in locals() else None)
+
+    app.state.db_pool = (
+        getattr(schema_retriever, "pool", None) or db_pool or (pool if "pool" in locals() else None)
+    )
     await audit_store.start()
     await app.state.sessions.start()
-    
+
     # Update pipeline with initialized providers
     app.state.pipeline = PipelineOrchestrator(
         sessions=app.state.sessions,
@@ -142,8 +153,9 @@ async def lifespan(app: FastAPI):
         story=storyteller,
         db_pool=app.state.db_pool,
     )
-    
+
     from app.services.briefing_scheduler import start_briefing_scheduler
+
     if app.state.db_pool and settings.supabase_database_url:
         start_briefing_scheduler(app.state.db_pool, settings, warehouse=warehouse_connector)
 
@@ -153,9 +165,10 @@ async def lifespan(app: FastAPI):
     await app.state.rate_limiter.close()
     if schema_retriever and getattr(schema_retriever, "pool", None):
         await schema_retriever.pool.close()
-        
+
     if app.state.db_pool and not getattr(schema_retriever, "pool", None):
         await app.state.db_pool.close()
+
 
 app = FastAPI(title="VoxQuery Voice Subsystem", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
@@ -228,8 +241,10 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     # Log the full traceback for any unhandled exception (500) so we can trace it immediately.
-    logger.exception("unhandled_exception path=%s method=%s error=%s", request.url.path, request.method, str(exc))
-    
+    logger.exception(
+        "unhandled_exception path=%s method=%s error=%s", request.url.path, request.method, str(exc)
+    )
+
     code = ErrorCode.internal_error
     return JSONResponse(
         status_code=500,
@@ -258,10 +273,13 @@ async def health() -> dict[str, str]:
 async def get_version() -> dict[str, str]:
     import os
     import subprocess
+
     git_sha = os.environ.get("GIT_SHA", "")
     if not git_sha:
         try:
-            git_sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+            git_sha = subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"], text=True
+            ).strip()
         except Exception:
             git_sha = "unknown"
     return {

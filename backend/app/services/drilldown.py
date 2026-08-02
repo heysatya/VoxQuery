@@ -43,7 +43,11 @@ async def get_row_drilldown(
         tenant_id="00000000-0000-0000-0000-000000000101",
         role="admin",
     )
-    logger.info("Fetching raw transaction drilldown for turn_id=%s tenant_id=%s", turn_id, effective_claims.tenant_id)
+    logger.info(
+        "Fetching raw transaction drilldown for turn_id=%s tenant_id=%s",
+        turn_id,
+        effective_claims.tenant_id,
+    )
 
     target_sql = sql_query
 
@@ -62,7 +66,11 @@ async def get_row_drilldown(
             logger.warning("Could not fetch turn from repo: %s", err)
 
     if not target_sql or not warehouse:
-        logger.warning("No underlying SQL or warehouse available for turn_id=%s tenant_id=%s", turn_id, effective_claims.tenant_id)
+        logger.warning(
+            "No underlying SQL or warehouse available for turn_id=%s tenant_id=%s",
+            turn_id,
+            effective_claims.tenant_id,
+        )
         return []
 
     clean_sql = target_sql.strip().rstrip(";")

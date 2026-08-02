@@ -48,19 +48,25 @@ async def generate_memory_graph(
             metric_id = None
             if metric_name:
                 metric_id = f"node_m_{idx}"
-                nodes.append(GraphNode(id=metric_id, label=str(metric_name), type="metric", turn_index=idx))
+                nodes.append(
+                    GraphNode(id=metric_id, label=str(metric_name), type="metric", turn_index=idx)
+                )
                 edges.append(GraphEdge(source=q_id, target=metric_id, relation="measures"))
 
             # Add source table entity nodes
             for table_idx, table_name in enumerate(source_tables, start=1):
                 e_id = f"node_e_{idx}_{table_idx}"
-                nodes.append(GraphNode(id=e_id, label=f"Entity: {table_name}", type="entity", turn_index=idx))
+                nodes.append(
+                    GraphNode(id=e_id, label=f"Entity: {table_name}", type="entity", turn_index=idx)
+                )
                 edges.append(GraphEdge(source=q_id, target=e_id, relation="uses"))
 
             # Add filter predicate nodes
             for filter_idx, predicate in enumerate(filter_predicates, start=1):
                 f_id = f"node_f_{idx}_{filter_idx}"
-                nodes.append(GraphNode(id=f_id, label=f"Filter: {predicate}", type="filter", turn_index=idx))
+                nodes.append(
+                    GraphNode(id=f_id, label=f"Filter: {predicate}", type="filter", turn_index=idx)
+                )
                 edges.append(GraphEdge(source=q_id, target=f_id, relation="applies"))
                 if metric_id:
                     edges.append(GraphEdge(source=f_id, target=metric_id, relation="refines"))

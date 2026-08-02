@@ -22,7 +22,8 @@ import { FailureNotice } from "./components/notice/FailureNotice";
 import { PriorSessionMemoryCard } from "./components/memory/PriorSessionMemoryCard";
 import { VoxQueryLogo } from "./components/brand/VoxQueryLogo";
 import { getStatusLabel } from "./state/interactionState";
-import { fetchWorkspaceWidgets, pinWorkspaceWidget, deleteWorkspaceWidget, fetchVersion, fetchPriorSessionSummary, setAuthTokenRefresher } from "../lib/api";
+import { fetchWorkspaceWidgets, pinWorkspaceWidget, deleteWorkspaceWidget, updateWorkspaceWidgetNote, fetchVersion, fetchPriorSessionSummary, setAuthTokenRefresher } from "../lib/api";
+import { extractHeadline } from "../lib/resultMetrics";
 import type { LastResult, PinnedAnalysis } from "../lib/types";
 
 const authMode = process.env.NEXT_PUBLIC_AUTH_MODE ?? "fake";
@@ -196,13 +197,16 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
   const handlePinWidget = async (result: LastResult) => {
     const title = result.submittedText
       || result.resultData?.tts_text?.split(".")[0]
-      || "Saved analysis";
+      || "Saved finding";
     try {
       const token = await auth.getToken();
+      const { value: headlineValue, label: headlineLabel } = extractHeadline(result.resultData?.result);
       const newWidget = await pinWorkspaceWidget(
         {
           turn_id: result.turnId,
           title,
+          headline_value: headlineValue,
+          headline_label: headlineLabel,
         },
         token
       );
@@ -212,6 +216,18 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
       });
     } catch (err) {
       console.error("Failed to pin widget", err);
+    }
+  };
+
+  const handleUpdateWidgetNote = async (widgetId: string, note: string | null) => {
+    try {
+      const token = await auth.getToken();
+      await updateWorkspaceWidgetNote(widgetId, note, token);
+      setPinnedWidgets((prev) =>
+        prev.map((w) => w.id === widgetId ? { ...w, note } : w)
+      );
+    } catch (err) {
+      console.error("Failed to update note", err);
     }
   };
 
@@ -406,12 +422,14 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 />
               </div>
 
-              {/* Pinned analyses workspace */}
+              {/* Saved findings workspace */}
               <div className="mt-6 w-full">
                 <ExecutiveWorkspace
                   pinnedWidgets={pinnedWidgets}
                   onRemoveWidget={handleRemoveWidget}
                   onRerunAnalysis={handleRerunPinnedAnalysis}
+                  onUpdateNote={handleUpdateWidgetNote}
+                  token={token}
                 />
               </div>
 

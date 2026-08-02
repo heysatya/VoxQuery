@@ -114,11 +114,11 @@ async def _generate_morning_briefing_uncached(
     Generate an executive briefing report for the given tenant using real warehouse queries.
     """
     today_str = datetime.now(timezone.utc).strftime("%A, %B %d, %Y")
-    
+
     kpis: list[BriefingKpi] = []
     anomalies: list[BriefingAnomaly] = []
     is_live = False
-    
+
     if warehouse is not None:
         try:
             # Query 1: Core KPIs
@@ -143,7 +143,8 @@ async def _generate_morning_briefing_uncached(
                 customers_cnt = int(row[3]) if row[3] is not None else None
 
                 rev_formatted = (
-                    f"${tot_rev / 1e6:.1f}M" if tot_rev is not None and tot_rev >= 1e6
+                    f"${tot_rev / 1e6:.1f}M"
+                    if tot_rev is not None and tot_rev >= 1e6
                     else (f"${tot_rev:,.2f}" if tot_rev is not None else "No data")
                 )
                 kpis = [
@@ -196,7 +197,7 @@ async def _generate_morning_briefing_uncached(
                 candidate_anomalies = []
                 for i, val in enumerate(weekly_values):
                     # Trailing window of most recent 8-12 weeks relative to point i (up to 12 weeks)
-                    window = weekly_values[max(0, i - 12):i]
+                    window = weekly_values[max(0, i - 12) : i]
                     if len(window) < 3:
                         window = [v for j, v in enumerate(weekly_values) if j != i]
 
@@ -211,12 +212,14 @@ async def _generate_morning_briefing_uncached(
                         z_score = abs(val - baseline_mean) / std_dev
                         if z_score > 2.5:  # (a) Raised threshold to 2.5
                             abs_dev = abs(val - baseline_mean)
-                            candidate_anomalies.append({
-                                "idx": i,
-                                "row": valid_rows[i],
-                                "val": val,
-                                "abs_dev": abs_dev,
-                            })
+                            candidate_anomalies.append(
+                                {
+                                    "idx": i,
+                                    "row": valid_rows[i],
+                                    "val": val,
+                                    "abs_dev": abs_dev,
+                                }
+                            )
 
                 # (b) Cap anomalies appended to the top 3 most significant (largest absolute deviation from baseline)
                 candidate_anomalies.sort(key=lambda c: c["abs_dev"], reverse=True)
@@ -236,7 +239,9 @@ async def _generate_morning_briefing_uncached(
                         except ValueError:
                             formatted_date = cleaned
                     else:
-                        formatted_date = str(row_week) if row_week is not None else f"Week {item['idx'] + 1}"
+                        formatted_date = (
+                            str(row_week) if row_week is not None else f"Week {item['idx'] + 1}"
+                        )
 
                     week_val = item["val"]
                     anomalies.append(
@@ -247,7 +252,9 @@ async def _generate_morning_briefing_uncached(
                         )
                     )
         except Exception as e:
-            logger.warning("Could not execute real warehouse briefing query for tenant %s: %s", tenant_id, e)
+            logger.warning(
+                "Could not execute real warehouse briefing query for tenant %s: %s", tenant_id, e
+            )
 
     if not kpis:
         return ExecutiveBriefingResponse(
@@ -270,7 +277,8 @@ async def _generate_morning_briefing_uncached(
     )
     summary_narrative += (
         f" {len(anomalies)} item{'s' if len(anomalies) != 1 else ''} require attention."
-        if anomalies else " No anomalies were detected in the available metrics."
+        if anomalies
+        else " No anomalies were detected in the available metrics."
     )
 
     return ExecutiveBriefingResponse(

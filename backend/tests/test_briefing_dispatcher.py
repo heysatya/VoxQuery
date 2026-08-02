@@ -61,8 +61,15 @@ def test_user_preferences_api_endpoints():
     app.dependency_overrides[get_db_pool] = lambda: mock_pool
     try:
         from unittest.mock import patch
-        with patch("app.services.preferences.get_user_preferences", new_callable=AsyncMock) as mock_get, \
-             patch("app.services.preferences.update_user_preferences", new_callable=AsyncMock) as mock_update:
+
+        with (
+            patch(
+                "app.services.preferences.get_user_preferences", new_callable=AsyncMock
+            ) as mock_get,
+            patch(
+                "app.services.preferences.update_user_preferences", new_callable=AsyncMock
+            ) as mock_update,
+        ):
             mock_get.return_value = UserPreferences(
                 user_id="00000000-0000-0000-0000-000000000001",
                 email_briefing_enabled=False,

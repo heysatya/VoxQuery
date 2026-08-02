@@ -3,7 +3,9 @@
 Synthesizes audio via Deepgram TTS, streams audio directly, and caches raw bytes
 in Upstash Redis with a 24-hour TTL (no blob storage).
 """
+
 from __future__ import annotations
+import base64
 import hashlib
 import logging
 import re
@@ -50,15 +52,16 @@ async def get_or_generate_briefing_audio_bytes(
     text_to_speak = clean_text_for_tts(raw_text)
 
     hash_key = hashlib.sha256(text_to_speak.encode("utf-8")).hexdigest()[:12]
-    cache_key = f"briefing_audio:{claims.tenant_id}:{briefing.date}:{voice}:{hash_key}"
+    cache_key = f"briefing_audio_b64:{claims.tenant_id}:{briefing.date}:{voice}:{hash_key}"
 
     if redis_client:
         try:
-            cached_audio = await redis_client.get(cache_key)
-            if cached_audio:
-                if isinstance(cached_audio, str):
-                    cached_audio = cached_audio.encode("latin1")
-                return cached_audio, settings.tts_provider
+            cached_val = await redis_client.get(cache_key)
+            if cached_val:
+                if isinstance(cached_val, bytes):
+                    cached_val = cached_val.decode("ascii", errors="ignore")
+                audio_bytes = base64.b64decode(cached_val)
+                return audio_bytes, settings.tts_provider
         except Exception as exc:
             logger.warning("Redis briefing audio cache fetch failed: %s", exc)
 
@@ -71,7 +74,8 @@ async def get_or_generate_briefing_audio_bytes(
 
     if redis_client and full_audio:
         try:
-            await redis_client.setex(cache_key, 86400, full_audio)
+            b64_str = base64.b64encode(full_audio).decode("ascii")
+            await redis_client.setex(cache_key, 86400, b64_str)
         except Exception as exc:
             logger.warning("Redis briefing audio cache store failed: %s", exc)
 

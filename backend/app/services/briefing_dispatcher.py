@@ -46,6 +46,7 @@ def _format_plain_text(briefing: ExecutiveBriefingResponse, dashboard_url: str) 
 def _render_html(briefing: ExecutiveBriefingResponse, dashboard_url: str) -> str:
     def esc(value: Any) -> str:
         return html.escape(str(value), quote=True)
+
     kpi_rows = "".join(
         "<tr>"
         f"<td style='padding:8px 12px;border-bottom:1px solid #e5e7eb'>{esc(kpi.label)}</td>"
@@ -64,7 +65,8 @@ def _render_html(briefing: ExecutiveBriefingResponse, dashboard_url: str) -> str
         f"<th align='left' style='padding:8px 12px'>Value</th>"
         f"<th align='left' style='padding:8px 12px'>Context</th></tr></thead>"
         f"<tbody>{kpi_rows}</tbody></table>"
-        if kpi_rows else ""
+        if kpi_rows
+        else ""
     )
     anomaly_section = f"<h3>Items to review</h3><ul>{anomaly_rows}</ul>" if anomaly_rows else ""
     return f"""<!doctype html>
@@ -89,13 +91,15 @@ async def _send_resend(
     if not settings.resend_api_key or not settings.briefing_email_from:
         raise BriefingDeliveryError("Resend email delivery is not configured.")
 
-    payload = json.dumps({
-        "from": settings.briefing_email_from,
-        "to": [recipient],
-        "subject": subject,
-        "html": html_content,
-        "text": text_content,
-    }).encode("utf-8")
+    payload = json.dumps(
+        {
+            "from": settings.briefing_email_from,
+            "to": [recipient],
+            "subject": subject,
+            "html": html_content,
+            "text": text_content,
+        }
+    ).encode("utf-8")
 
     def send() -> None:
         request = UrlRequest(
@@ -113,14 +117,18 @@ async def _send_resend(
                 if response.status < 200 or response.status >= 300:
                     raise BriefingDeliveryError(f"Email provider returned HTTP {response.status}.")
         except HTTPError as exc:
-            raise BriefingDeliveryError(f"Email provider rejected delivery with HTTP {exc.code}.") from exc
+            raise BriefingDeliveryError(
+                f"Email provider rejected delivery with HTTP {exc.code}."
+            ) from exc
         except URLError as exc:
             raise BriefingDeliveryError("Email provider could not be reached.") from exc
 
     await asyncio.to_thread(send)
 
 
-async def _reserve_delivery(pool: asyncpg.Pool, user_id: str, tenant_id: str, delivery_date: date) -> bool:
+async def _reserve_delivery(
+    pool: asyncpg.Pool, user_id: str, tenant_id: str, delivery_date: date
+) -> bool:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
@@ -184,7 +192,11 @@ async def dispatch_briefing_email(
 
     effective_delivery_date = delivery_date or datetime.now(timezone.utc).date()
     if pool and not await _reserve_delivery(pool, user_id, tenant_id, effective_delivery_date):
-        logger.info("Briefing delivery already sent or in progress user_id=%s tenant_id=%s", user_id, tenant_id)
+        logger.info(
+            "Briefing delivery already sent or in progress user_id=%s tenant_id=%s",
+            user_id,
+            tenant_id,
+        )
         return False
 
     dashboard_url = settings.public_app_url.rstrip("/")
@@ -208,7 +220,14 @@ async def dispatch_briefing_email(
     except Exception as exc:
         if pool:
             try:
-                await _mark_delivery(pool, user_id, tenant_id, effective_delivery_date, status="failed", error=str(exc))
+                await _mark_delivery(
+                    pool,
+                    user_id,
+                    tenant_id,
+                    effective_delivery_date,
+                    status="failed",
+                    error=str(exc),
+                )
             except Exception:
                 logger.exception("Could not persist briefing delivery failure")
         raise

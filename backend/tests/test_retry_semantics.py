@@ -36,24 +36,30 @@ async def test_valid_first_attempt(claims, req):
     sessions = InMemorySessionStore()
     events = PipelineEventBus()
     audit = MagicMock(spec=AuditStore)
-    
+
     pipeline = PipelineOrchestrator(sessions, events, audit)
     session, _ = await sessions.create(claims)
     req.session_id = session.session_id
-    
+
     pipeline.schema = MagicMock()
-    pipeline.schema.retrieve = AsyncMock(return_value=([SchemaChunk(content="c", source_ref="r", score=1.0)], 1.0))
-    
+    pipeline.schema.retrieve = AsyncMock(
+        return_value=([SchemaChunk(content="c", source_ref="r", score=1.0)], 1.0)
+    )
+
     pipeline.llm = MagicMock()
     succ_gen = SqlGenerationResult(sql="SELECT * FROM table", validation_passed=True)
     pipeline.llm.generate_sql = AsyncMock(return_value=succ_gen)
-    
+
     pipeline.warehouse = MagicMock()
-    pipeline.warehouse.execute_readonly = AsyncMock(return_value=(
-        ResultPayload(columns=["a"], rows=[[1]], row_count=1),
-        ResultShape(columns=["a"], chart_type=ChartType.stat, row_count=1, aggregate_summary="1")
-    ))
-    
+    pipeline.warehouse.execute_readonly = AsyncMock(
+        return_value=(
+            ResultPayload(columns=["a"], rows=[[1]], row_count=1),
+            ResultShape(
+                columns=["a"], chart_type=ChartType.stat, row_count=1, aggregate_summary="1"
+            ),
+        )
+    )
+
     turn = TurnRecord(
         session_id=session.session_id,
         conversation_id=session.conversation_id,
@@ -62,14 +68,14 @@ async def test_valid_first_attempt(claims, req):
         user_input=req.submitted_text,
         input_modality=req.input_modality,
     )
-    
+
     await pipeline._run_until_confidence_or_result(session, turn, claims)
-    
+
     # Assertions
     assert pipeline.llm.generate_sql.call_count == 1
     assert len(turn.attempts) == 1
     assert pipeline.warehouse.execute_readonly.call_count == 1
-    
+
     # Check attempt structure
     attempt = turn.attempts[0]
     assert attempt.attempt_number == 1
@@ -84,7 +90,11 @@ async def test_valid_first_attempt(claims, req):
     assert attempt.confidence_evidence.retry_count == 0
     assert "llm_self_confidence" in attempt.confidence_evidence.inputs_absent
     assert attempt.confidence_evidence.sql_hash == attempt.executed_sql_hash
-    pipeline.warehouse.execute_readonly.assert_called_once_with("SELECT * FROM table LIMIT 10000", snowflake_role=claims.snowflake_role, tenant_id=claims.tenant_id)
+    pipeline.warehouse.execute_readonly.assert_called_once_with(
+        "SELECT * FROM table LIMIT 10000",
+        snowflake_role=claims.snowflake_role,
+        tenant_id=claims.tenant_id,
+    )
     assert turn.generated_sql == "SELECT * FROM table LIMIT 10000"
 
 
@@ -93,25 +103,33 @@ async def test_successful_correction_retry(claims, req):
     sessions = InMemorySessionStore()
     events = PipelineEventBus()
     audit = MagicMock(spec=AuditStore)
-    
+
     pipeline = PipelineOrchestrator(sessions, events, audit)
     session, _ = await sessions.create(claims)
     req.session_id = session.session_id
-    
+
     pipeline.schema = MagicMock()
-    pipeline.schema.retrieve = AsyncMock(return_value=([SchemaChunk(content="c", source_ref="r", score=1.0)], 1.0))
-    
+    pipeline.schema.retrieve = AsyncMock(
+        return_value=([SchemaChunk(content="c", source_ref="r", score=1.0)], 1.0)
+    )
+
     pipeline.llm = MagicMock()
-    fail_gen = SqlGenerationResult(sql="SELECT bad", validation_passed=False, validation_error="Syntax error")
+    fail_gen = SqlGenerationResult(
+        sql="SELECT bad", validation_passed=False, validation_error="Syntax error"
+    )
     succ_gen = SqlGenerationResult(sql="SELECT good", validation_passed=True)
     pipeline.llm.generate_sql = AsyncMock(side_effect=[fail_gen, succ_gen])
-    
+
     pipeline.warehouse = MagicMock()
-    pipeline.warehouse.execute_readonly = AsyncMock(return_value=(
-        ResultPayload(columns=["a"], rows=[[1]], row_count=1),
-        ResultShape(columns=["a"], chart_type=ChartType.stat, row_count=1, aggregate_summary="1")
-    ))
-    
+    pipeline.warehouse.execute_readonly = AsyncMock(
+        return_value=(
+            ResultPayload(columns=["a"], rows=[[1]], row_count=1),
+            ResultShape(
+                columns=["a"], chart_type=ChartType.stat, row_count=1, aggregate_summary="1"
+            ),
+        )
+    )
+
     turn = TurnRecord(
         session_id=session.session_id,
         conversation_id=session.conversation_id,
@@ -120,28 +138,30 @@ async def test_successful_correction_retry(claims, req):
         user_input=req.submitted_text,
         input_modality=req.input_modality,
     )
-    
+
     await pipeline._run_until_confidence_or_result(session, turn, claims)
-    
+
     # Assertions
     assert pipeline.llm.generate_sql.call_count == 2
     assert len(turn.attempts) == 2
     assert pipeline.warehouse.execute_readonly.call_count == 1
-    
+
     # Assert second call receives exact invalid SQL and validation error
     calls = pipeline.llm.generate_sql.call_args_list
     first_call_args, first_call_kwargs = calls[0]
     second_call_args, second_call_kwargs = calls[1]
-    
+
     assert first_call_kwargs.get("feedback") is None
     assert first_call_kwargs.get("previous_sql") is None
-    
+
     assert second_call_kwargs.get("feedback") == "Syntax error"
     assert second_call_kwargs.get("previous_sql") == "SELECT bad"
-    
+
     # Verify execution was called with attempt 2 SQL
-    pipeline.warehouse.execute_readonly.assert_called_once_with("SELECT good LIMIT 10000", snowflake_role=claims.snowflake_role, tenant_id=claims.tenant_id)
-    
+    pipeline.warehouse.execute_readonly.assert_called_once_with(
+        "SELECT good LIMIT 10000", snowflake_role=claims.snowflake_role, tenant_id=claims.tenant_id
+    )
+
     # Check attempt structures
     attempt1 = turn.attempts[0]
     assert attempt1.attempt_number == 1
@@ -149,7 +169,7 @@ async def test_successful_correction_retry(claims, req):
     assert attempt1.validation_passed is False
     assert attempt1.validation_error == "Syntax error"
     assert attempt1.executed_sql_hash is None
-    
+
     attempt2 = turn.attempts[1]
     assert attempt2.attempt_number == 2
     assert attempt2.generated_sql == "SELECT good LIMIT 10000"
@@ -170,12 +190,16 @@ async def test_cartesian_join_validation_feeds_correction_retry(claims, req):
     req.session_id = session.session_id
 
     pipeline.schema = MagicMock()
-    pipeline.schema.retrieve = AsyncMock(return_value=([SchemaChunk(content="c", source_ref="r", score=1.0)], 1.0))
+    pipeline.schema.retrieve = AsyncMock(
+        return_value=([SchemaChunk(content="c", source_ref="r", score=1.0)], 1.0)
+    )
 
     pipeline.llm = MagicMock()
     pipeline.llm.generate_sql = AsyncMock(
         side_effect=[
-            SqlGenerationResult(sql="SELECT * FROM orders CROSS JOIN customers", validation_passed=True),
+            SqlGenerationResult(
+                sql="SELECT * FROM orders CROSS JOIN customers", validation_passed=True
+            ),
             SqlGenerationResult(
                 sql="SELECT * FROM orders JOIN customers ON orders.customer_id = customers.customer_id",
                 validation_passed=True,
@@ -184,10 +208,14 @@ async def test_cartesian_join_validation_feeds_correction_retry(claims, req):
     )
 
     pipeline.warehouse = MagicMock()
-    pipeline.warehouse.execute_readonly = AsyncMock(return_value=(
-        ResultPayload(columns=["a"], rows=[[1]], row_count=1),
-        ResultShape(columns=["a"], chart_type=ChartType.stat, row_count=1, aggregate_summary="1")
-    ))
+    pipeline.warehouse.execute_readonly = AsyncMock(
+        return_value=(
+            ResultPayload(columns=["a"], rows=[[1]], row_count=1),
+            ResultShape(
+                columns=["a"], chart_type=ChartType.stat, row_count=1, aggregate_summary="1"
+            ),
+        )
+    )
 
     turn = TurnRecord(
         session_id=session.session_id,
@@ -214,22 +242,28 @@ async def test_exhaustion_both_attempts_fail(claims, req):
     sessions = InMemorySessionStore()
     events = PipelineEventBus()
     audit = MagicMock(spec=AuditStore)
-    
+
     pipeline = PipelineOrchestrator(sessions, events, audit)
     session, _ = await sessions.create(claims)
     req.session_id = session.session_id
-    
+
     pipeline.schema = MagicMock()
-    pipeline.schema.retrieve = AsyncMock(return_value=([SchemaChunk(content="c", source_ref="r", score=1.0)], 1.0))
-    
+    pipeline.schema.retrieve = AsyncMock(
+        return_value=([SchemaChunk(content="c", source_ref="r", score=1.0)], 1.0)
+    )
+
     pipeline.llm = MagicMock()
-    fail_gen1 = SqlGenerationResult(sql="SELECT bad1", validation_passed=False, validation_error="Syntax error 1")
-    fail_gen2 = SqlGenerationResult(sql="SELECT bad2", validation_passed=False, validation_error="Syntax error 2")
+    fail_gen1 = SqlGenerationResult(
+        sql="SELECT bad1", validation_passed=False, validation_error="Syntax error 1"
+    )
+    fail_gen2 = SqlGenerationResult(
+        sql="SELECT bad2", validation_passed=False, validation_error="Syntax error 2"
+    )
     pipeline.llm.generate_sql = AsyncMock(side_effect=[fail_gen1, fail_gen2])
-    
+
     pipeline.warehouse = MagicMock()
     pipeline.warehouse.execute_readonly = AsyncMock()
-    
+
     turn = TurnRecord(
         session_id=session.session_id,
         conversation_id=session.conversation_id,
@@ -238,25 +272,25 @@ async def test_exhaustion_both_attempts_fail(claims, req):
         user_input=req.submitted_text,
         input_modality=req.input_modality,
     )
-    
+
     # Assert that ApiError with code sql_generation_failed is raised
     with pytest.raises(ApiError) as exc_info:
         await pipeline._run_until_confidence_or_result(session, turn, claims)
-        
+
     assert exc_info.value.code == ErrorCode.sql_generation_failed
-    
+
     # Assertions
     assert pipeline.llm.generate_sql.call_count == 2
     assert len(turn.attempts) == 2
     assert pipeline.warehouse.execute_readonly.call_count == 0
-    
+
     # Check attempt structures
     attempt1 = turn.attempts[0]
     assert attempt1.attempt_number == 1
     assert attempt1.generated_sql == "SELECT bad1"
     assert attempt1.validation_passed is False
     assert attempt1.validation_error == "Syntax error 1"
-    
+
     attempt2 = turn.attempts[1]
     assert attempt2.attempt_number == 2
     assert attempt2.generated_sql == "SELECT bad2"
@@ -279,16 +313,22 @@ async def test_redis_query_cache_bypasses_second_warehouse_execution(claims, req
     req.session_id = session.session_id
 
     pipeline.schema = MagicMock()
-    pipeline.schema.retrieve = AsyncMock(return_value=([SchemaChunk(content="c", source_ref="r", score=1.0)], 1.0))
+    pipeline.schema.retrieve = AsyncMock(
+        return_value=([SchemaChunk(content="c", source_ref="r", score=1.0)], 1.0)
+    )
     pipeline.llm = MagicMock()
     pipeline.llm.generate_sql = AsyncMock(
         return_value=SqlGenerationResult(sql="SELECT * FROM orders", validation_passed=True)
     )
     pipeline.warehouse = MagicMock()
-    pipeline.warehouse.execute_readonly = AsyncMock(return_value=(
-        ResultPayload(columns=["a"], rows=[[1]], row_count=1),
-        ResultShape(columns=["a"], chart_type=ChartType.stat, row_count=1, aggregate_summary="1")
-    ))
+    pipeline.warehouse.execute_readonly = AsyncMock(
+        return_value=(
+            ResultPayload(columns=["a"], rows=[[1]], row_count=1),
+            ResultShape(
+                columns=["a"], chart_type=ChartType.stat, row_count=1, aggregate_summary="1"
+            ),
+        )
+    )
 
     first_turn = TurnRecord(
         session_id=session.session_id,
@@ -332,12 +372,21 @@ async def test_duplication_risk_warns_without_rerunning_distinct(claims, req):
     pipeline.schema = MagicMock()
     pipeline.schema.retrieve = AsyncMock(return_value=([], 0.8))
     pipeline.llm = MagicMock()
-    pipeline.llm.generate_sql = AsyncMock(return_value=SqlGenerationResult(sql=original_sql, validation_passed=True))
+    pipeline.llm.generate_sql = AsyncMock(
+        return_value=SqlGenerationResult(sql=original_sql, validation_passed=True)
+    )
     pipeline.warehouse = MagicMock()
-    pipeline.warehouse.execute_readonly = AsyncMock(return_value=(
-        ResultPayload(columns=["customer_segment"], rows=[["Enterprise"]], row_count=100),
-        ResultShape(columns=["customer_segment"], chart_type=ChartType.table, row_count=100, aggregate_summary="many rows")
-    ))
+    pipeline.warehouse.execute_readonly = AsyncMock(
+        return_value=(
+            ResultPayload(columns=["customer_segment"], rows=[["Enterprise"]], row_count=100),
+            ResultShape(
+                columns=["customer_segment"],
+                chart_type=ChartType.table,
+                row_count=100,
+                aggregate_summary="many rows",
+            ),
+        )
+    )
 
     turn = TurnRecord(
         session_id=session.session_id,
@@ -351,7 +400,9 @@ async def test_duplication_risk_warns_without_rerunning_distinct(claims, req):
     await pipeline._run_until_confidence_or_result(session, turn, claims)
 
     expected_sql = f"{original_sql} LIMIT 10000"
-    pipeline.warehouse.execute_readonly.assert_called_once_with(expected_sql, snowflake_role=claims.snowflake_role, tenant_id=claims.tenant_id)
+    pipeline.warehouse.execute_readonly.assert_called_once_with(
+        expected_sql, snowflake_role=claims.snowflake_role, tenant_id=claims.tenant_id
+    )
     assert turn.generated_sql == expected_sql
     assert turn.attempts[-1].executed_sql_hash == turn.attempts[-1].sql_hash
     assert len(turn.result_warnings) == 1
@@ -377,12 +428,21 @@ async def test_duplication_risk_does_not_warn_for_small_result(claims, req):
     pipeline.schema = MagicMock()
     pipeline.schema.retrieve = AsyncMock(return_value=([], 0.8))
     pipeline.llm = MagicMock()
-    pipeline.llm.generate_sql = AsyncMock(return_value=SqlGenerationResult(sql=sql, validation_passed=True))
+    pipeline.llm.generate_sql = AsyncMock(
+        return_value=SqlGenerationResult(sql=sql, validation_passed=True)
+    )
     pipeline.warehouse = MagicMock()
-    pipeline.warehouse.execute_readonly = AsyncMock(return_value=(
-        ResultPayload(columns=["customer_segment"], rows=[["Enterprise"]], row_count=1),
-        ResultShape(columns=["customer_segment"], chart_type=ChartType.table, row_count=1, aggregate_summary="one row")
-    ))
+    pipeline.warehouse.execute_readonly = AsyncMock(
+        return_value=(
+            ResultPayload(columns=["customer_segment"], rows=[["Enterprise"]], row_count=1),
+            ResultShape(
+                columns=["customer_segment"],
+                chart_type=ChartType.table,
+                row_count=1,
+                aggregate_summary="one row",
+            ),
+        )
+    )
 
     turn = TurnRecord(
         session_id=session.session_id,
@@ -395,7 +455,9 @@ async def test_duplication_risk_does_not_warn_for_small_result(claims, req):
 
     await pipeline._run_until_confidence_or_result(session, turn, claims)
 
-    pipeline.warehouse.execute_readonly.assert_called_once_with(f"{sql} LIMIT 10000", snowflake_role=claims.snowflake_role, tenant_id=claims.tenant_id)
+    pipeline.warehouse.execute_readonly.assert_called_once_with(
+        f"{sql} LIMIT 10000", snowflake_role=claims.snowflake_role, tenant_id=claims.tenant_id
+    )
     assert turn.result_warnings == []
 
 
@@ -410,7 +472,9 @@ async def test_valid_sql_limit_policy_is_applied_before_confidence_and_execution
     req.session_id = session.session_id
 
     pipeline.schema = MagicMock()
-    pipeline.schema.retrieve = AsyncMock(return_value=([SchemaChunk(content="c", source_ref="r", score=1.0)], 1.0))
+    pipeline.schema.retrieve = AsyncMock(
+        return_value=([SchemaChunk(content="c", source_ref="r", score=1.0)], 1.0)
+    )
     pipeline.llm = MagicMock()
     pipeline.llm.generate_sql = AsyncMock(
         side_effect=[
@@ -420,10 +484,14 @@ async def test_valid_sql_limit_policy_is_applied_before_confidence_and_execution
         ]
     )
     pipeline.warehouse = MagicMock()
-    pipeline.warehouse.execute_readonly = AsyncMock(return_value=(
-        ResultPayload(columns=["a"], rows=[[1]], row_count=1),
-        ResultShape(columns=["a"], chart_type=ChartType.stat, row_count=1, aggregate_summary="1")
-    ))
+    pipeline.warehouse.execute_readonly = AsyncMock(
+        return_value=(
+            ResultPayload(columns=["a"], rows=[[1]], row_count=1),
+            ResultShape(
+                columns=["a"], chart_type=ChartType.stat, row_count=1, aggregate_summary="1"
+            ),
+        )
+    )
 
     expected_sql = [
         "SELECT * FROM orders LIMIT 10000",

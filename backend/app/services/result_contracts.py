@@ -23,14 +23,17 @@ def confidence_reasons_for_turn(turn: TurnRecord) -> list[str]:
                 "temporal_ambiguity": "unclear what time range or date you were asking about",
                 "scope_ambiguity": "unclear how broadly to apply your filters",
             }
-            signals = [signal_descriptions.get(s.value, s.value.replace("_", " ")) for s in evidence.ambiguity_signals]
-            
+            signals = [
+                signal_descriptions.get(s.value, s.value.replace("_", " "))
+                for s in evidence.ambiguity_signals
+            ]
+
             if len(signals) == 1:
                 reasons.append(f"It was {signals[0]}.")
             else:
                 joined_signals = ", ".join(signals[:-1]) + ", and " + signals[-1]
                 reasons.append(f"It was {joined_signals}.")
-                
+
         if not evidence.validation_outcome:
             reasons.append("The first generated SQL needed validation repair.")
         if "llm_self_confidence" in evidence.inputs_absent:

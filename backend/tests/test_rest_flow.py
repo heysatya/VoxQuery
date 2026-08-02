@@ -21,12 +21,12 @@ def create_session():
 def test_delete_session_success():
     session = create_session()
     session_id = session["session_id"]
-    
+
     # Try deleting it
     response = client.delete(f"/api/session/{session_id}")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    
+
     # Verify it is actually deleted by trying to query
     query = client.post(
         "/api/query",
@@ -39,18 +39,19 @@ def test_delete_session_success():
     assert query.status_code == 404
     assert query.json()["error"]["code"] == "session_not_found"
 
+
 def test_delete_session_not_found():
     response = client.delete("/api/session/00000000-0000-0000-0000-000000000999")
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "session_not_found"
 
 
-
-
 @patch("app.observability.langfuse.LangfuseTracer.score_feedback")
 def test_text_query_clarification_then_result_and_feedback(mock_score_feedback):
     session = create_session()
-    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
+    with client.websocket_connect(
+        f"/ws/pipeline?session_id={session['session_id']}&token=fake"
+    ) as ws:
         query = client.post(
             "/api/query",
             json={
@@ -65,7 +66,9 @@ def test_text_query_clarification_then_result_and_feedback(mock_score_feedback):
     assert body["status"] == "processing"
     assert clarification_event["turn_id"] == body["turn_id"]
 
-    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
+    with client.websocket_connect(
+        f"/ws/pipeline?session_id={session['session_id']}&token=fake"
+    ) as ws:
         clarification = client.post(
             "/api/clarification",
             json={
@@ -94,13 +97,13 @@ def test_text_query_clarification_then_result_and_feedback(mock_score_feedback):
         },
     )
     assert feedback.status_code == 200
-    
+
     # Verify telemetry linkage: tracer.score_feedback must be called with the correct turn_id
     mock_score_feedback.assert_called_once()
     assert mock_score_feedback.call_args[0][0] == UUID(body["turn_id"])
     assert mock_score_feedback.call_args[0][1] == -1
-    assert mock_score_feedback.call_args[0][4] is True # clarification_triggered
-    assert mock_score_feedback.call_args[0][5] == "Net revenue" # option_selected
+    assert mock_score_feedback.call_args[0][4] is True  # clarification_triggered
+    assert mock_score_feedback.call_args[0][5] == "Net revenue"  # option_selected
 
     duplicate_feedback = client.post(
         "/api/feedback",
@@ -116,7 +119,9 @@ def test_text_query_clarification_then_result_and_feedback(mock_score_feedback):
 
 def test_clear_non_ambiguous_query_returns_before_result_ready():
     session = create_session()
-    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
+    with client.websocket_connect(
+        f"/ws/pipeline?session_id={session['session_id']}&token=fake"
+    ) as ws:
         query = client.post(
             "/api/query",
             json={
@@ -155,7 +160,9 @@ def test_clear_non_ambiguous_query_returns_before_result_ready():
 
 async def test_positive_feedback_records_ok_quality_flag():
     session = create_session()
-    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
+    with client.websocket_connect(
+        f"/ws/pipeline?session_id={session['session_id']}&token=fake"
+    ) as ws:
         query = client.post(
             "/api/query",
             json={
@@ -184,7 +191,9 @@ async def test_positive_feedback_records_ok_quality_flag():
 
 def test_clarification_escape_does_not_complete_turn():
     session = create_session()
-    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
+    with client.websocket_connect(
+        f"/ws/pipeline?session_id={session['session_id']}&token=fake"
+    ) as ws:
         query = client.post(
             "/api/query",
             json={
@@ -213,9 +222,12 @@ def test_clarification_escape_does_not_complete_turn():
     result = client.get(f"/api/result/{body['turn_id']}")
     assert result.status_code == 404
 
+
 def test_clarification_timeout_is_silently_ignored():
     session = create_session()
-    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
+    with client.websocket_connect(
+        f"/ws/pipeline?session_id={session['session_id']}&token=fake"
+    ) as ws:
         query = client.post(
             "/api/query",
             json={
@@ -225,9 +237,9 @@ def test_clarification_timeout_is_silently_ignored():
             },
         )
         clarification_event = receive_until(ws, "clarification_request")
-    
+
     body = query.json()
-    
+
     # Manually expire the clarification state in the session store
     store = app.state.sessions
     s = store._sessions.get((TENANT_ID, UUID(session["session_id"])))
@@ -251,7 +263,9 @@ def test_clarification_timeout_is_silently_ignored():
 
 def test_ecommerce_dimensions_generate_expected_fake_sql():
     session = create_session()
-    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
+    with client.websocket_connect(
+        f"/ws/pipeline?session_id={session['session_id']}&token=fake"
+    ) as ws:
         query = client.post(
             "/api/query",
             json={
@@ -268,7 +282,10 @@ def test_ecommerce_dimensions_generate_expected_fake_sql():
     payload = result.json()
     assert payload["result"]["columns"] == ["geolocation_state", "total_net_revenue"]
     assert "geolocation.geolocation_state" in payload["generated_sql"]
-    assert "customers.customer_zip_code_prefix = geolocation.zip_code_prefix" in payload["generated_sql"]
+    assert (
+        "customers.customer_zip_code_prefix = geolocation.zip_code_prefix"
+        in payload["generated_sql"]
+    )
 
 
 def test_session_tenant_must_match_auth_claims():
@@ -378,13 +395,18 @@ def test_voice_query_rejects_missing_or_false_provenance():
     response = client.post("/api/query", json={**base, "stt_confidence": None})
     assert response.status_code == 400
 
-    response = client.post("/api/query", json={**base, "submitted_text": "Show net revenue", "transcript_edited": False})
+    response = client.post(
+        "/api/query",
+        json={**base, "submitted_text": "Show net revenue", "transcript_edited": False},
+    )
     assert response.status_code == 400
 
 
 def test_followup_query_uses_first_class_parent_turn_id():
     session = create_session()
-    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
+    with client.websocket_connect(
+        f"/ws/pipeline?session_id={session['session_id']}&token=fake"
+    ) as ws:
         first = client.post(
             "/api/query",
             json={
@@ -421,7 +443,9 @@ def test_followup_query_uses_first_class_parent_turn_id():
 
 def test_followup_rejects_cross_session_parent_turn():
     first_session = create_session()
-    with client.websocket_connect(f"/ws/pipeline?session_id={first_session['session_id']}&token=fake") as ws:
+    with client.websocket_connect(
+        f"/ws/pipeline?session_id={first_session['session_id']}&token=fake"
+    ) as ws:
         first = client.post(
             "/api/query",
             json={
@@ -449,7 +473,9 @@ def test_followup_rejects_cross_session_parent_turn():
 
 def test_followup_rejects_incomplete_parent_turn():
     session = create_session()
-    with client.websocket_connect(f"/ws/pipeline?session_id={session['session_id']}&token=fake") as ws:
+    with client.websocket_connect(
+        f"/ws/pipeline?session_id={session['session_id']}&token=fake"
+    ) as ws:
         first = client.post(
             "/api/query",
             json={
@@ -482,7 +508,6 @@ def test_health_reports_local_stub_dependencies():
     assert response.status_code == 200
     assert response.json()["redis"] == "local_stub"
     assert response.json()["postgres"] in ("not_configured", "ok", "degraded")
-
 
 
 def receive_until(ws, event_type: str):

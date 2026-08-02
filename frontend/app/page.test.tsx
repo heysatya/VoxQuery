@@ -900,29 +900,42 @@ describe("HomePage", () => {
 
     render(<HomePage />);
     const input = await screen.findByLabelText("Ask a data question");
+    await waitFor(() => expect(input).not.toBeDisabled());
     fireEvent.change(input, { target: { value: "Show net revenue by customer segment" } });
     fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    await waitFor(() => expect(queryBodies.length).toBeGreaterThan(0));
     await emitPipeline({ type: "result_ready", turn_id: "turn-csv" });
 
     // Ensure the result is fully loaded by awaiting the tts text
     expect(await screen.findByText("Enterprise, Inc. leads net revenue.")).toBeInTheDocument();
     
     const downloadBtn = screen.getByRole("button", { name: "Download CSV" });
+    vi.mocked(URL.createObjectURL).mockClear();
     fireEvent.click(downloadBtn);
 
     expect(URL.createObjectURL).toHaveBeenCalled();
-    const blobArg = vi.mocked(URL.createObjectURL).mock.calls[0][0];
-    expect(blobArg).toBeInstanceOf(Blob);
-    if (!(blobArg instanceof Blob)) {
+    const calls = vi.mocked(URL.createObjectURL).mock.calls;
+    const blobArg = calls[calls.length - 1][0];
+    const blob = blobArg as Blob;
+    expect(blob.size).toBeGreaterThan(0);
+    if (!(blob.size > 0)) {
       throw new Error("CSV download did not create a Blob.");
     }
-    
-    const text = await new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.readAsText(blobArg);
-    });
-    
+
+    let text = "";
+    if (typeof (blobArg as any).text === "function") {
+      text = await (blobArg as any).text();
+    }
+    if (!text || text === "[object Blob]") {
+      for (const s of Object.getOwnPropertySymbols(blobArg)) {
+        const impl = (blobArg as any)[s];
+        if (impl?._buffer) {
+          text = impl._buffer.toString("utf-8");
+          break;
+        }
+      }
+    }
+
     // Assert actual newline boundaries
     const lines = text.split("\n");
     expect(lines.length).toBe(3); // Header + 2 data rows

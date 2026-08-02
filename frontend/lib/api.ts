@@ -247,10 +247,33 @@ export async function fetchWorkspaceWidgets(authToken?: string | null): Promise<
 }
 
 export async function pinWorkspaceWidget(
-  payload: { turn_id: string; title: string; layout_x?: number; layout_y?: number; layout_w?: number; layout_h?: number },
+  payload: {
+    turn_id: string; title: string; note?: string;
+    headline_value?: number | null; headline_label?: string | null;
+    layout_x?: number; layout_y?: number; layout_w?: number; layout_h?: number;
+  },
   authToken?: string | null
 ): Promise<PinnedAnalysis> {
   return request<PinnedAnalysis>("/api/workspace/widgets", { method: "POST", body: JSON.stringify(payload) }, authToken);
+}
+
+export async function startCheckNow(
+  widgetId: string,
+  authToken?: string | null
+): Promise<{ turn_id: string; status: "processing" }> {
+  return request(`/api/workspace/widgets/${widgetId}/check-now`, { method: "POST" }, authToken);
+}
+
+export async function updateWorkspaceWidgetNote(
+  widgetId: string,
+  note: string | null,
+  authToken?: string | null
+): Promise<any> {
+  return request<any>(
+    `/api/workspace/widgets/${widgetId}/note`,
+    { method: "PATCH", body: JSON.stringify({ note }) },
+    authToken
+  );
 }
 
 export async function deleteWorkspaceWidget(widgetId: string, authToken?: string | null): Promise<any> {

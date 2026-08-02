@@ -25,6 +25,7 @@ os.environ.update(TEST_ENV)
 
 import pytest
 
+
 @pytest.fixture(autouse=True)
 def manage_global_test_clients(request):
     os.environ.update(TEST_ENV)
@@ -32,14 +33,16 @@ def manage_global_test_clients(request):
 
     get_settings.cache_clear()
     module = request.node.module
-    if hasattr(module, 'client'):
+    if hasattr(module, "client"):
         with module.client:
             yield
     else:
         yield
     get_settings.cache_clear()
 
+
 import asyncio
+
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -54,6 +57,7 @@ async def db_pool():
     if url:
         try:
             import asyncpg
+
             pool = await asyncpg.create_pool(url, timeout=3.0)
             yield pool
             await pool.close()
@@ -62,6 +66,7 @@ async def db_pool():
             pass
 
     from unittest.mock import AsyncMock, MagicMock
+
     mock_pool = MagicMock()
     mock_conn = AsyncMock()
 

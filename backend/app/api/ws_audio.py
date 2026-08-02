@@ -94,7 +94,9 @@ async def audio_socket(
         return
     if not limit.ok:
         # 4429: custom close code for rate limit exceeded
-        await websocket.close(code=4429, reason=f"Rate limit exceeded. Retry after {limit.retry_after_seconds}s")
+        await websocket.close(
+            code=4429, reason=f"Rate limit exceeded. Retry after {limit.retry_after_seconds}s"
+        )
         return
 
     settings = get_settings()
@@ -106,16 +108,16 @@ async def audio_socket(
     import time
     from app.core.stt import DeepgramUnavailableError
     from app.models.contracts import FinalTranscriptEvent
-    
+
     start_time = time.monotonic()
-    
+
     telemetry.emit("stt.ws.lifecycle", tier=2, action="opened")
     provider = build_stt_provider(settings, logger=telemetry)
     provider_name = "deepgram" if settings.stt_provider == "deepgram" else "fake"
 
     close_code = 1000
     stop_time = None
-    
+
     async def intercept_stop(gen):
         nonlocal stop_time
         async for frame in gen:
@@ -129,11 +131,11 @@ async def audio_socket(
                     stop_time = time.monotonic()
                 latency_ms = int((time.monotonic() - stop_time) * 1000)
                 telemetry.emit(
-                    "stt.transcript.final", 
-                    tier=2, 
-                    provider=provider_name, 
-                    confidence=event.confidence, 
-                    latency_ms=latency_ms
+                    "stt.transcript.final",
+                    tier=2,
+                    provider=provider_name,
+                    confidence=event.confidence,
+                    latency_ms=latency_ms,
                 )
             await websocket.send_json(event.model_dump(mode="json"))
         # Stream exhausted (stop_recording received and final transcript emitted)
@@ -148,7 +150,11 @@ async def audio_socket(
         close_code = 1011
         try:
             await websocket.send_json(
-                {"type": "error", "code": "deepgram_unavailable", "message": "Speech-to-text service is temporarily unavailable."}
+                {
+                    "type": "error",
+                    "code": "deepgram_unavailable",
+                    "message": "Speech-to-text service is temporarily unavailable.",
+                }
             )
             await websocket.close(code=close_code)
         except Exception as exc:
@@ -159,11 +165,14 @@ async def audio_socket(
         close_code = 1011
         try:
             await websocket.send_json(
-                {"type": "error", "code": "relay_error", "message": "An unexpected error occurred during audio processing."}
+                {
+                    "type": "error",
+                    "code": "relay_error",
+                    "message": "An unexpected error occurred during audio processing.",
+                }
             )
             await websocket.close(code=close_code)
         except Exception as exc:
             logger.exception("Audio streaming error: %s", str(exc))
     finally:
         telemetry.emit("stt.ws.lifecycle", tier=2, action="closed", close_code=close_code)
-
