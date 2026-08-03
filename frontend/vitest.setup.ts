@@ -35,10 +35,14 @@ window.scrollTo = () => {};
     setLineDash: () => {},
     putImageData: () => {},
     getImageData: () => ({ data: new Uint8ClampedArray(0) }),
+    moveTo: () => {},
+    lineTo: () => {},
+    setTransform: () => {},
     canvas: this,
     fillStyle: "",
     strokeStyle: "",
     lineWidth: 1,
+    lineCap: "butt",
     font: "",
     textAlign: "start",
     textBaseline: "alphabetic",
@@ -46,6 +50,25 @@ window.scrollTo = () => {};
     globalCompositeOperation: "source-over",
   };
 };
+
+// ── IntersectionObserver mock ─────────────────────────────────────────────
+// jsdom does not implement IntersectionObserver. framer-motion's
+// `whileInView` (used throughout the marketing landing page for
+// scroll-triggered reveals) relies on it. Provide a minimal no-op stub so
+// components mount without crashing; entries never fire in tests, which is
+// fine since tests assert on final DOM content, not the reveal animation.
+class IntersectionObserverMock {
+  readonly root: Element | null = null;
+  readonly rootMargin: string = "";
+  readonly thresholds: ReadonlyArray<number> = [];
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  takeRecords(): IntersectionObserverEntry[] {
+    return [];
+  }
+}
+(globalThis as any).IntersectionObserver = IntersectionObserverMock;
 
 // ── Navigation mock ────────────────────────────────────────────────────────
 // jsdom does not implement full navigation (e.g. anchor href click for CSV

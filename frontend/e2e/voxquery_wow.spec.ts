@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test.describe('VoxQuery Refinement E2E Browser Verification Suite', () => {
 
   test('1. Ready screen visual hierarchy & branding', async ({ page }) => {
-    await page.goto('http://localhost:3000');
+    await page.goto('http://localhost:3000/app');
     await page.waitForLoadState('networkidle');
 
     // Header branding and briefing trigger
@@ -24,7 +24,7 @@ test.describe('VoxQuery Refinement E2E Browser Verification Suite', () => {
   });
 
   test('2. Visible executive briefing summary on Ready screen', async ({ page }) => {
-    await page.goto('http://localhost:3000');
+    await page.goto('http://localhost:3000/app');
     await page.waitForLoadState('networkidle');
 
     // Briefing card on main page
@@ -33,7 +33,7 @@ test.describe('VoxQuery Refinement E2E Browser Verification Suite', () => {
   });
 
   test('3. Briefing drawer interaction', async ({ page }) => {
-    await page.goto('http://localhost:3000');
+    await page.goto('http://localhost:3000/app');
     await page.waitForLoadState('networkidle');
 
     // 1. Briefing summary card is visible on ready screen
@@ -62,7 +62,7 @@ test.describe('VoxQuery Refinement E2E Browser Verification Suite', () => {
 
 
   test('4. Connection status honesty (No contradictory state)', async ({ page }) => {
-    await page.goto('http://localhost:3000');
+    await page.goto('http://localhost:3000/app');
     await page.waitForLoadState('networkidle');
 
     // Single consistent connection status
@@ -75,7 +75,7 @@ test.describe('VoxQuery Refinement E2E Browser Verification Suite', () => {
   });
 
   test('5 & 8. Starter question to insight flow & trust/chart/follow-ups', async ({ page }) => {
-    await page.goto('http://localhost:3000');
+    await page.goto('http://localhost:3000/app');
     await page.waitForLoadState('networkidle');
 
     const starterBtn = page.getByRole('button', { name: 'How did revenue perform last quarter?' }).first();
@@ -87,7 +87,7 @@ test.describe('VoxQuery Refinement E2E Browser Verification Suite', () => {
   });
 
   test('9. Pinned analyses workspace persistence', async ({ page }) => {
-    await page.goto('http://localhost:3000');
+    await page.goto('http://localhost:3000/app');
     await page.waitForLoadState('networkidle');
 
     const workspaceHeader = page.locator('text=Pinned analyses').first();
@@ -117,21 +117,21 @@ test.describe('VoxQuery Refinement E2E Browser Verification Suite', () => {
 
   test('11. Desktop screenshot at 1440x900', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto('http://localhost:3000');
+    await page.goto('http://localhost:3000/app');
     await page.waitForLoadState('networkidle');
     await page.screenshot({ path: 'artifacts/desktop-1440x900-ready.png', fullPage: true });
   });
 
   test('12. Desktop screenshot at 1280x800', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto('http://localhost:3000');
+    await page.goto('http://localhost:3000/app');
     await page.waitForLoadState('networkidle');
     await page.screenshot({ path: 'artifacts/desktop-1280x800-ready.png', fullPage: true });
   });
 
   test('13. Mobile screenshot at 390x844', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('http://localhost:3000');
+    await page.goto('http://localhost:3000/app');
     await page.waitForLoadState('networkidle');
     await page.screenshot({ path: 'artifacts/mobile-390x844-ready.png', fullPage: true });
   });

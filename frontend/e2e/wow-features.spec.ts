@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test.describe('VoxQuery WOW Features E2E Automated Tests', () => {
   test('exercises Morning Briefing, Query Dock, Multi-Widget Workspace, Memory Graph, and Data Glass Panel', async ({ page }) => {
     // 1. Open VoxQuery local web application
-    await page.goto('http://localhost:3000/');
+    await page.goto('http://localhost:3000/app');
     await page.waitForLoadState('networkidle');
 
     // 2. Verify Hero Header and Morning Briefing
