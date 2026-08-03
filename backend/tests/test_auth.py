@@ -165,10 +165,12 @@ def test_clerk_verifier_rejects_invalid_issuer(key_pair, clerk_settings):
 
 def test_clerk_verifier_rejects_expired_token(key_pair, clerk_settings):
     private_key, public_key = key_pair
+    expired_iat = datetime.now(UTC) - timedelta(days=365)
+    expired_token = signed_token(private_key, iat=expired_iat, exp=expired_iat + timedelta(minutes=5))
     verifier = ClerkJwtVerifier(clerk_settings, jwks_client=FakeJwksClient(public_key))
 
     with pytest.raises(ApiError) as exc:
-        verifier.verify(signed_token(private_key, exp=datetime.now(UTC) - timedelta(minutes=1)))
+        verifier.verify(expired_token)
 
     assert exc.value.code == "auth_invalid"
 
