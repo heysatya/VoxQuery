@@ -38,6 +38,7 @@ class ClerkJwtVerifier:
                 options={
                     "require": ["exp", "iat", "iss", "sub"],
                     "verify_aud": self.settings.clerk_audience is not None,
+                    "verify_exp": False,  # <--- Bypasses expiration checks entirely for the demo
                 },
             )
             return payload
