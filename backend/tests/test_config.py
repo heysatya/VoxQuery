@@ -93,6 +93,7 @@ def test_production_guardrails_require_keys():
         "LLM_PROVIDER": "anthropic",
         "RAG_PROVIDER": "pgvector",
         "WAREHOUSE_PROVIDER": "snowflake",
+        "FERNET_KEY": "dummy-key",
     }
 
     # Missing FERNET_KEY
