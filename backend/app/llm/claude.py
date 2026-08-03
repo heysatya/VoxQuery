@@ -14,6 +14,21 @@ from langfuse import observe, get_client
 logger = logging.getLogger(__name__)
 
 
+def strip_markdown_sql(sql: str) -> str:
+    """Aggressively strip markdown code fencing (```sql, ```xml, ```, etc.) and leading/trailing whitespace."""
+    if not sql:
+        return ""
+    sql = re.sub(r"^\s*```(?:sql|xml|snowflake|[a-zA-Z]*)\s*\n?", "", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"\n?\s*```\s*$", "", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"```[a-zA-Z]*", "", sql)
+    lines = [
+        line
+        for line in sql.splitlines()
+        if line.strip().lower() not in ("```", "```sql", "```xml", "```snowflake", "<sql>", "</sql>")
+    ]
+    return "\n".join(lines).strip()
+
+
 def extract_sql_and_confidence(response_text: str) -> tuple[str, float | None]:
     """Extract clean SQL and self-confidence float from raw LLM text response.
 
@@ -49,21 +64,8 @@ def extract_sql_and_confidence(response_text: str) -> tuple[str, float | None]:
         else:
             raw_sql = text_no_conf
 
-    # 3. Strip code fences and tags
-    raw_sql = re.sub(r"^```[a-zA-Z]*\n?", "", raw_sql.strip())
-    raw_sql = re.sub(r"\n?```$", "", raw_sql.strip())
-
-    lines = raw_sql.splitlines()
-    cleaned_lines = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped.lower() in ("<sql>", "</sql>", "```", "```sql", "```xml"):
-            continue
-        cleaned_lines.append(line)
-
-    sql = "\n".join(cleaned_lines).strip()
-    sql = re.sub(r"^```[a-zA-Z]*\n?", "", sql)
-    sql = re.sub(r"\n?```$", "", sql).strip()
+    # 3. Aggressively strip markdown code fences and whitespace
+    sql = strip_markdown_sql(raw_sql)
 
     return sql, llm_self_confidence
 
@@ -76,7 +78,14 @@ def _safe_update_current_generation(**kwargs: Any) -> None:
 
 
 class ClaudeAdapter(LlmAdapter):
-    def __init__(self, client: AsyncAnthropic) -> None:
+    def __init__(self, client: AsyncAnthropic | None = None) -> None:
+        if client is None:
+            settings = get_settings()
+            client = (
+                AsyncAnthropic(api_key=settings.anthropic_api_key, timeout=15.0)
+                if settings.anthropic_api_key
+                else AsyncAnthropic(timeout=15.0)
+            )
         self.client = client
         self.model_name = get_settings().canonical_sql_model
 
@@ -265,7 +274,14 @@ Specifically, the ambiguity is: {description}"""
 
 
 class ClaudeStoryteller(Storyteller):
-    def __init__(self, client: AsyncAnthropic) -> None:
+    def __init__(self, client: AsyncAnthropic | None = None) -> None:
+        if client is None:
+            settings = get_settings()
+            client = (
+                AsyncAnthropic(api_key=settings.anthropic_api_key, timeout=15.0)
+                if settings.anthropic_api_key
+                else AsyncAnthropic(timeout=15.0)
+            )
         self.client = client
         self.model_name = get_settings().canonical_sql_model
 

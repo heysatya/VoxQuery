@@ -132,8 +132,8 @@ class DeepgramSttProvider(SttProvider):
             "&sample_rate=16000"
             "&channels=1"
             "&interim_results=true"
-            "&endpointing=1500"  # 1.5s silence before speech_final fires.
-            "&utterance_end_ms=2500"  # 2.5s silence before UtteranceEnd fires — the authoritative submission signal.
+            "&endpointing=750"  # VAD endpointing tuned to 750ms so user isn't cut off taking a breath.
+            "&utterance_end_ms=1000"  # 1000ms silence before UtteranceEnd fires.
             "&vad_events=true"
             f"{keyterm_params}"
             f"{mip_opt_out_param}"

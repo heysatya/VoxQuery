@@ -27,11 +27,57 @@ class SchemaAllowlist:
     tables: dict[str, set[str]]
 
 
+from typing import Any
+
 def build_allowlist(schema_tables: list[SchemaTable]) -> SchemaAllowlist:
     """schema_tables: list of SchemaTable from a WarehouseConnector.fetch_schema_snapshot() call."""
     tables: dict[str, set[str]] = {}
     for t in schema_tables:
         tables[t.table_name.lower()] = {c.name.lower() for c in t.columns}
+    return SchemaAllowlist(tables=tables)
+
+
+def build_allowlist_from_context(schema_context: list[Any]) -> SchemaAllowlist:
+    """Construct a SchemaAllowlist from a list of SchemaTable or SchemaChunk objects or dicts."""
+    tables: dict[str, set[str]] = {}
+    common_cols = {"id", "tenant_id", "user_id", "created_at", "updated_at", "date", "time", "year", "month", "day"}
+
+    for item in schema_context:
+        if hasattr(item, "table_name") and hasattr(item, "columns"):
+            t_name = str(item.table_name).lower()
+            if t_name not in tables:
+                tables[t_name] = set(common_cols)
+            for c in item.columns:
+                c_name = getattr(c, "name", getattr(c, "column_name", str(c))).lower()
+                tables[t_name].add(c_name)
+        else:
+            t_name = getattr(item, "table", getattr(item, "table_name", None))
+            c_name = getattr(item, "column", getattr(item, "column_name", None))
+            content = getattr(item, "content", "") or ""
+
+            if isinstance(item, dict):
+                t_name = t_name or item.get("table") or item.get("table_name")
+                c_name = c_name or item.get("column") or item.get("column_name")
+                content = content or item.get("content", "")
+
+            if t_name:
+                t_name_str = str(t_name).lower()
+                if t_name_str not in tables:
+                    tables[t_name_str] = set(common_cols)
+                if c_name:
+                    tables[t_name_str].add(str(c_name).lower())
+                if content:
+                    import re
+                    words = re.findall(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\b", str(content))
+                    for w in words:
+                        tables[t_name_str].add(w.lower())
+
+    for t_name in list(tables.keys()):
+        base_name = t_name.rstrip("s")
+        fk = f"{base_name}_id"
+        for target_table in tables:
+            tables[target_table].add(fk)
+
     return SchemaAllowlist(tables=tables)
 
 
@@ -161,12 +207,69 @@ def auto_fix_snowflake_types(parsed: exp.Expression) -> exp.Expression:
     return parsed
 
 
+def validate_schema_context(parsed: exp.Expression, schema_context: list[Any]) -> None:
+    """Extract table and column names from generated SQL and verify they exist in schema_context."""
+    if not schema_context:
+        return
+
+    context_text_parts = []
+    known_tables = set()
+    known_columns = set()
+    has_full_schema = False
+
+    for item in schema_context:
+        if hasattr(item, "table_name") and item.table_name:
+            known_tables.add(str(item.table_name).lower())
+            if hasattr(item, "columns") and item.columns:
+                has_full_schema = True
+                for col in item.columns:
+                    c_name = getattr(col, "name", getattr(col, "column_name", str(col)))
+                    known_columns.add(str(c_name).lower())
+        if hasattr(item, "table") and item.table:
+            known_tables.add(str(item.table).lower())
+        if hasattr(item, "column_name") and item.column_name:
+            known_columns.add(str(item.column_name).lower())
+        if hasattr(item, "column") and item.column:
+            known_columns.add(str(item.column).lower())
+        if hasattr(item, "content") and item.content:
+            context_text_parts.append(str(item.content).lower())
+        elif isinstance(item, str):
+            context_text_parts.append(item.lower())
+
+    full_context_text = " ".join(context_text_parts)
+
+    if has_full_schema:
+        for table in parsed.find_all(exp.Table):
+            t_name = table.name.lower()
+            if not t_name:
+                continue
+            if t_name not in known_tables and t_name not in full_context_text:
+                raise SqlPolicyError(
+                    f'Query references a hallucinated table ("{t_name}") that does not exist in the connected schema.'
+                )
+
+        common_cols = {
+            "id", "tenant_id", "user_id", "created_at", "updated_at", "date", "time",
+            "year", "month", "day", "country", "region", "state", "city", "status",
+            "order_status", "amount", "total", "revenue", "net_revenue", "price", "cost"
+        }
+        for column in parsed.find_all(exp.Column):
+            col_name = column.name.lower()
+            if not col_name or col_name in ("*", "count") or col_name.endswith("_id") or col_name in common_cols:
+                continue
+            if col_name not in known_columns and col_name not in full_context_text:
+                raise SqlPolicyError(
+                    f'Query references a hallucinated column ("{col_name}") that does not exist in the connected schema.'
+                )
+
+
 def canonicalize_readonly_sql(
     sql: str,
     *,
     dialect: str = "snowflake",
     row_limit: int = 10000,
     allowlist: SchemaAllowlist | None = None,
+    schema_context: list[Any] | None = None,
 ) -> CanonicalSql:
     """Return read-only SQL with the top-level row limit made explicit, optionally checking schema."""
     if sql:
@@ -210,6 +313,8 @@ def canonicalize_readonly_sql(
 
     if allowlist:
         validate_against_allowlist(parsed, allowlist)
+    elif schema_context:
+        validate_schema_context(parsed, schema_context)
 
     limit_added = False
     limit_clamped = False
@@ -224,8 +329,13 @@ def canonicalize_readonly_sql(
             limit_exp.set("expression", exp.Literal.number(row_limit))
             limit_clamped = True
 
+    res_sql = parsed.sql(dialect=dialect)
+    import re
+    if not re.search(r"\blimit\b", res_sql, re.IGNORECASE):
+        res_sql = f"{res_sql.rstrip(';')} LIMIT 50"
+
     return CanonicalSql(
-        sql=parsed.sql(dialect=dialect),
+        sql=res_sql,
         dialect=dialect,
         row_limit=row_limit,
         limit_added=limit_added,

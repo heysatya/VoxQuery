@@ -101,14 +101,14 @@ async def lifespan(app: FastAPI):
         pool = await asyncpg.create_pool(
             settings.supabase_database_url, min_size=1, max_size=4, statement_cache_size=0
         )
-        openai_client = AsyncOpenAI()
+        openai_client = AsyncOpenAI(timeout=10.0)
         schema_retriever = PgVectorSchemaRetriever(openai_client=openai_client, db_pool=pool)
 
     if settings.llm_provider == "claude":
         anthropic_client = (
-            AsyncAnthropic(api_key=settings.anthropic_api_key)
+            AsyncAnthropic(api_key=settings.anthropic_api_key, timeout=15.0)
             if settings.anthropic_api_key
-            else AsyncAnthropic()
+            else AsyncAnthropic(timeout=15.0)
         )
         llm_adapter = ClaudeAdapter(client=anthropic_client)
         storyteller = ClaudeStoryteller(client=anthropic_client)

@@ -1,12 +1,18 @@
+import logging
+import json
 import asyncpg
 from app.models.contracts import SchemaChunk
 from app.rag.retriever import SchemaRetriever
 from app.rag.query_rewriter import RewrittenQuery
 from langfuse.openai import AsyncOpenAI
 
+logger = logging.getLogger(__name__)
+
 
 class PgVectorSchemaRetriever(SchemaRetriever):
-    def __init__(self, openai_client: AsyncOpenAI, db_pool: asyncpg.Pool) -> None:
+    def __init__(self, openai_client: AsyncOpenAI | None = None, db_pool: asyncpg.Pool = None) -> None:
+        if openai_client is None:
+            openai_client = AsyncOpenAI(timeout=10.0)
         self.openai = openai_client
         self.pool = db_pool
 
@@ -16,12 +22,14 @@ class PgVectorSchemaRetriever(SchemaRetriever):
         retrieval_query = rewritten.get_retrieval_query()
         bm25_query = rewritten.original + " " + " ".join(rewritten.expanded_terms)
 
-        response = await self.openai.embeddings.create(
-            input=retrieval_query, model="text-embedding-3-small"
-        )
-        import json
-
-        embedding_str = json.dumps(response.data[0].embedding)
+        try:
+            response = await self.openai.embeddings.create(
+                input=retrieval_query, model="text-embedding-3-small"
+            )
+            embedding_str = json.dumps(response.data[0].embedding)
+        except Exception as exc:
+            logger.warning("OpenAI embedding generation failed: %s. Proceeding gracefully without RAG vector search.", exc)
+            return [], 0.0
 
         vector_sql = """
             SELECT 

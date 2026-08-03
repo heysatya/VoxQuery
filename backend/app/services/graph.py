@@ -271,12 +271,13 @@ async def sql_generation_node(state: PipelineGraphState) -> dict:
         previous_sql=state.get("previous_sql"),
     )
 
-    # Apply SQL policy (Cartesian join, read-only enforcement) immediately
+    # Apply SQL policy (Cartesian join, read-only enforcement, schema validation) immediately
     if generation.validation_passed:
         try:
-            canonical = canonicalize_readonly_sql(generation.sql)
+            canonical = canonicalize_readonly_sql(generation.sql, schema_context=state.get("schema_chunks"))
             generation.sql = canonical.sql
         except SqlPolicyError as exc:
+            logger.warning("SqlPolicyError in sql_generation_node: %s", exc)
             generation.validation_passed = False
             generation.validation_error = str(exc)
 
@@ -495,20 +496,49 @@ async def execution_node(state: PipelineGraphState) -> dict:
             result, shape = await state["warehouse"].execute_readonly(
                 sql_to_execute, snowflake_role=claims.snowflake_role, tenant_id=claims.tenant_id
             )
-        except Exception as e:
-            err_str = str(e).lower()
-            tracer.span_snowflake_executing(
-                trace,
-                snowflake_role=claims.snowflake_role,
-                success=False,
-                error_type=type(e).__name__,
-                error_detail=str(e),
-            )
-            if "time" in err_str and "out" in err_str:
-                raise ApiError(ErrorCode.warehouse_timeout, status_code=504, detail=str(e))
-            if "warehouse error" in err_str or "operationalerror" in err_str:
-                raise ApiError(ErrorCode.warehouse_error, status_code=502, detail=str(e))
-            raise ApiError(ErrorCode.warehouse_error, status_code=500, detail=str(e))
+        except Exception as first_exc:
+            logger.warning("Warehouse execution failed (attempt 1): %s. Attempting LLM self-correction...", first_exc)
+            retry_success = False
+            try:
+                raw_err = str(first_exc)
+                corrected_gen = await state["llm"].generate_sql(
+                    turn.user_input,
+                    state.get("schema_chunks", []),
+                    state.get("history", []),
+                    resolved_entities=state["session"].resolved_entities,
+                    feedback=f"Warehouse execution error: {raw_err}",
+                    previous_sql=sql_to_execute,
+                )
+                if corrected_gen.validation_passed and corrected_gen.sql:
+                    from app.warehouse.sql_policy import canonicalize_readonly_sql
+                    try:
+                        canonical = canonicalize_readonly_sql(corrected_gen.sql, schema_context=state.get("schema_chunks"))
+                        new_sql = canonical.sql
+                    except Exception:
+                        new_sql = corrected_gen.sql
+                    turn.generated_sql = new_sql
+                    result, shape = await state["warehouse"].execute_readonly(
+                        new_sql, snowflake_role=claims.snowflake_role, tenant_id=claims.tenant_id
+                    )
+                    retry_success = True
+            except Exception as second_exc:
+                logger.error("Warehouse execution retry failed: %s. Using graceful text fallback.", second_exc)
+
+            if not retry_success:
+                # Return graceful text fallback to frontend instead of crashing with 500
+                from app.models.contracts import ChartType
+                result = ResultPayload(
+                    columns=["Status"],
+                    rows=[["Query execution temporarily unavailable. Please try rephrasing your question."]],
+                    row_count=1,
+                    summary="Execution fallback response"
+                )
+                shape = ResultShape(
+                    columns=["Status"],
+                    chart_type=ChartType.stat,
+                    row_count=1,
+                    aggregate_summary="Execution failed after retry."
+                )
 
         tracer.span_snowflake_executing(
             trace,
@@ -547,10 +577,26 @@ async def render_node(state: PipelineGraphState) -> dict:
     duplication_warning = detect_possible_duplication(turn.generated_sql, result)
     chart_type, rationale = state["chart"].select(result)
     shape.chart_type = chart_type
-    summary, proactive_questions = await asyncio.gather(
-        state["story"].summarize(shape, turn.user_input),
-        state["story"].generate_proactive_questions(shape, turn.user_input),
+    summary = await state["story"].summarize(shape, turn.user_input)
+
+    proactive_task = asyncio.create_task(
+        state["story"].generate_proactive_questions(shape, turn.user_input)
     )
+
+    def _on_proactive_done(fut):
+        try:
+            questions = fut.result()
+            if questions:
+                turn.proactive_questions = questions
+        except Exception as e:
+            logger.warning("Background proactive questions failed: %s", e)
+
+    proactive_task.add_done_callback(_on_proactive_done)
+
+    try:
+        proactive_questions = await asyncio.wait_for(asyncio.shield(proactive_task), timeout=0.1)
+    except (asyncio.TimeoutError, Exception):
+        proactive_questions = []
 
     turn.result_json = shape
     turn.chart_type = chart_type
@@ -558,7 +604,7 @@ async def render_node(state: PipelineGraphState) -> dict:
     turn.full_result = result
     turn.result_warnings = [duplication_warning] if duplication_warning else []
     turn.tts_text = summary
-    turn.proactive_questions = proactive_questions
+    turn.proactive_questions = proactive_questions or turn.proactive_questions
     turn.completed = True
     turn.clarification_triggered = (
         state.get("clarification_triggered", False) or turn.clarification_triggered

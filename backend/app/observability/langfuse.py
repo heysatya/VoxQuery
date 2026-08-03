@@ -27,11 +27,22 @@ class LangfuseTracer:
     def _safe_call(self, func, *args, **kwargs):
         if self.langfuse is None:
             return None
+
+        def _execute():
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                func_name = getattr(func, "__name__", "unknown")
+                emit("langfuse.error", tier=2, error=str(e), func=func_name)
+                return None
+
+        import asyncio
         try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            emit("langfuse.error", tier=2, error=str(e), func=func.__name__)
-            return None
+            loop = asyncio.get_running_loop()
+            loop.create_task(asyncio.to_thread(_execute))
+        except RuntimeError:
+            _execute()
+        return None
 
     @contextlib.contextmanager
     def start_trace(self, turn: TurnRecord) -> Any:

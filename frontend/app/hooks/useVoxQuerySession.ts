@@ -165,6 +165,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     setNoticeState(createNotice(message, severity));
   }, []);
 
+  const wsRef = useRef<WebSocket | null>(null);
   const audioSocketRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -227,6 +228,21 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
   function setActiveTurnRequest(submitted: string, parentTurnId: string | null) {
     currentTurnRequestRef.current = { submittedText: submitted, parentTurnId };
   }
+
+  // WebSocket keep-alive ping interval every 10,000ms
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+    if (wsRef.current && connectionState === "connected") {
+      interval = setInterval(() => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: "ping" }));
+        }
+      }, 10000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [connectionState]);
 
   // ── Result watchdog ──────────────────────────────────────────────────
   // The pipeline result normally arrives via the `result_ready` WebSocket
@@ -464,6 +480,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
         }
         setConnectionState("connecting");
         socket = new WebSocket(pipelineSocketUrl(session.sessionId));
+        wsRef.current = socket;
         socket.onopen = () => {
           socket?.send(JSON.stringify({ event: "auth", token: token ?? "fake" }));
           setConnectionState("connected");
@@ -556,6 +573,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
       });
     return () => {
       cancelled = true;
+      wsRef.current = null;
       socket?.close();
     };
   }, [auth.ready, auth.signedIn, session.sessionId, connectionRetryKey, setNotice]);
@@ -602,6 +620,32 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
   }
 
   async function startRecording() {
+    const sessionState = {
+      isProcessing: pipelineInFlight || pipelineStage !== null,
+      isRecording: recordingState !== "idle" || voiceState !== "idle"
+    };
+    if (sessionState.isProcessing || sessionState.isRecording) return;
+
+    // Web Audio Auto-Play Hack: unlock AudioContext if instantiated
+    try {
+      if (ttsAudioContextRef.current) {
+        if (ttsAudioContextRef.current.state === "suspended") {
+          ttsAudioContextRef.current.resume().catch(() => {});
+        }
+        const buffer = ttsAudioContextRef.current.createBuffer(
+          1,
+          Math.floor(ttsAudioContextRef.current.sampleRate * 0.1),
+          ttsAudioContextRef.current.sampleRate
+        );
+        const source = ttsAudioContextRef.current.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ttsAudioContextRef.current.destination);
+        source.start(0);
+      }
+    } catch (e) {
+      console.warn("Silent audio unlock failed:", e);
+    }
+
     if (
       typeof navigator === "undefined" ||
       !navigator.mediaDevices ||

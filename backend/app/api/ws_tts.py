@@ -11,6 +11,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
+from app.api.rest import _get_turn_for_user
 from app.config import Settings, get_settings
 from app.core.tts import build_tts_provider, TTSUnavailableError
 from app.middleware.auth import authenticate_websocket_message
@@ -36,8 +37,9 @@ async def tts_socket(
         await websocket.close(code=4002)
         return
 
+    db_pool = getattr(websocket.app.state, "db_pool", None)
     try:
-        turn = websocket.app.state.pipeline.get_turn_for_user(turn_id, claims)
+        turn = await _get_turn_for_user(turn_id, claims, websocket.app.state.pipeline, db_pool)
     except Exception:
         await websocket.close(code=4004)  # Not found
         return
