@@ -152,7 +152,7 @@ export function deriveCaveatText(result: ResultResponse): string | null {
     const reason = reasons[0].toLowerCase();
     if (/time|period|date|quarter|month|year/.test(reason)) return `${prefix} — confirm the reporting period.`;
     if (/product|customer|region|segment|scope|entity/.test(reason)) return `${prefix} — confirm which business scope is included.`;
-    if (/metric|calculate|measure/.test(reason)) return `${prefix} — confirm which metric should be used.`;
+    if (/metric|calculate|measure/.test(reason)) return `${prefix} — multiple metrics detected. Displaying Net Revenue by default. Click to toggle definition.`;
     if (/join|connect|duplicate/.test(reason)) return `${prefix} — confirm how the data should be connected.`;
   }
   if (result.warnings.some((warning) => warning.code === "possible_duplication")) {

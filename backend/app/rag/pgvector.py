@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class PgVectorSchemaRetriever(SchemaRetriever):
     def __init__(self, openai_client: AsyncOpenAI | None = None, db_pool: asyncpg.Pool = None) -> None:
         if openai_client is None:
-            openai_client = AsyncOpenAI(timeout=10.0)
+            openai_client = AsyncOpenAI(timeout=120.0)
         self.openai = openai_client
         self.pool = db_pool
 

@@ -267,6 +267,7 @@ type DataGlassPanelProps = {
   onDrillDown?: (query: string) => void;
   onDrilldownOpen?: (turnId: string) => void;
   onPin?: (result: LastResult) => void;
+  getToken?: () => Promise<string | null>;
 };
 
 export function DataGlassPanel({
@@ -276,6 +277,7 @@ export function DataGlassPanel({
   onDrillDown,
   onDrilldownOpen,
   onPin,
+  getToken,
 }: DataGlassPanelProps) {
   const [showSql, setShowSql] = useState(false);
   const [userChartOverride, setUserChartOverride] = useState<string | null>(null);
@@ -325,15 +327,16 @@ export function DataGlassPanel({
   const [copiedLink, setCopiedLink] = useState(false);
   async function copyPermalink() {
     try {
-      const shareRes = await createShareLink({ turn_id: result.turnId, ttl_hours: 168 });
+      const token = getToken ? await getToken() : undefined;
+      const shareRes = await createShareLink({ turn_id: result.turnId, ttl_hours: 168 }, token);
       if (shareRes?.url) {
         await navigator.clipboard.writeText(shareRes.url);
         setCopiedLink(true);
         setTimeout(() => setCopiedLink(false), 2000);
         return;
       }
-    } catch (err) {
-      console.warn("Share link creation error, falling back to permalink", err);
+    } catch (err: any) {
+      console.warn("Share link creation error, falling back to permalink", err?.status, err?.message, err?.response?.data?.detail ?? err);
     }
     const url = new URL(window.location.href);
     url.searchParams.set("share", result.turnId);
@@ -422,8 +425,9 @@ export function DataGlassPanel({
           {onPin && (
             <button
               type="button"
+              disabled={!result?.turnId}
               onClick={() => onPin(result)}
-              className="p-2 text-[var(--text-muted)] hover:text-[var(--accent-blue)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] rounded-lg transition-colors"
+              className="p-2 text-[var(--text-muted)] hover:text-[var(--accent-blue)] disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] rounded-lg transition-colors"
               title="Pin to Workspace"
             >
               <Pin className="h-4 w-4" />

@@ -19,7 +19,15 @@ async def get_db_pool(request: Request) -> asyncpg.Pool:
         settings = get_settings()
         if not settings.supabase_database_url:
             raise HTTPException(status_code=500, detail="Database not configured")
-        pool = await asyncpg.create_pool(settings.supabase_database_url)
+        pool = await asyncpg.create_pool(
+            settings.supabase_database_url,
+            max_inactive_connection_lifetime=300.0,
+            server_settings={
+                'tcp_keepalives_idle': '60',
+                'tcp_keepalives_interval': '10',
+                'tcp_keepalives_count': '5'
+            }
+        )
         request.app.state.db_pool = pool
     return pool
 

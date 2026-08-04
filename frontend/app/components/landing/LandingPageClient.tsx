@@ -20,14 +20,5 @@ export function LandingPageClient() {
  * immediately with no gating or loading flash.
  */
 function ClerkLandingPage() {
-  const { isLoaded, isSignedIn } = useAuth();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (isLoaded && isSignedIn) {
-      router.replace("/app");
-    }
-  }, [isLoaded, isSignedIn, router]);
-
   return <MarketingLandingPage />;
 }

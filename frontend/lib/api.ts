@@ -67,6 +67,14 @@ export async function fetchAuthenticatedBlob(
 
 async function request<T>(path: string, init?: RequestInit, authToken?: string | null): Promise<T> {
   const send = async (token?: string | null) => {
+    let effectiveToken = token;
+    if (!effectiveToken && tokenRefresher) {
+      try {
+        effectiveToken = await tokenRefresher();
+      } catch {
+        // ignore fallback
+      }
+    }
     const headers: Record<string, string> = {};
 
     // Merge any caller-supplied headers into the plain object
@@ -86,8 +94,8 @@ async function request<T>(path: string, init?: RequestInit, authToken?: string |
     }
 
     // Bearer token (only when present)
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
+    if (effectiveToken) {
+      headers["Authorization"] = `Bearer ${effectiveToken}`;
     }
 
     return fetch(`${apiUrl}${path}`, {
@@ -97,10 +105,11 @@ async function request<T>(path: string, init?: RequestInit, authToken?: string |
   };
   let response: Response;
   try {
-    response = await send(authToken);
-    if (response.status === 401 && authToken && tokenRefresher) {
+    const initialToken = authToken ?? (tokenRefresher ? await tokenRefresher() : null);
+    response = await send(initialToken);
+    if (response.status === 401 && tokenRefresher) {
       const refreshedToken = await tokenRefresher({ skipCache: true });
-      if (refreshedToken && refreshedToken !== authToken) {
+      if (refreshedToken) {
         response = await send(refreshedToken);
       }
     }
@@ -254,7 +263,23 @@ export async function pinWorkspaceWidget(
   },
   authToken?: string | null
 ): Promise<PinnedAnalysis> {
-  return request<PinnedAnalysis>("/api/workspace/widgets", { method: "POST", body: JSON.stringify(payload) }, authToken);
+  const safePayload = {
+    turn_id: payload.turn_id,
+    title: (payload.title || "Saved finding").slice(0, 200),
+    note: payload.note,
+    headline_value: payload.headline_value ?? null,
+    headline_label: payload.headline_label ?? null,
+    layout_x: Math.max(0, payload.layout_x ?? 0),
+    layout_y: Math.max(0, payload.layout_y ?? 0),
+    layout_w: Math.min(12, Math.max(1, payload.layout_w ?? 4)),
+    layout_h: Math.min(12, Math.max(1, payload.layout_h ?? 3)),
+  };
+  try {
+    return await request<PinnedAnalysis>("/api/workspace/widgets", { method: "POST", body: JSON.stringify(safePayload) }, authToken);
+  } catch (err: any) {
+    console.error("Workspace widget pin request failed:", err?.status, err?.message, err?.response?.data?.detail ?? err);
+    throw err;
+  }
 }
 
 export async function startCheckNow(

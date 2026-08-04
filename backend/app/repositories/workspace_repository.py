@@ -64,11 +64,10 @@ class WorkspaceRepository:
                 """
                 SELECT turn_id, user_input, chart_type, full_result, generated_sql
                 FROM turns
-                WHERE turn_id = $1 AND tenant_id = $2 AND user_id = $3 AND completed = TRUE
+                WHERE turn_id = $1 AND tenant_id = $2 AND completed = TRUE
                 """,
                 turn_id,
                 claims.tenant_id,
-                claims.user_id,
             )
             if source is None:
                 raise ValueError("Cannot pin: source turn not found or not yet completed.")

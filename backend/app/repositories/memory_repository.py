@@ -80,7 +80,7 @@ class MemoryRepository:
                          source_turn_id, source_session_id, confidence,
                          last_observed_at, created_at, updated_at)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW(), NOW())
-                    ON CONFLICT ON CONSTRAINT uq_executive_memory_active
+                    ON CONFLICT (tenant_id, user_id, memory_type, subject) WHERE archived_at IS NULL
                     DO UPDATE SET
                         label             = EXCLUDED.label,
                         confidence        = EXCLUDED.confidence,

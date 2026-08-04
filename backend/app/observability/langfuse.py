@@ -19,7 +19,7 @@ class LangfuseTracer:
             if get_settings().app_env == "test":
                 self.langfuse = None
             else:
-                self.langfuse = Langfuse()
+                self.langfuse = Langfuse(timeout=15.0)
         except Exception as e:
             emit("langfuse.init.error", tier=2, error=str(e))
             self.langfuse = None

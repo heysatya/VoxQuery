@@ -86,6 +86,7 @@ export type VoxQueryEngine = {
   setSubmittedText: (value: string) => void;
   startRecording: () => Promise<void>;
   stopRecording: () => void;
+  reRecord: () => void;
   toggleRecording: () => Promise<void>;
   startFakeVoice: () => Promise<void>;
   submitCurrentQuery: () => Promise<void>;
@@ -873,6 +874,44 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     setNotice("Recording stopped. Processing transcript...");
   }
 
+  const reRecord = useCallback(() => {
+    // 1. HARD STOP the existing microphone tracks
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+    }
+
+    // 2. HARD CLOSE the old WebSocket
+    if (audioSocketRef.current) {
+      if (audioSocketRef.current.readyState === WebSocket.OPEN) {
+        audioSocketRef.current.send(JSON.stringify({ type: "stop_recording" }));
+      }
+      audioSocketRef.current.close();
+      audioSocketRef.current = null;
+    }
+
+    // 3. Reset UI state immediately
+    setSubmittedText("");
+    setPartialTranscript("");
+    setVoiceDraft(null);
+    setVoiceState("idle");
+
+    // 4. Bulletproof re-initialization with a 300ms OS-level buffer
+    setTimeout(async () => {
+      try {
+        await startRecording();
+      } catch (err: unknown) {
+        const errorName = (err as { name?: string })?.name;
+        if (errorName === "NotReadableError" || errorName === "TrackStartError") {
+          console.warn("Hardware mic lock detected. Retrying...");
+          setTimeout(startRecording, 500);
+        } else {
+          console.error("Microphone initialization failed:", err);
+        }
+      }
+    }, 300);
+  }, [startRecording]);
+
   async function toggleRecording() {
     if (recordingState === "recording") {
       stopRecording();
@@ -1354,6 +1393,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
     setSubmittedText,
     startRecording,
     stopRecording,
+    reRecord,
     toggleRecording,
     startFakeVoice,
     submitCurrentQuery,

@@ -195,6 +195,10 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
   }, [briefingDrawerOpen]);
 
   const handlePinWidget = async (result: LastResult) => {
+    if (!result?.turnId) {
+      console.error("Cannot pin widget: turn_id is missing");
+      return;
+    }
     const title = result.submittedText
       || result.resultData?.tts_text?.split(".")[0]
       || "Saved finding";
@@ -204,9 +208,13 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
       const newWidget = await pinWorkspaceWidget(
         {
           turn_id: result.turnId,
-          title,
+          title: title.slice(0, 200),
           headline_value: headlineValue,
           headline_label: headlineLabel,
+          layout_x: 0,
+          layout_y: 0,
+          layout_w: 4,
+          layout_h: 3,
         },
         token
       );
@@ -214,8 +222,8 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
         if (prev.some((w) => w.id === newWidget.id || w.id === result.turnId)) return prev;
         return [...prev, newWidget];
       });
-    } catch (err) {
-      console.error("Failed to pin widget", err);
+    } catch (err: any) {
+      console.error("Failed to pin widget", err?.status, err?.message, err?.response?.data?.detail ?? err);
     }
   };
 
@@ -463,10 +471,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 editedText={engine.submittedText}
                 disabled={!engine.isReady}
                 onChange={engine.setSubmittedText}
-                onReRecord={() => {
-                  engine.setSubmittedText("");
-                  void engine.startRecording();
-                }}
+                onReRecord={engine.reRecord}
                 onSubmit={engine.submitCurrentQuery}
               />
             </motion.div>
@@ -566,6 +571,7 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
                 onDrillDown={engine.submitQuery}
                 onDrilldownOpen={setDrilldownTurnId}
                 onPin={handlePinWidget}
+                getToken={auth.getToken}
               />
 
               {/* Inline anomaly nudge */}

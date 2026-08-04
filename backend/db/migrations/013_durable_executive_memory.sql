@@ -1,4 +1,4 @@
--- Migration 011: Durable per-user executive memory.
+-- Migration 013: Durable per-user executive memory.
 -- Stores explainable, user-scoped, tenant-scoped preferences and recurring interests.
 -- Never stores raw warehouse rows or arbitrary data.
 

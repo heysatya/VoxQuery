@@ -99,16 +99,25 @@ async def lifespan(app: FastAPI):
 
     if settings.rag_provider == "pgvector" and settings.supabase_database_url:
         pool = await asyncpg.create_pool(
-            settings.supabase_database_url, min_size=1, max_size=4, statement_cache_size=0
+            settings.supabase_database_url,
+            min_size=1,
+            max_size=4,
+            statement_cache_size=0,
+            max_inactive_connection_lifetime=300.0,
+            server_settings={
+                'tcp_keepalives_idle': '60',
+                'tcp_keepalives_interval': '10',
+                'tcp_keepalives_count': '5'
+            }
         )
-        openai_client = AsyncOpenAI(timeout=10.0)
+        openai_client = AsyncOpenAI(timeout=120.0)
         schema_retriever = PgVectorSchemaRetriever(openai_client=openai_client, db_pool=pool)
 
     if settings.llm_provider == "claude":
         anthropic_client = (
-            AsyncAnthropic(api_key=settings.anthropic_api_key, timeout=15.0)
+            AsyncAnthropic(api_key=settings.anthropic_api_key, timeout=120.0)
             if settings.anthropic_api_key
-            else AsyncAnthropic(timeout=15.0)
+            else AsyncAnthropic(timeout=120.0)
         )
         llm_adapter = ClaudeAdapter(client=anthropic_client)
         storyteller = ClaudeStoryteller(client=anthropic_client)
@@ -121,7 +130,16 @@ async def lifespan(app: FastAPI):
             if not getattr(schema_retriever, "pool", None):
                 # Ensure we have a pool if not created by pgvector
                 pool = await asyncpg.create_pool(
-                    settings.supabase_database_url, min_size=1, max_size=4, statement_cache_size=0
+                    settings.supabase_database_url,
+                    min_size=1,
+                    max_size=4,
+                    statement_cache_size=0,
+                    max_inactive_connection_lifetime=300.0,
+                    server_settings={
+                        'tcp_keepalives_idle': '60',
+                        'tcp_keepalives_interval': '10',
+                        'tcp_keepalives_count': '5'
+                    }
                 )
             else:
                 pool = schema_retriever.pool
@@ -160,6 +178,10 @@ async def lifespan(app: FastAPI):
         start_briefing_scheduler(app.state.db_pool, settings, warehouse=warehouse_connector)
 
     yield
+    from app.observability.langfuse import tracer
+    if tracer and tracer.langfuse:
+        tracer.langfuse.flush()
+
     await audit_store.stop()
     await app.state.sessions.close()
     await app.state.rate_limiter.close()

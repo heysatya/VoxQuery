@@ -5,10 +5,11 @@ Multi-Widget Workspace API Router — Saved Findings.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.middleware.auth import get_current_user
 from app.models.contracts import (
@@ -46,7 +47,7 @@ def get_db_pool(request: Request):
 
 class CreateWidgetRequest(BaseModel):
     turn_id: UUID
-    title: str = Field(..., max_length=200)
+    title: str = Field(default="Saved finding", max_length=500)
     note: str | None = None
     headline_value: float | None = None
     headline_label: str | None = None
@@ -54,6 +55,24 @@ class CreateWidgetRequest(BaseModel):
     layout_y: int = Field(default=0, ge=0)
     layout_w: int = Field(default=4, ge=1, le=12)
     layout_h: int = Field(default=3, ge=1, le=12)
+
+    @field_validator("headline_value", mode="before")
+    @classmethod
+    def validate_headline_value(cls, v: Any) -> float | None:
+        if v is None or v == "":
+            return None
+        try:
+            val = float(v)
+            return val if not math.isnan(val) else None
+        except (ValueError, TypeError):
+            return None
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def validate_title(cls, v: Any) -> str:
+        if not v or not isinstance(v, str) or not v.strip():
+            return "Saved finding"
+        return v.strip()[:200]
 
 
 class UpdateLayoutRequest(BaseModel):

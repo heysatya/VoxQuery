@@ -122,19 +122,34 @@ class DeepgramSttProvider(SttProvider):
         # per Deepgram's own docs, true ZDR requires an Enterprise Agreement.
         # Left as an explicit opt-in setting since it has a real cost tradeoff.
         mip_opt_out_param = "&mip_opt_out=true" if self._mip_opt_out else ""
+        options = {
+            "model": "nova-3",
+            "language": "en-US",
+            "smart_format": True,
+            "punctuate": True,
+            "encoding": "linear16",
+            "sample_rate": 16000,
+            "channels": 1,
+            "interim_results": True,
+            "endpointing": 750,
+            "utterance_end_ms": 1000,
+            "vad_events": True,
+            "keepalive": True,
+        }
         url = (
             "wss://api.deepgram.com/v1/listen"
-            "?model=nova-3"
-            "&language=en-US"
-            "&smart_format=true"
-            "&punctuate=true"
-            "&encoding=linear16"
-            "&sample_rate=16000"
-            "&channels=1"
-            "&interim_results=true"
-            "&endpointing=750"  # VAD endpointing tuned to 750ms so user isn't cut off taking a breath.
-            "&utterance_end_ms=1000"  # 1000ms silence before UtteranceEnd fires.
-            "&vad_events=true"
+            f"?model={options['model']}"
+            f"&language={options['language']}"
+            f"&smart_format={str(options['smart_format']).lower()}"
+            f"&punctuate={str(options['punctuate']).lower()}"
+            f"&encoding={options['encoding']}"
+            f"&sample_rate={options['sample_rate']}"
+            f"&channels={options['channels']}"
+            f"&interim_results={str(options['interim_results']).lower()}"
+            f"&endpointing={options['endpointing']}"  # VAD endpointing tuned to 750ms so user isn't cut off taking a breath.
+            f"&utterance_end_ms={options['utterance_end_ms']}"  # 1000ms silence before UtteranceEnd fires.
+            f"&vad_events={str(options['vad_events']).lower()}"
+            f"&keepalive={str(options['keepalive']).lower()}"
             f"{keyterm_params}"
             f"{mip_opt_out_param}"
         )

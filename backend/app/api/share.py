@@ -37,6 +37,7 @@ def _get_db_pool(request: Request):
     return getattr(request.app.state, "db_pool", None)
 
 
+@router.post("/api/share/create", response_model=ShareLinkCreateResponse, status_code=201)
 @router.post("/api/share", response_model=ShareLinkCreateResponse, status_code=201)
 async def create_share_link(
     body: ShareLinkCreateRequest,

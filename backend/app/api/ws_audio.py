@@ -19,7 +19,8 @@ import logging
 from collections.abc import AsyncGenerator
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket
+from starlette.websockets import WebSocketDisconnect
 
 from app.config import Settings, get_settings
 from app.core.stt import build_stt_provider
@@ -41,17 +42,21 @@ async def _frame_generator(websocket: WebSocket) -> AsyncGenerator[bytes, None]:
 
     Any other text frame is silently ignored to future-proof the protocol.
     """
-    while True:
-        message = await websocket.receive()
-        if "bytes" in message and message["bytes"] is not None:
-            yield message["bytes"]
-        elif "text" in message and message["text"] is not None:
-            try:
-                parsed = json.loads(message["text"])
-                if isinstance(parsed, dict) and parsed.get("type") == "stop_recording":
-                    return  # signal: stream is over; provider will emit final transcript
-            except (json.JSONDecodeError, AttributeError):
-                pass  # malformed text frame — ignore and keep reading
+    try:
+        while True:
+            message = await websocket.receive()
+            if "bytes" in message and message["bytes"] is not None:
+                yield message["bytes"]
+            elif "text" in message and message["text"] is not None:
+                try:
+                    parsed = json.loads(message["text"])
+                    if isinstance(parsed, dict) and parsed.get("type") == "stop_recording":
+                        return  # signal: stream is over; provider will emit final transcript
+                except (json.JSONDecodeError, AttributeError):
+                    pass  # malformed text frame — ignore and keep reading
+    except WebSocketDisconnect:
+        import logging
+        logging.getLogger("ws_audio").info("Voice WebSocket session closed cleanly.")
 
 
 @router.websocket("/ws/audio")
