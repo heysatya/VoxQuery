@@ -50,7 +50,7 @@ export function LiveDemoPreview() {
         <SectionHeading
           eyebrow="See it work"
           title="Watch a question become an answer"
-          description="No dashboards to build, no SQL to write. Just ask — VoxQuery does the rest, out loud."
+          description="No dashboards to build, no SQL to write. Just ask - VoxQuery does the rest, out loud."
         />
 
         <motion.div
@@ -86,11 +86,10 @@ export function LiveDemoPreview() {
                         : { scale: 1 }
                     }
                     transition={{ repeat: step === "listening" ? Infinity : 0, duration: 1.4, ease: "easeInOut" }}
-                    className={`flex items-center justify-center h-20 w-20 rounded-full transition-colors ${
-                      step === "listening"
+                    className={`flex items-center justify-center h-20 w-20 rounded-full transition-colors ${step === "listening"
                         ? "bg-gradient-to-br from-sky-500 via-cyan-500 to-indigo-600 shadow-[0_0_50px_rgba(56,189,248,0.35)]"
                         : "bg-white/5 border border-white/10"
-                    }`}
+                      }`}
                   >
                     <Mic className="h-8 w-8 text-white" />
                   </motion.div>

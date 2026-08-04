@@ -70,8 +70,8 @@ export function Hero() {
           transition={{ duration: 0.7, delay: 0.18 }}
           className="text-4xl md:text-6xl font-bold tracking-tight text-white leading-[1.08]"
         >
-          Ask your data
-          <br className="hidden sm:block" /> a question. Out loud.
+          Executive answers
+          <br className="hidden sm:block" /> at the speed of speech!
         </motion.h1>
 
         <motion.p
