@@ -7,7 +7,7 @@ describe("LandingPage", () => {
   it("renders the marketing hero with a headline and sign-in call to action", () => {
     render(<LandingPage />);
 
-    expect(screen.getByRole("heading", { level: 1, name: /ask your data/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: /executive answers at the speed of speech!/i })).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: /sign in/i }).length).toBeGreaterThan(0);
   });
 
