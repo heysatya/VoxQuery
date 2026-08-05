@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
+import { dark } from "@clerk/themes";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./styles.css";
 
@@ -21,6 +22,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         signUpForceRedirectUrl="/app"
         signInFallbackRedirectUrl="/app"
         signUpFallbackRedirectUrl="/app"
+        appearance={{
+          baseTheme: dark,
+          variables: {
+            colorPrimary: "#38BDF8",
+            colorBackground: "#10141C",
+            colorText: "#F8FAFC",
+            colorTextSecondary: "#CBD5E1",
+            colorInputBackground: "#171D28",
+            colorInputText: "#F8FAFC"
+          }
+        }}
       >
         {wrappedChildren}
       </ClerkProvider>
@@ -34,4 +46,3 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
-
