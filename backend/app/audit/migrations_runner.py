@@ -33,8 +33,21 @@ async def run_migrations(dsn: str, migrations_dir: Path | None = None) -> None:
         for migration in migrations:
             if migration not in applied:
                 print(f"Applying {migration}...")
-                with open(target_dir / migration, "r", encoding="utf-8") as f:
-                    sql = f.read()
+                file_path = target_dir / migration
+                # Read as bytes first and attempt multiple decodings to handle
+                # migrations saved with different encodings (UTF-8, UTF-16, etc.).
+                with open(file_path, "rb") as bf:
+                    data = bf.read()
+                try:
+                    sql = data.decode("utf-8")
+                except UnicodeDecodeError:
+                    try:
+                        # Let Python handle byte-order mark with 'utf-16'
+                        sql = data.decode("utf-16")
+                    except UnicodeDecodeError:
+                        # Last-resort fallback preserves bytes as-is so migration can still run.
+                        sql = data.decode("latin-1")
+                        print(f"Warning: migration {migration} decoded with latin-1 fallback; please convert to UTF-8")
 
                 async with conn.transaction():
                     await conn.execute(sql)
