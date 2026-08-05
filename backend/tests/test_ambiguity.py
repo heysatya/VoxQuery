@@ -114,3 +114,13 @@ def test_temporal_ambiguity_not_detected_when_unambiguous():
     ]
     result = detect_ambiguity("show orders from today", chunks)
     assert AmbiguitySignal.temporal_ambiguity not in result.signals_detected
+
+
+def test_entity_ambiguity_not_detected_for_foreign_key_pointers():
+    chunks = [
+        SchemaChunk(source_ref="products.product_category", content="Product category"),
+        SchemaChunk(source_ref="order_items.product_id", content="Foreign key product ID"),
+    ]
+    result = detect_ambiguity("show revenue by product category", chunks)
+    assert AmbiguitySignal.entity_ambiguity not in result.signals_detected
+

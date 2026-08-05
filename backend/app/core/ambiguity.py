@@ -127,14 +127,31 @@ STOP_WORDS = {
 }
 
 
+def _is_foreign_key_pointer(chunk: SchemaChunk, term: str) -> bool:
+    """True if this chunk is just a `<term>_id`-style FK/PK column pointing at
+    the entity named `term` -- a normal join pointer, not a second, distinct
+    meaning of the term. E.g. PRODUCTS.product_id and ORDER_ITEMS.product_id
+    both naturally mention "product", but that's one entity referenced from
+    two schema locations via a join relationship, not genuine ambiguity
+    about what "product" means. Without this check, any query that mentions
+    a dimension spanning a normal foreign-key-joined table falsely
+    trips entity_ambiguity.
+    """
+    column = (chunk.column or chunk.source_ref.rsplit(".", 1)[-1]).lower()
+    return column == f"{term}_id"
+
+
 def _entity_collision_terms(tokens: set[str], schema_chunks: list[SchemaChunk]) -> list[str]:
     refs_by_term: dict[str, set[str]] = {}
     for token in tokens:
         if len(token) < 2 or token in STOP_WORDS:
             continue
         for chunk in schema_chunks:
-            if token in chunk.source_ref.lower() or token in chunk.content.lower():
-                refs_by_term.setdefault(token, set()).add(chunk.source_ref)
+            if token not in chunk.source_ref.lower() and token not in chunk.content.lower():
+                continue
+            if _is_foreign_key_pointer(chunk, token):
+                continue
+            refs_by_term.setdefault(token, set()).add(chunk.source_ref)
     return [
         term
         for term, refs in refs_by_term.items()
