@@ -85,9 +85,15 @@ export function transitionVoiceState(
     finalizing: {
       transcript_ready: "reviewing"
     },
-    reviewing: {},
+    reviewing: {
+      request_permission: "permission_requesting",
+      explain_permission: "permission_explaining",
+      permission_granted: "connecting"
+    },
     capture_error: {
-      request_permission: "permission_requesting"
+      request_permission: "permission_requesting",
+      explain_permission: "permission_explaining",
+      permission_granted: "connecting"
     }
   };
 

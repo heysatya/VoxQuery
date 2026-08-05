@@ -623,7 +623,7 @@ export function useVoxQuerySession(auth: VoxQueryAuthRelay): VoxQueryEngine {
   async function startRecording() {
     const sessionState = {
       isProcessing: pipelineInFlight || pipelineStage !== null,
-      isRecording: recordingState !== "idle" || voiceState !== "idle"
+      isRecording: recordingState !== "idle"
     };
     if (sessionState.isProcessing || sessionState.isRecording) return;
 

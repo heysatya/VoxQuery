@@ -29,6 +29,11 @@ describe("interaction state", () => {
     state = transitionVoiceState(state, "transcript_ready");
     expect(state).toBe("reviewing");
     expect(mapVoiceToRecordingState(state)).toBe("idle");
+
+    // Allows re-recording from reviewing state
+    state = transitionVoiceState(state, "request_permission");
+    expect(state).toBe("permission_requesting");
+    expect(mapVoiceToRecordingState(state)).toBe("connecting");
   });
 
   it("maps backend pipeline stages to explicit turn phases", () => {
