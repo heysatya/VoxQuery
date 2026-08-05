@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Fraunces:ital,opsz,wght@0,9..144,500;1,9..144,500;1,9..144,600&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -69,5 +69,35 @@
   }
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
+  }
+
+  /* Business Pulse signature treatment: a restrained editorial display face
+     used only for the card's own wordmark/date line, plus a brushed-glass
+     top sheen and soft instrument glow used nowhere else in the app. Scoped
+     narrowly so the rest of the product keeps its plain Inter/mono voice. */
+  .font-pulse-display {
+    font-family: 'Fraunces', ui-serif, Georgia, serif;
+    font-feature-settings: 'ss01' 1;
+    font-optical-sizing: auto;
+  }
+
+  .pulse-sheen {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0) 22%),
+      radial-gradient(120% 80% at 12% -10%, rgba(56, 189, 248, 0.10) 0%, rgba(56, 189, 248, 0) 55%),
+      radial-gradient(90% 70% at 100% 0%, rgba(212, 175, 106, 0.08) 0%, rgba(212, 175, 106, 0) 60%);
+  }
+
+  .pulse-hairline {
+    background: linear-gradient(
+      90deg,
+      rgba(212, 175, 106, 0) 0%,
+      rgba(212, 175, 106, 0.55) 18%,
+      rgba(56, 189, 248, 0.5) 55%,
+      rgba(212, 175, 106, 0) 100%
+    );
   }
 }

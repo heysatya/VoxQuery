@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useId } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mic, BarChart2, Download, TrendingUp, TrendingDown, X, Play, Pause, Sparkles, ChevronRight, AlertTriangle } from "lucide-react";
+import { Mic, BarChart2, Download, TrendingUp, TrendingDown, X, Play, Pause, ChevronRight, AlertTriangle } from "lucide-react";
 import { ExecutiveAudioPlayer } from "../insight/ExecutiveAudioPlayer";
 import { FailureNotice } from "../notice/FailureNotice";
 import { fetchBriefing as fetchBriefingApi, fetchAuthenticatedBlob, ApiRequestError } from "../../../lib/api";
@@ -22,6 +22,116 @@ type MorningBriefingCardProps = {
   onOpenFullBriefing?: () => void;
   onAuthExpired?: () => void;
   actionsDisabled?: boolean;
+};
+
+/* ── Signature mark: a bespoke pulse-line glyph, standing in for the generic
+   sparkle icon this card used to lead with. Ties literally to "Business
+   Pulse" rather than borrowing a stock AI-chat icon. ─────────────────────── */
+function PulseMark({ gradientId }: { gradientId: string }) {
+  return (
+    <span
+      className="relative inline-flex items-center justify-center w-7 h-7 rounded-full bg-gradient-to-br from-sky-400/15 to-[#D4AF6A]/10 ring-1 ring-white/[0.08] shrink-0"
+      aria-hidden="true"
+    >
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+        <path
+          d="M1.5 13h4.4l2-8.5L13 20l3.3-13.5L18 13h4.5"
+          stroke={`url(#${gradientId})`}
+          strokeWidth="1.9"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="24" y2="0">
+            <stop offset="0%" stopColor="#38BDF8" />
+            <stop offset="100%" stopColor="#D4AF6A" />
+          </linearGradient>
+        </defs>
+      </svg>
+    </span>
+  );
+}
+
+const SEVERITY_TONE: Record<
+  string,
+  { fg: string; dot: string; ring: string; bg: string; glow: string }
+> = {
+  critical: {
+    fg: "text-rose-300",
+    dot: "bg-rose-400",
+    ring: "ring-rose-500/30",
+    bg: "bg-rose-500/10",
+    glow: "shadow-[0_0_18px_-6px_rgba(244,63,94,0.6)]",
+  },
+  warning: {
+    fg: "text-amber-300",
+    dot: "bg-amber-400",
+    ring: "ring-amber-500/25",
+    bg: "bg-amber-500/10",
+    glow: "shadow-[0_0_18px_-6px_rgba(245,158,11,0.5)]",
+  },
+  info: {
+    fg: "text-emerald-300",
+    dot: "bg-emerald-400",
+    ring: "ring-emerald-500/25",
+    bg: "bg-emerald-500/10",
+    glow: "shadow-[0_0_16px_-6px_rgba(16,185,129,0.45)]",
+  },
+};
+
+/* ── Ledger indicator: replaces the flat colored dot with a directional
+   glyph + magnitude, when the anomaly carries structured direction/
+   magnitude data. Falls back to a plain tone dot for synthetic "all clear"
+   takeaways that have no meaningful direction to show. ────────────────── */
+function SeverityGlyph({
+  severity,
+  direction,
+  magnitudePct,
+  compact = false,
+}: {
+  severity: string;
+  direction?: "up" | "down" | null;
+  magnitudePct?: number | null;
+  compact?: boolean;
+}) {
+  const tone = SEVERITY_TONE[severity] ?? SEVERITY_TONE.info;
+  const size = compact ? "w-8 h-8" : "w-11 h-11";
+
+  if (direction && magnitudePct != null) {
+    return (
+      <div
+        className={`shrink-0 flex flex-col items-center justify-center ${size} rounded-xl ${tone.bg} ring-1 ${tone.ring} ${tone.glow}`}
+        aria-hidden="true"
+      >
+        <svg
+          width="8"
+          height="7"
+          viewBox="0 0 9 8"
+          className={tone.fg}
+          style={{ transform: direction === "down" ? "rotate(180deg)" : undefined }}
+        >
+          <path d="M4.5 0L9 8H0L4.5 0Z" fill="currentColor" />
+        </svg>
+        <span className={`font-mono ${compact ? "text-[9px]" : "text-[10px]"} font-semibold tabular-nums mt-0.5 ${tone.fg}`}>
+          {Math.round(magnitudePct)}%
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`shrink-0 ${size} rounded-xl ${tone.bg} ring-1 ${tone.ring} flex items-center justify-center`} aria-hidden="true">
+      <span className={`w-1.5 h-1.5 rounded-full ${tone.dot}`} />
+    </div>
+  );
+}
+
+type Takeaway = {
+  severity: "warning" | "critical" | "info";
+  direction?: "up" | "down" | null;
+  magnitudePct?: number | null;
+  headline: string;
+  subtext: string;
 };
 
 export function MorningBriefingCard({
@@ -46,6 +156,7 @@ export function MorningBriefingCard({
   const [showDetails, setShowDetails] = useState(false);
   const [isPlayingTopAudio, setIsPlayingTopAudio] = useState(false);
   const [authExpired, setAuthExpired] = useState(false);
+  const gradientId = useId();
 
   const attemptFetch = useCallback(async (): Promise<ExecutiveBriefingData> => {
     if (!token) {
@@ -158,16 +269,17 @@ export function MorningBriefingCard({
         role="status"
         aria-live="polite"
         aria-label="Loading briefing"
-        className="w-full max-w-xl mx-auto mb-6 p-5 rounded-2xl border border-white/10 bg-[var(--bg-surface)] space-y-3"
+        className="w-full max-w-xl mx-auto mb-6 p-5 rounded-2xl border border-white/10 bg-[var(--bg-surface)] relative overflow-hidden space-y-3"
       >
-        <div className="flex items-center justify-between">
-          <div className="h-4 w-32 bg-white/10 rounded animate-pulse" />
-          <div className="h-4 w-16 bg-white/10 rounded animate-pulse" />
+        <div className="pulse-sheen" />
+        <div className="flex items-center justify-between relative">
+          <div className="h-4 w-36 bg-white/10 rounded-full animate-pulse" />
+          <div className="h-4 w-16 bg-white/10 rounded-full animate-pulse" />
         </div>
-        <div className="h-3 w-48 bg-white/5 rounded animate-pulse" />
-        <div className="space-y-2 pt-2">
-          <div className="h-3 w-full bg-white/5 rounded animate-pulse" />
-          <div className="h-3 w-4/5 bg-white/5 rounded animate-pulse" />
+        <div className="h-3 w-48 bg-white/5 rounded-full animate-pulse relative" />
+        <div className="space-y-2 pt-2 relative">
+          <div className="h-3 w-full bg-white/5 rounded-full animate-pulse" />
+          <div className="h-3 w-4/5 bg-white/5 rounded-full animate-pulse" />
         </div>
         <span className="sr-only">Loading today's briefing...</span>
       </div>
@@ -196,21 +308,23 @@ export function MorningBriefingCard({
   const displayedAnomalies = briefing.anomalies ? briefing.anomalies.slice(0, 3) : [];
   const hiddenAnomalyCount = Math.max(0, (briefing.anomalies?.length ?? 0) - 3);
 
-  const takeaways = briefing.anomalies && briefing.anomalies.length > 0
+  const takeaways: Takeaway[] = briefing.anomalies && briefing.anomalies.length > 0
     ? [
         ...displayedAnomalies.map((anom) => ({
           severity: anom.severity || "warning",
-          dotColor: anom.severity === "critical" ? "bg-rose-500" : "bg-amber-400",
+          direction: anom.direction ?? null,
+          magnitudePct: anom.magnitude_pct ?? null,
           headline: anom.title,
-          subtext: `→ ${anom.description}`,
+          subtext: anom.description,
         })),
         ...(hiddenAnomalyCount > 0
           ? [
               {
-                severity: "info",
-                dotColor: "bg-slate-400",
+                severity: "info" as const,
+                direction: null,
+                magnitudePct: null,
                 headline: `+${hiddenAnomalyCount} more`,
-                subtext: `→ ${hiddenAnomalyCount} additional anomaly flag${hiddenAnomalyCount > 1 ? "s" : ""} recorded`,
+                subtext: `${hiddenAnomalyCount} additional anomaly flag${hiddenAnomalyCount > 1 ? "s" : ""} recorded`,
               },
             ]
           : []),
@@ -218,21 +332,33 @@ export function MorningBriefingCard({
     : [
         {
           severity: "info",
-          dotColor: "bg-emerald-400",
+          direction: null,
+          magnitudePct: null,
           headline: briefing.kpis[0] ? `${briefing.kpis[0].label}: ${briefing.kpis[0].value}` : "All primary metrics on track",
-          subtext: `→ ${briefing.kpis[0]?.insight || "Performance matches 30-day benchmarks"}`,
+          subtext: briefing.kpis[0]?.insight || "Performance matches 30-day benchmarks",
         },
         ...(briefing.kpis[1]
           ? [
               {
-                severity: "info",
-                dotColor: "bg-sky-400",
+                severity: "info" as const,
+                direction: null,
+                magnitudePct: null,
                 headline: `${briefing.kpis[1].label}: ${briefing.kpis[1].value}`,
-                subtext: `→ ${briefing.kpis[1].insight || "Stable trajectory"}`,
+                subtext: briefing.kpis[1].insight || "Stable trajectory",
               },
             ]
           : []),
       ];
+
+  const statusBadgeTone = !hasLiveData
+    ? "border-amber-500/25 text-amber-300/90"
+    : anomalyCount === 0
+    ? "border-emerald-500/25 text-emerald-300/90"
+    : anomalyCount === 1
+    ? "border-amber-500/25 text-amber-300/90"
+    : "border-rose-500/25 text-rose-300/90";
+
+  const statusBadgeText = !hasLiveData ? "Unavailable" : anomalyCount === 0 ? "Clear" : `${anomalyCount} ${anomalyCount === 1 ? "flag" : "flags"}`;
 
   /* ── COMPACT SUMMARY PRESENTATION (for Ready screen) ────────── */
   const visibleTakeaways = hasLiveData ? takeaways : [];
@@ -246,32 +372,25 @@ export function MorningBriefingCard({
         exit={{ opacity: 0, height: 0 }}
         className="w-full max-w-xl mx-auto mb-6 rounded-2xl glass-card p-5 relative overflow-hidden border border-white/10 bg-[#10141C]/90 shadow-[0_12px_40px_rgba(0,0,0,0.22)] hover:border-[var(--accent-blue)]/30 transition-all"
       >
+        <div className="pulse-sheen" />
+        <div className="absolute top-0 left-5 right-5 h-px pulse-hairline" />
+
         {/* Compact Header Bar */}
-        <div className="flex items-center justify-between mb-2.5">
+        <div className="flex items-center justify-between mb-2.5 relative">
           <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-[var(--accent-amber)]" aria-hidden="true" />
-            <h3 className="text-xs font-semibold text-white tracking-tight">
-              Today's business pulse
+            <PulseMark gradientId={`${gradientId}-compact`} />
+            <h3 className="font-pulse-display italic text-[15px] font-medium text-white tracking-tight">
+              Business Pulse
             </h3>
-            <span
-              className={`text-[10px] font-mono px-2 py-0.5 rounded-full border font-medium ${
-                !hasLiveData
-                  ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                  : anomalyCount === 0
-                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                  : anomalyCount === 1
-                  ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                  : "bg-rose-500/10 text-rose-400 border-rose-500/20"
-              }`}
-            >
-              {!hasLiveData ? "Unavailable" : anomalyCount === 0 ? "Clear" : `${anomalyCount} ${anomalyCount === 1 ? "flag" : "flags"}`}
+            <span className={`text-[9px] font-mono uppercase tracking-widest px-2 py-0.5 rounded-full border font-medium ${statusBadgeTone}`}>
+              {statusBadgeText}
             </span>
           </div>
 
           <button
             type="button"
             onClick={onOpenFullBriefing}
-            className="px-2.5 py-1 rounded-full bg-[var(--accent-blue)]/15 hover:bg-[var(--accent-blue)]/25 border border-[var(--accent-blue)]/30 text-[var(--accent-blue)] text-[11px] font-medium flex items-center gap-1 transition-colors touch-target"
+            className="px-2.5 py-1 rounded-full border border-white/10 hover:border-[var(--accent-blue)]/40 text-[var(--text-secondary)] hover:text-[var(--accent-blue)] text-[11px] font-medium flex items-center gap-1 transition-colors touch-target"
             aria-label="View full briefing details"
           >
             <span>View briefing</span>
@@ -281,44 +400,47 @@ export function MorningBriefingCard({
 
         {/* Preview Data Notice */}
         {isPreviewData && (
-          <div className="mb-2.5 px-2.5 py-1 rounded-md bg-[var(--accent-amber)]/10 border border-[var(--accent-amber)]/20 text-[var(--accent-amber)] text-[10px] font-medium flex items-center gap-1.5">
+          <div className="mb-2.5 px-2.5 py-1 rounded-md bg-[var(--accent-amber)]/10 border border-[var(--accent-amber)]/20 text-[var(--accent-amber)] text-[10px] font-medium flex items-center gap-1.5 relative">
             <AlertTriangle className="w-3 h-3 shrink-0" />
             <span>Live workspace not connected - no business figures are being shown.</span>
           </div>
         )}
 
         {!hasLiveData && (
-          <div className="mb-3 rounded-lg border border-white/10 bg-[var(--bg-base)]/50 px-3 py-3">
+          <div className="mb-3 rounded-lg border border-white/10 bg-[var(--bg-base)]/50 px-3 py-3 relative">
             <p className="text-xs font-medium text-white">Your business pulse is not available yet.</p>
             <p className="text-[11px] text-[var(--text-secondary)] mt-1">Connect a live workspace to see verified changes, risks, and recommended actions.</p>
           </div>
         )}
 
-        {/* Key takeaways */}
-        <div className="space-y-2 mb-3">
+        {/* Key takeaways — instrument ledger, not a bullet list */}
+        <div className="relative">
           {visibleTakeaways.slice(0, 2).map((item, idx) => (
             <button
               key={idx}
               type="button"
-              className="w-full text-left flex items-start gap-2 group cursor-pointer rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent-blue)]"
-              onClick={onOpenFullBriefing}
+              className={`w-full text-left flex items-center gap-2.5 group cursor-pointer py-2 -mx-1 px-1 rounded-lg hover:bg-white/[0.03] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent-blue)] ${
+                idx > 0 ? "border-t border-white/[0.06]" : ""
+              }`}
+              onClick={() => onSelectInsight?.(item.headline)}
               aria-label={`Open details for ${item.headline}`}
             >
-              <span className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${item.dotColor}`} />
+              <SeverityGlyph severity={item.severity} direction={item.direction} magnitudePct={item.magnitudePct} compact />
               <div className="space-y-0.5 min-w-0 flex-1">
                 <h4 className="text-xs font-medium text-white tracking-wide truncate group-hover:text-[var(--accent-blue)] transition-colors">
                   {item.headline}
                 </h4>
-                <p className="text-[11px] font-mono text-[var(--text-secondary)] font-normal truncate">
+                <p className="text-[11px] text-[var(--text-secondary)] font-normal truncate">
                   {item.subtext}
                 </p>
               </div>
+              <ChevronRight className="w-3.5 h-3.5 text-white/0 group-hover:text-white/30 transition-colors shrink-0" />
             </button>
           ))}
         </div>
 
         {/* Quick Actions */}
-        <div className="flex items-center gap-2 pt-2.5 border-t border-white/5">
+        <div className="flex items-center gap-2 pt-2.5 mt-2.5 border-t border-white/5 relative">
           <button
             type="button"
             onClick={onAskFollowUp}
@@ -352,23 +474,23 @@ export function MorningBriefingCard({
           variant === "drawer" ? "border-[var(--accent-blue)]/40 shadow-2xl bg-[#0F131C]" : ""
         }`}
       >
+        <div className="pulse-sheen" />
+        <div className="absolute top-0 left-5 right-5 h-px pulse-hairline" />
+
         {/* Top Title Bar */}
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-[var(--accent-amber)]" aria-hidden="true" />
-            <h2 className="text-sm font-semibold text-white tracking-tight">
-              Today's business pulse
-            </h2>
-            <span
-              className={`text-[10px] font-mono px-2 py-0.5 rounded-full border font-medium ${
-                !hasLiveData
-                  ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                  : anomalyCount === 0
-                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                  : "bg-amber-500/10 text-amber-400 border-amber-500/20"
-              }`}
-            >
-              {!hasLiveData ? "Unavailable" : anomalyCount === 0 ? "Clear" : `${anomalyCount} ${anomalyCount === 1 ? "flag" : "flags"}`}
+        <div className="flex items-center justify-between mb-1 relative">
+          <div className="flex items-center gap-2.5">
+            <PulseMark gradientId={`${gradientId}-full`} />
+            <div>
+              <h2 className="font-pulse-display italic text-[19px] leading-none font-medium text-white tracking-tight">
+                Business Pulse
+              </h2>
+              <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-muted)] mt-1">
+                {briefing.date}
+              </p>
+            </div>
+            <span className={`self-start text-[9px] font-mono uppercase tracking-widest px-2 py-0.5 rounded-full border font-medium ${statusBadgeTone}`}>
+              {statusBadgeText}
             </span>
           </div>
 
@@ -380,7 +502,7 @@ export function MorningBriefingCard({
                 setIsPlayingTopAudio(nextPlaying);
                 if (nextPlaying && !showDetails) setShowDetails(true);
               }}
-              className="px-2.5 py-1 rounded-full bg-[var(--accent-blue)]/15 hover:bg-[var(--accent-blue)]/25 border border-[var(--accent-blue)]/30 text-[var(--accent-blue)] text-[11px] font-medium flex items-center gap-1.5 transition-colors touch-target"
+              className="px-2.5 py-1 rounded-full bg-[var(--accent-blue)]/10 hover:bg-[var(--accent-blue)]/20 border border-[var(--accent-blue)]/25 text-[var(--accent-blue)] text-[11px] font-medium flex items-center gap-1.5 transition-colors touch-target"
             >
               {isPlayingTopAudio ? (
                 <>
@@ -390,7 +512,7 @@ export function MorningBriefingCard({
               ) : (
                 <>
                   <Play className="w-3 h-3 fill-[var(--accent-blue)]" />
-                  <span>Listen - 45s</span>
+                  <span>Listen · 45s</span>
                 </>
               )}
             </button>
@@ -413,52 +535,58 @@ export function MorningBriefingCard({
 
         {/* Fallback Mode Data Source Indicator */}
         {isPreviewData && (
-          <div className="mb-3 px-3 py-1.5 rounded-lg bg-[var(--accent-amber)]/10 border border-[var(--accent-amber)]/20 text-[var(--accent-amber)] text-[11px] font-medium flex items-center gap-2">
+          <div className="mt-4 mb-3 px-3 py-1.5 rounded-lg bg-[var(--accent-amber)]/10 border border-[var(--accent-amber)]/20 text-[var(--accent-amber)] text-[11px] font-medium flex items-center gap-2 relative">
             <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
             <span>Live workspace not connected - no business figures are being shown.</span>
           </div>
         )}
 
         {/* Executive Greeting Subtitle */}
-        <p className="text-xs text-[var(--text-secondary)] font-medium mb-3">
-          {hasLiveData ? "What changed and what may need attention:" : "Connect your workspace to generate a verified business pulse."}
+        <p className={`text-xs text-[var(--text-secondary)] font-medium mb-1 relative ${isPreviewData ? "" : "mt-4"}`}>
+          {hasLiveData ? "What changed and what may need attention" : "Connect your workspace to generate a verified business pulse."}
         </p>
 
         {!hasLiveData && (
-          <div className="mb-5 rounded-xl border border-white/10 bg-[var(--bg-base)]/50 px-4 py-4">
+          <div className="mt-3 mb-5 rounded-xl border border-white/10 bg-[var(--bg-base)]/50 px-4 py-4 relative">
             <p className="text-sm font-semibold text-white">No verified business figures are available.</p>
             <p className="text-xs text-[var(--text-secondary)] mt-1">Once a live workspace is connected, this briefing will summarize changes, risks, and recommended actions.</p>
           </div>
         )}
 
-        {/* Executive Bullet Takeaways */}
-        <div className="space-y-3 mb-5">
+        {/* Executive Ledger — directional glyph + magnitude, not a bullet dot */}
+        <div className="mb-1 mt-3 relative rounded-xl border border-white/[0.06] bg-black/10 overflow-hidden">
           {visibleTakeaways.map((item, idx) => (
-            <div
+            <motion.div
               key={idx}
-              className="flex items-start gap-2.5 group cursor-pointer"
+              initial={{ opacity: 0, x: -6 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: idx * 0.05, duration: 0.25 }}
+              className={`flex items-start gap-3 group cursor-pointer px-3.5 py-3 hover:bg-white/[0.03] transition-colors ${
+                idx > 0 ? "border-t border-white/[0.06]" : ""
+              }`}
               onClick={() => onSelectInsight?.(item.headline)}
             >
-              <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${item.dotColor}`} />
-              <div className="space-y-0.5">
-                <h4 className="text-xs font-semibold text-white tracking-wide group-hover:text-[var(--accent-blue)] transition-colors">
+              <SeverityGlyph severity={item.severity} direction={item.direction} magnitudePct={item.magnitudePct} />
+              <div className="space-y-0.5 min-w-0 flex-1 pt-0.5">
+                <h4 className="text-[13px] font-semibold text-white tracking-wide group-hover:text-[var(--accent-blue)] transition-colors">
                   {item.headline}
                 </h4>
-                <p className="text-[11px] font-mono text-[var(--text-secondary)] font-normal">
+                <p className="text-[12px] text-[var(--text-secondary)] font-normal leading-relaxed">
                   {item.subtext}
                 </p>
               </div>
-            </div>
+              <ChevronRight className="w-3.5 h-3.5 text-white/0 group-hover:text-white/30 transition-colors shrink-0 mt-2" />
+            </motion.div>
           ))}
         </div>
 
         {/* Bottom Action Bar */}
-        <div className="flex items-center gap-2.5 pt-3 border-t border-white/10">
+        <div className="flex items-center gap-2.5 pt-4 mt-4 border-t border-white/10 relative">
           <button
             type="button"
             onClick={onAskFollowUp}
             disabled={actionsDisabled}
-            className="flex-1 py-2 px-3.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 text-white text-xs font-semibold shadow-md flex items-center justify-center gap-2 transition-all active:scale-[0.98] touch-target disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 py-2 px-3.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 text-white text-xs font-semibold shadow-[0_4px_20px_-4px_rgba(56,189,248,0.4)] ring-1 ring-white/10 flex items-center justify-center gap-2 transition-all active:scale-[0.98] touch-target disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Mic className="w-3.5 h-3.5" />
             <span>Ask a follow-up</span>
@@ -482,12 +610,12 @@ export function MorningBriefingCard({
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
-            className="mt-4 pt-4 border-t border-white/10 space-y-4"
+            className="mt-4 pt-4 border-t border-white/10 space-y-4 relative"
           >
             {/* Audio Podcast Narrator */}
             <div>
               <span className="text-[10px] font-mono text-[var(--accent-blue)] uppercase tracking-widest block mb-2 font-semibold">
-                AUDIO BRIEFING PODCAST
+                Audio briefing
               </span>
               <ExecutiveAudioPlayer
                 textToSpeak={briefing.summary_narrative}
@@ -500,18 +628,19 @@ export function MorningBriefingCard({
             {/* KPI Grid */}
             <div>
               <span className="text-[10px] font-mono text-[var(--text-muted)] uppercase tracking-widest block mb-2 font-semibold">
-                BUSINESS SIGNALS
+                Business signals
               </span>
               <div className="grid grid-cols-2 gap-2.5">
                 {briefing.kpis.map((kpi, idx) => (
                   <div
                     key={idx}
-                    className="p-3 rounded-xl bg-[var(--bg-elevated)]/60 border border-white/10 flex flex-col justify-between hover:border-[var(--accent-blue)]/30 transition-colors cursor-pointer"
+                    className="p-3 rounded-xl bg-[var(--bg-elevated)]/60 border border-white/10 flex flex-col justify-between hover:border-[var(--accent-blue)]/30 transition-colors cursor-pointer relative overflow-hidden"
                     onClick={() => onSelectInsight?.(`Show breakdown for ${kpi.label}`)}
                   >
+                    <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
                     <span className="text-[10px] font-mono text-[var(--text-muted)] font-medium">{kpi.label}</span>
                     <div className="my-1 flex items-baseline justify-between">
-                      <span className="text-sm font-bold text-white">{kpi.value}</span>
+                      <span className="text-sm font-bold text-white font-mono tabular-nums">{kpi.value}</span>
                       {kpi.change_pct !== undefined && kpi.change_pct !== null && kpi.trend ? (
                         <span className={`text-[10px] font-mono font-semibold flex items-center gap-0.5 ${kpi.trend === "up" ? "text-[var(--accent-green)]" : "text-[var(--accent-amber)]"}`}>
                           {kpi.trend === "up" ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}

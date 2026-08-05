@@ -613,6 +613,26 @@ async def render_node(state: PipelineGraphState) -> dict:
     identity: AuditIdentity = state["audit_identity"]  # type: ignore[assignment]
     state["audit"].enqueue_turn(turn, identity, state.get("clarification"))
 
+    # ── Durable persistence: write the now-completed turn back to Postgres ──
+    # submit_query() persists an initial row *before* the pipeline runs, when
+    # completed=False and full_result=NULL. That row is never updated once
+    # the pipeline actually finishes, so anything reading straight from the
+    # `turns` table (pin-to-workspace, share links) can never find a
+    # completed=TRUE row — even though GET /api/result works fine, since it
+    # reads the fully-populated in-memory TurnRecord instead. Persist the
+    # completed turn here so DB-backed reads see the same state.
+    if state.get("db_pool"):
+        try:
+            from app.repositories.turn_repository import TurnRepository
+
+            await TurnRepository(state["db_pool"]).save(turn, tenant_name=identity.tenant_name)
+        except Exception as _persist_exc:
+            logger.warning(
+                "render_node: failed to persist completed turn turn_id=%s error=%s",
+                turn.turn_id,
+                _persist_exc,
+            )
+
     # ── Durable executive memory: extract and upsert candidates ────────────
     # Runs only when a turn completes with a result. Extracts explainable
     # memory candidates (metrics, dimensions, time ranges) from turn metadata.

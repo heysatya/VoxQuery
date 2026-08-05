@@ -161,6 +161,8 @@ export type BriefingAnomaly = {
   severity: "warning" | "critical" | "info";
   title: string;
   description: string;
+  direction?: "up" | "down" | null;
+  magnitude_pct?: number | null;
 };
 
 export type ExecutiveBriefingData = {

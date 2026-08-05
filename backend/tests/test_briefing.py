@@ -92,20 +92,21 @@ async def test_generate_morning_briefing_anomaly_cap_and_date_formatting():
         row_count=1,
     )
 
-    # 15 weeks with 5 huge spikes
+    # 15 weeks with 5 huge spikes (kept off 2024/2025 — those years are
+    # deliberately excluded from anomaly flags; see test below for that).
     rows2 = [
-        [date(2025, 1, 1), 100.0],
-        [date(2025, 1, 8), 102.0],
-        [date(2025, 1, 15), 98.0],
-        [date(2025, 1, 22), 101.0],
-        [date(2025, 1, 29), 1000.0],  # Outlier 1
-        [date(2025, 2, 5), 99.0],
-        [date(2025, 2, 12), 101.0],
-        [date(2025, 2, 19), 1500.0],  # Outlier 2
-        [date(2025, 2, 26), 100.0],
-        [date(2025, 3, 5), 2000.0],  # Outlier 3
-        [date(2025, 3, 12), 2500.0],  # Outlier 4
-        [date(2025, 3, 19), 3000.0],  # Outlier 5
+        [date(2023, 1, 1), 100.0],
+        [date(2023, 1, 8), 102.0],
+        [date(2023, 1, 15), 98.0],
+        [date(2023, 1, 22), 101.0],
+        [date(2023, 1, 29), 1000.0],  # Outlier 1
+        [date(2023, 2, 5), 99.0],
+        [date(2023, 2, 12), 101.0],
+        [date(2023, 2, 19), 1500.0],  # Outlier 2
+        [date(2023, 2, 26), 100.0],
+        [date(2023, 3, 5), 2000.0],  # Outlier 3
+        [date(2023, 3, 12), 2500.0],  # Outlier 4
+        [date(2023, 3, 19), 3000.0],  # Outlier 5
     ]
     payload2 = ResultPayload(
         columns=["order_week", "weekly_revenue"], rows=rows2, row_count=len(rows2)
@@ -118,7 +119,107 @@ async def test_generate_morning_briefing_anomaly_cap_and_date_formatting():
 
     # (b) Cap to top 3 most significant anomalies
     assert len(briefing.anomalies) == 3
-    # (d) Check that title uses actual formatted date instead of "Week N"
+    # (d) Check that title uses actual formatted date instead of "Week N", and
+    # that the wording is direction-aware and executive-attention-grabbing
+    # rather than a flat "Revenue Variance" restatement of the z-score test.
     for anomaly in briefing.anomalies:
-        assert "Revenue Variance (" in anomaly.title
+        assert "Revenue spike — week of " in anomaly.title or (
+            "Revenue shortfall — week of " in anomaly.title
+        )
         assert "Week " not in anomaly.title
+        assert "%" in anomaly.description
+        assert anomaly.severity in ("warning", "critical")
+
+
+@pytest.mark.asyncio
+async def test_generate_morning_briefing_excludes_2024_2025_anomalies():
+    """Anomaly candidates dated 2024/2025 are stale/synthetic artifacts of the
+    source data and must never surface as flags in Business Pulse, even if
+    they'd otherwise be the most statistically significant outliers."""
+    from unittest.mock import AsyncMock, MagicMock
+    from datetime import date
+    from app.models.contracts import ResultPayload
+
+    settings = get_settings()
+    tenant_id = str(uuid4())
+    mock_warehouse = MagicMock()
+
+    payload1 = ResultPayload(
+        columns=["tot_rev", "aov", "orders", "customers"],
+        rows=[[50000.0, 100.0, 500, 200]],
+        row_count=1,
+    )
+
+    # Stable baseline weeks in 2023, then a huge spike in 2024 and another in
+    # 2025. Neither spike should ever appear in briefing.anomalies.
+    rows2 = [
+        [date(2023, 1, 1), 100.0],
+        [date(2023, 1, 8), 102.0],
+        [date(2023, 1, 15), 98.0],
+        [date(2023, 1, 22), 101.0],
+        [date(2023, 1, 29), 99.0],
+        [date(2024, 1, 7), 5000.0],  # Excluded spike — 2024
+        [date(2025, 1, 5), 6000.0],  # Excluded spike — 2025
+    ]
+    payload2 = ResultPayload(
+        columns=["order_week", "weekly_revenue", "weekly_orders", "weekly_customers"],
+        rows=rows2,
+        row_count=len(rows2),
+    )
+    mock_warehouse.execute_readonly = AsyncMock(side_effect=[(payload1, 10), (payload2, 10)])
+
+    briefing = await generate_morning_briefing(
+        tenant_id, settings, user_name="Exec Test", warehouse=mock_warehouse
+    )
+
+    assert briefing.anomalies == []
+    for anomaly in briefing.anomalies:
+        assert "2024" not in anomaly.title
+        assert "2025" not in anomaly.title
+
+
+@pytest.mark.asyncio
+async def test_generate_morning_briefing_week_over_week_kpi_deltas():
+    """KPI cards should carry a real week-over-week % change and direction,
+    computed from the two most recent weeks in the trend series — not the
+    None placeholders the endpoint used to return."""
+    from unittest.mock import AsyncMock, MagicMock
+    from datetime import date
+    from app.models.contracts import ResultPayload
+
+    settings = get_settings()
+    tenant_id = str(uuid4())
+    mock_warehouse = MagicMock()
+
+    payload1 = ResultPayload(
+        columns=["tot_rev", "aov", "orders", "customers"],
+        rows=[[50000.0, 100.0, 500, 200]],
+        row_count=1,
+    )
+
+    # Prior week: $10,000 revenue / 100 orders / 80 customers.
+    # Latest week: $15,000 revenue / 120 orders / 90 customers -> all up WoW.
+    rows2 = [
+        [date(2023, 1, 1), 9800.0, 98, 79],
+        [date(2023, 1, 8), 9900.0, 99, 80],
+        [date(2023, 1, 15), 10000.0, 100, 80],
+        [date(2023, 1, 22), 15000.0, 120, 90],
+    ]
+    payload2 = ResultPayload(
+        columns=["order_week", "weekly_revenue", "weekly_orders", "weekly_customers"],
+        rows=rows2,
+        row_count=len(rows2),
+    )
+    mock_warehouse.execute_readonly = AsyncMock(side_effect=[(payload1, 10), (payload2, 10)])
+
+    briefing = await generate_morning_briefing(
+        tenant_id, settings, user_name="Exec Test", warehouse=mock_warehouse
+    )
+
+    revenue_kpi = briefing.kpis[0]
+    orders_kpi = briefing.kpis[3]
+    assert revenue_kpi.change_pct == 50.0
+    assert revenue_kpi.trend == "up"
+    assert "vs. the prior week" in revenue_kpi.insight
+    assert orders_kpi.change_pct == 20.0
+    assert orders_kpi.trend == "up"

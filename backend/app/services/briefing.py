@@ -28,6 +28,43 @@ from app.warehouse.sql_policy import canonicalize_readonly_sql
 
 logger = logging.getLogger("voxquery.services.briefing")
 
+# Rows in this dataset dated 2024/2025 are known-stale/synthetic artifacts of
+# the source data, not organic recent activity. Surfacing a flag dated
+# "Nov 2025" in a "Today's Business Pulse" reads as current when it isn't —
+# so anomaly candidates in these years are excluded before ranking.
+_EXCLUDED_ANOMALY_YEARS = {2024, 2025}
+
+
+def _extract_year(value: Any) -> int | None:
+    """Best-effort year extraction from a warehouse date/timestamp/string cell."""
+    if hasattr(value, "year"):
+        return value.year
+    if isinstance(value, str):
+        cleaned = value.split("T")[0].split(" ")[0]
+        try:
+            return datetime.strptime(cleaned, "%Y-%m-%d").year
+        except ValueError:
+            return None
+    return None
+
+
+def _pct_change(curr: float | None, prev: float | None) -> float | None:
+    """Percent change from prev -> curr, or None if not computable."""
+    if curr is None or prev in (None, 0):
+        return None
+    return round((curr - prev) / prev * 100, 1)
+
+
+def _trend_direction(pct: float | None) -> str | None:
+    if pct is None:
+        return None
+    if pct > 0.5:
+        return "up"
+    if pct < -0.5:
+        return "down"
+    return "neutral"
+
+
 try:
     _BRIEFING_CACHE_TTL_SECONDS = max(
         30,
@@ -178,11 +215,15 @@ async def _generate_morning_briefing_uncached(
                     ),
                 ]
 
-            # Query 2: Weekly trend series for outlier anomaly detection
+            # Query 2: Weekly trend series for outlier anomaly detection, and for
+            # week-over-week KPI deltas (orders/customers pulled alongside revenue
+            # so the WoW comparison below doesn't need a third round trip).
             trend_sql = canonicalize_readonly_sql(
                 "SELECT "
                 "DATE_TRUNC('week', TRY_TO_TIMESTAMP(orders.order_purchase_timestamp)) AS order_week, "
-                "SUM(order_items.price) AS weekly_revenue "
+                "SUM(order_items.price) AS weekly_revenue, "
+                "COUNT(DISTINCT orders.order_id) AS weekly_orders, "
+                "COUNT(DISTINCT orders.customer_id) AS weekly_customers "
                 "FROM order_items "
                 "JOIN orders ON order_items.order_id = orders.order_id "
                 "GROUP BY 1 ORDER BY 1"
@@ -193,6 +234,47 @@ async def _generate_morning_briefing_uncached(
             if trend_payload and trend_payload.rows and len(trend_payload.rows) >= 3:
                 valid_rows = [r for r in trend_payload.rows if len(r) > 1 and r[1] is not None]
                 weekly_values = [float(r[1]) for r in valid_rows]
+
+                # ── Week-over-week KPI deltas ───────────────────────────────
+                # Compares the two most recent complete weeks in the dataset's
+                # own timeline (not wall-clock "today" — this is historical
+                # data). Only a relative % and direction are surfaced on the
+                # KPI cards, never a calendar date, so this stays meaningful
+                # regardless of which actual years the underlying rows fall in.
+                if len(valid_rows) >= 2 and kpis:
+                    latest_row, prev_row = valid_rows[-1], valid_rows[-2]
+
+                    def _cell(row, idx):
+                        return float(row[idx]) if len(row) > idx and row[idx] is not None else None
+
+                    rev_latest, rev_prev = _cell(latest_row, 1), _cell(prev_row, 1)
+                    orders_latest, orders_prev = _cell(latest_row, 2), _cell(prev_row, 2)
+                    cust_latest, cust_prev = _cell(latest_row, 3), _cell(prev_row, 3)
+                    aov_latest = (
+                        rev_latest / orders_latest
+                        if rev_latest is not None and orders_latest
+                        else None
+                    )
+                    aov_prev = (
+                        rev_prev / orders_prev if rev_prev is not None and orders_prev else None
+                    )
+
+                    # kpis indices: 0=Total Revenue, 1=Active Accounts, 2=Avg Order Value, 3=Total Orders
+                    kpi_deltas = {
+                        0: _pct_change(rev_latest, rev_prev),
+                        1: _pct_change(cust_latest, cust_prev),
+                        2: _pct_change(aov_latest, aov_prev),
+                        3: _pct_change(orders_latest, orders_prev),
+                    }
+                    for kpi_idx, pct in kpi_deltas.items():
+                        if pct is None or kpi_idx >= len(kpis):
+                            continue
+                        kpis[kpi_idx].change_pct = pct
+                        kpis[kpi_idx].trend = _trend_direction(pct)
+                        direction_word = "Up" if pct > 0 else "Down" if pct < 0 else "Flat"
+                        kpis[
+                            kpi_idx
+                        ].insight = f"{direction_word} {abs(pct):.1f}% vs. the prior week."
 
                 candidate_anomalies = []
                 for i, val in enumerate(weekly_values):
@@ -211,6 +293,12 @@ async def _generate_morning_briefing_uncached(
                     if std_dev > 0:
                         z_score = abs(val - baseline_mean) / std_dev
                         if z_score > 2.5:  # (a) Raised threshold to 2.5
+                            row_week = valid_rows[i][0] if i < len(valid_rows) else None
+                            if _extract_year(row_week) in _EXCLUDED_ANOMALY_YEARS:
+                                # Stale/synthetic years — see _EXCLUDED_ANOMALY_YEARS.
+                                # Skip rather than filter after ranking, so a real
+                                # anomaly outside this window can take the slot.
+                                continue
                             abs_dev = abs(val - baseline_mean)
                             candidate_anomalies.append(
                                 {
@@ -218,6 +306,12 @@ async def _generate_morning_briefing_uncached(
                                     "row": valid_rows[i],
                                     "val": val,
                                     "abs_dev": abs_dev,
+                                    "baseline_mean": baseline_mean,
+                                    "pct_diff": (
+                                        (val - baseline_mean) / baseline_mean * 100
+                                        if baseline_mean
+                                        else 0.0
+                                    ),
                                 }
                             )
 
@@ -244,11 +338,41 @@ async def _generate_morning_briefing_uncached(
                         )
 
                     week_val = item["val"]
+                    baseline_val = item["baseline_mean"]
+                    pct_diff = item["pct_diff"]
+                    is_surge = week_val > baseline_val
+
+                    # Executive-attention-grabbing framing: lead with the size and
+                    # direction of the swing (the number a VP actually reacts to),
+                    # not just a flat "deviates from baseline" restatement of the
+                    # z-score test. Severity escalates to "critical" for the
+                    # largest swings so the UI can visually distinguish a >50%
+                    # move from a routine week-to-week wobble.
+                    severity = "critical" if abs(pct_diff) >= 50 else "warning"
+
+                    if is_surge:
+                        title = f"Revenue spike — week of {formatted_date}"
+                        description = (
+                            f"${week_val:,.0f} that week, {abs(pct_diff):.0f}% above the "
+                            f"trailing baseline of ${baseline_val:,.0f}. Worth confirming "
+                            "whether this was a promotion, bulk order, or one-off before "
+                            "citing it as a trend."
+                        )
+                    else:
+                        title = f"Revenue shortfall — week of {formatted_date}"
+                        description = (
+                            f"${week_val:,.0f} that week, {abs(pct_diff):.0f}% below the "
+                            f"trailing baseline of ${baseline_val:,.0f}. Flag for review "
+                            "ahead of the next leadership check-in."
+                        )
+
                     anomalies.append(
                         BriefingAnomaly(
-                            severity="warning",
-                            title=f"Revenue Variance ({formatted_date})",
-                            description=f"Weekly revenue of ${week_val:,.2f} deviates significantly from baseline average.",
+                            severity=severity,
+                            title=title,
+                            description=description,
+                            direction="up" if is_surge else "down",
+                            magnitude_pct=round(abs(pct_diff), 1),
                         )
                     )
         except Exception as e:

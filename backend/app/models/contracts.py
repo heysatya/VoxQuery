@@ -656,6 +656,12 @@ class BriefingAnomaly(BaseModel):
     severity: Literal["warning", "critical", "info"]
     title: str
     description: str
+    # Structured fields so the UI can render a proper directional indicator
+    # and magnitude figure without parsing them back out of prose. Optional
+    # and additive: older cached briefings or other anomaly producers (e.g.
+    # anomaly_detector.check_turn_anomaly) that don't set these still validate.
+    direction: Literal["up", "down"] | None = None
+    magnitude_pct: float | None = None
 
 
 class ExecutiveBriefingResponse(BaseModel):
