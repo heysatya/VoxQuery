@@ -82,9 +82,9 @@ class ClaudeAdapter(LlmAdapter):
         if client is None:
             settings = get_settings()
             client = (
-                AsyncAnthropic(api_key=settings.anthropic_api_key, timeout=120.0)
+                AsyncAnthropic(api_key=settings.anthropic_api_key, timeout=120.0, max_retries=3)
                 if settings.anthropic_api_key
-                else AsyncAnthropic(timeout=120.0)
+                else AsyncAnthropic(timeout=120.0, max_retries=3)
             )
         self.client = client
         self.model_name = get_settings().canonical_sql_model
