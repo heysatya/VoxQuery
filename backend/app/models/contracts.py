@@ -662,6 +662,14 @@ class BriefingAnomaly(BaseModel):
     # anomaly_detector.check_turn_anomaly) that don't set these still validate.
     direction: Literal["up", "down"] | None = None
     magnitude_pct: float | None = None
+    # A fully-formed, self-contained natural-language question the UI sends
+    # to the query pipeline when this flag is clicked — NOT shown anywhere
+    # in the UI itself. `title`/`description` are deliberately date-free (see
+    # briefing.py), but a follow-up query needs a concrete anchor (the real
+    # week) to produce a real, aggregated answer instead of a vague-prompt
+    # SQL fan-out. Optional so other anomaly producers that don't set it
+    # (the UI falls back to `title`) still validate.
+    follow_up_query: str | None = None
 
 
 class ExecutiveBriefingResponse(BaseModel):

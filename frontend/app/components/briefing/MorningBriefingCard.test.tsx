@@ -1,6 +1,6 @@
 import React from "react";
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { MorningBriefingCard } from "./MorningBriefingCard";
 import type { ExecutiveBriefingData } from "../../../lib/types";
 
@@ -130,5 +130,105 @@ describe("MorningBriefingCard", () => {
     render(<MorningBriefingCard token={null} briefing={briefing} variant="drawer" />);
 
     expect(screen.getByText("Clear")).toBeInTheDocument();
+  });
+
+  it("sends the rich follow_up_query (not the bare ranked title) when a flagged anomaly is clicked", () => {
+    // Regression test: clicking "Biggest revenue spike" used to send that
+    // literal 3-word label as the query, which gives the pipeline no
+    // timeframe to anchor on and was observed producing an unaggregated,
+    // duplicate-inflated result instead of a real answer. The click must
+    // send BriefingAnomaly.follow_up_query instead, which carries the real
+    // date/figures the title/description deliberately omit.
+    const onSelectInsight = vi.fn();
+    const briefing = makeBriefing({
+      anomalies: [
+        {
+          severity: "critical",
+          title: "Biggest revenue spike",
+          description: "$8,535,126 that period, 240% above the trailing baseline of $2,512,718.",
+          direction: "up",
+          magnitude_pct: 240,
+          follow_up_query:
+            "What drove the 240% revenue spike in the week of Nov 06, 2023 (revenue reached " +
+            "$8,535,126 vs. a typical $2,512,718)? Show me daily revenue for that week, " +
+            "broken down by product category.",
+        },
+      ],
+    });
+
+    render(
+      <MorningBriefingCard
+        token={null}
+        briefing={briefing}
+        variant="drawer"
+        onSelectInsight={onSelectInsight}
+      />
+    );
+
+    fireEvent.click(screen.getByText("Biggest revenue spike"));
+
+    expect(onSelectInsight).toHaveBeenCalledTimes(1);
+    const sentQuery = onSelectInsight.mock.calls[0][0];
+    expect(sentQuery).not.toBe("Biggest revenue spike");
+    expect(sentQuery).toContain("Nov 06, 2023");
+    expect(sentQuery).toContain("240%");
+  });
+
+  it("falls back to the title when an anomaly has no follow_up_query (older producers, e.g. anomaly_detector)", () => {
+    const onSelectInsight = vi.fn();
+    const briefing = makeBriefing({
+      anomalies: [
+        {
+          severity: "warning",
+          title: "Order volume dipped",
+          description: "Fewer orders than the trailing baseline this period.",
+          // No direction/magnitude_pct/follow_up_query — the older
+          // check_turn_anomaly() shape.
+        },
+      ],
+    });
+
+    render(
+      <MorningBriefingCard
+        token={null}
+        briefing={briefing}
+        variant="drawer"
+        onSelectInsight={onSelectInsight}
+      />
+    );
+
+    fireEvent.click(screen.getByText("Order volume dipped"));
+
+    expect(onSelectInsight).toHaveBeenCalledWith("Order volume dipped");
+  });
+
+  it('opens the full briefing (not a bogus query) when the "+N more" overflow row is clicked', () => {
+    const onSelectInsight = vi.fn();
+    const onOpenFullBriefing = vi.fn();
+    const briefing = makeBriefing({
+      anomalies: [1, 2, 3, 4].map((n) => ({
+        severity: "warning" as const,
+        title: `Anomaly ${n}`,
+        description: `Description ${n}`,
+        direction: "up" as const,
+        magnitude_pct: 10 * n,
+        follow_up_query: `Follow-up for anomaly ${n}`,
+      })),
+    });
+
+    render(
+      <MorningBriefingCard
+        token={null}
+        briefing={briefing}
+        variant="drawer"
+        onSelectInsight={onSelectInsight}
+        onOpenFullBriefing={onOpenFullBriefing}
+      />
+    );
+
+    fireEvent.click(screen.getByText("+1 more"));
+
+    expect(onOpenFullBriefing).toHaveBeenCalledTimes(1);
+    expect(onSelectInsight).not.toHaveBeenCalled();
   });
 });

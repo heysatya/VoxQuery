@@ -132,6 +132,17 @@ type Takeaway = {
   magnitudePct?: number | null;
   headline: string;
   subtext: string;
+  // The query fired when this takeaway is clicked. Falls back to `headline`
+  // for KPI-derived takeaways and older anomaly producers that don't set
+  // BriefingAnomaly.follow_up_query — but for anomaly-derived takeaways this
+  // MUST be the richer, date-anchored prompt, not the bare ranked title
+  // ("Biggest revenue spike" alone gives the query pipeline no timeframe to
+  // anchor on and reliably produces an unaggregated, duplicate-inflated
+  // result instead of a real answer).
+  query: string;
+  // True for the synthetic "+N more" overflow row, which represents "open
+  // the full briefing," not a question — it must never be sent as a query.
+  isOverflow?: boolean;
 };
 
 export function MorningBriefingCard({
@@ -316,6 +327,7 @@ export function MorningBriefingCard({
           magnitudePct: anom.magnitude_pct ?? null,
           headline: anom.title,
           subtext: anom.description,
+          query: anom.follow_up_query ?? anom.title,
         })),
         ...(hiddenAnomalyCount > 0
           ? [
@@ -325,6 +337,8 @@ export function MorningBriefingCard({
                 magnitudePct: null,
                 headline: `+${hiddenAnomalyCount} more`,
                 subtext: `${hiddenAnomalyCount} additional anomaly flag${hiddenAnomalyCount > 1 ? "s" : ""} recorded`,
+                query: "",
+                isOverflow: true,
               },
             ]
           : []),
@@ -336,6 +350,7 @@ export function MorningBriefingCard({
           magnitudePct: null,
           headline: briefing.kpis[0] ? `${briefing.kpis[0].label}: ${briefing.kpis[0].value}` : "All primary metrics on track",
           subtext: briefing.kpis[0]?.insight || "Performance matches 30-day benchmarks",
+          query: briefing.kpis[0] ? `Show breakdown for ${briefing.kpis[0].label}` : "How are we tracking against our usual benchmarks?",
         },
         ...(briefing.kpis[1]
           ? [
@@ -345,6 +360,7 @@ export function MorningBriefingCard({
                 magnitudePct: null,
                 headline: `${briefing.kpis[1].label}: ${briefing.kpis[1].value}`,
                 subtext: briefing.kpis[1].insight || "Stable trajectory",
+                query: `Show breakdown for ${briefing.kpis[1].label}`,
               },
             ]
           : []),
@@ -422,8 +438,10 @@ export function MorningBriefingCard({
               className={`w-full text-left flex items-center gap-2.5 group cursor-pointer py-2 -mx-1 px-1 rounded-lg hover:bg-white/[0.03] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent-blue)] ${
                 idx > 0 ? "border-t border-white/[0.06]" : ""
               }`}
-              onClick={() => onSelectInsight?.(item.headline)}
-              aria-label={`Open details for ${item.headline}`}
+              onClick={() =>
+                item.isOverflow ? onOpenFullBriefing?.() : onSelectInsight?.(item.query)
+              }
+              aria-label={item.isOverflow ? "Open full briefing" : `Open details for ${item.headline}`}
             >
               <SeverityGlyph severity={item.severity} direction={item.direction} magnitudePct={item.magnitudePct} compact />
               <div className="space-y-0.5 min-w-0 flex-1">
@@ -564,7 +582,9 @@ export function MorningBriefingCard({
               className={`flex items-start gap-3 group cursor-pointer px-3.5 py-3 hover:bg-white/[0.03] transition-colors ${
                 idx > 0 ? "border-t border-white/[0.06]" : ""
               }`}
-              onClick={() => onSelectInsight?.(item.headline)}
+              onClick={() =>
+                item.isOverflow ? onOpenFullBriefing?.() : onSelectInsight?.(item.query)
+              }
             >
               <SeverityGlyph severity={item.severity} direction={item.direction} magnitudePct={item.magnitudePct} />
               <div className="space-y-0.5 min-w-0 flex-1 pt-0.5">

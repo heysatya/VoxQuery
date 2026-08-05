@@ -54,6 +54,30 @@ def _extract_year(value: Any) -> int | None:
     return None
 
 
+def _format_internal_date(value: Any) -> str | None:
+    """Best-effort 'Mon DD, YYYY' formatting of a warehouse date/timestamp cell.
+
+    Used ONLY to build BriefingAnomaly.follow_up_query (the hidden prompt sent
+    to the pipeline when a flag is clicked) — never for title/description,
+    which are deliberately date-free. A follow-up query needs a concrete week
+    to anchor a real, aggregated answer; without one, the pipeline has been
+    observed generating an unaggregated join that fans out into duplicate
+    rows instead of a useful answer (see the 2551-row/"duplicate source
+    records" symptom this fixes).
+    """
+    if value is None:
+        return None
+    if hasattr(value, "strftime"):
+        return value.strftime("%b %d, %Y")
+    if isinstance(value, str):
+        cleaned = value.split("T")[0].split(" ")[0]
+        try:
+            return datetime.strptime(cleaned, "%Y-%m-%d").strftime("%b %d, %Y")
+        except ValueError:
+            return cleaned
+    return None
+
+
 def _pct_change(curr: float | None, prev: float | None) -> float | None:
     """Percent change from prev -> curr, or None if not computable."""
     if curr is None or prev in (None, 0):
@@ -348,6 +372,11 @@ async def _generate_morning_briefing_uncached(
                     # largest swings so the UI can visually distinguish a >50%
                     # move from a routine week-to-week wobble.
                     severity = "critical" if abs(pct_diff) >= 50 else "warning"
+                    row_week = item["row"][0] if item.get("row") else None
+                    formatted_date = _format_internal_date(row_week)
+                    period_phrase = (
+                        f"the week of {formatted_date}" if formatted_date else "that period"
+                    )
 
                     if is_surge:
                         ordinal = (
@@ -363,6 +392,12 @@ async def _generate_morning_briefing_uncached(
                             "whether this was a promotion, bulk order, or one-off before "
                             "citing it as a trend."
                         )
+                        follow_up_query = (
+                            f"What drove the {abs(pct_diff):.0f}% revenue spike in "
+                            f"{period_phrase} (revenue reached ${week_val:,.0f} vs. a typical "
+                            f"${baseline_val:,.0f})? Show me daily revenue for that week, "
+                            "broken down by product category."
+                        )
                     else:
                         ordinal = (
                             _RANK_ORDINALS[shortfall_rank]
@@ -376,6 +411,12 @@ async def _generate_morning_briefing_uncached(
                             f"trailing baseline of ${baseline_val:,.0f}. Flag for review "
                             "ahead of the next leadership check-in."
                         )
+                        follow_up_query = (
+                            f"What drove the {abs(pct_diff):.0f}% revenue shortfall in "
+                            f"{period_phrase} (revenue fell to ${week_val:,.0f} vs. a typical "
+                            f"${baseline_val:,.0f})? Show me daily revenue for that week, "
+                            "broken down by product category."
+                        )
 
                     anomalies.append(
                         BriefingAnomaly(
@@ -384,6 +425,7 @@ async def _generate_morning_briefing_uncached(
                             description=description,
                             direction="up" if is_surge else "down",
                             magnitude_pct=round(abs(pct_diff), 1),
+                            follow_up_query=follow_up_query,
                         )
                     )
         except Exception as e:

@@ -136,6 +136,15 @@ async def test_generate_morning_briefing_anomaly_cap_and_ranked_titles():
         assert anomaly.severity in ("warning", "critical")
         assert anomaly.direction == "up"
         assert anomaly.magnitude_pct is not None and anomaly.magnitude_pct > 0
+        # follow_up_query is the ONE place the real date is allowed to
+        # appear: it's a hidden prompt sent to the pipeline when the user
+        # clicks the flag (never rendered in the UI), and it needs a
+        # concrete week to anchor a real, aggregated query instead of the
+        # vague-prompt join fan-out a bare "Biggest revenue spike" causes.
+        assert anomaly.follow_up_query is not None
+        assert "2023" in anomaly.follow_up_query
+        assert "%" in anomaly.follow_up_query
+        assert anomaly.follow_up_query != anomaly.title
 
 
 @pytest.mark.asyncio
