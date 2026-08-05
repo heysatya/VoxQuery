@@ -14,7 +14,7 @@ test.describe('VoxQuery Refinement E2E Browser Verification Suite', () => {
     await expect(page.getByRole('heading', { name: /What would you like to know\?/i })).toBeVisible();
 
     // Starter questions
-    await expect(page.getByRole('button', { name: 'How did revenue perform last quarter?' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'How has monthly revenue trended over time?' })).toBeVisible();
 
     // Honest connection status
     await expect(page.locator('text=/Connected to your workspace|Connecting to your workspace|Reconnecting/i').first()).toBeVisible();
@@ -78,7 +78,7 @@ test.describe('VoxQuery Refinement E2E Browser Verification Suite', () => {
     await page.goto('http://localhost:3000/app');
     await page.waitForLoadState('networkidle');
 
-    const starterBtn = page.getByRole('button', { name: 'How did revenue perform last quarter?' }).first();
+    const starterBtn = page.getByRole('button', { name: 'How has monthly revenue trended over time?' }).first();
     await expect(starterBtn).toBeVisible();
     await starterBtn.click({ force: true });
 

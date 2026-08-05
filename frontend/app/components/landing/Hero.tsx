@@ -7,10 +7,10 @@ import { AmbientVoiceOrb } from "./AmbientVoiceOrb";
 import { SignInCTA } from "./SignInCTA";
 
 const EXAMPLE_QUESTIONS = [
-  "How did revenue perform last quarter?",
-  "What are the top-selling products in EMEA?",
-  "Show me pipeline by region, and flag anything unusual.",
-  "Why did churn spike in March?"
+  "How has monthly revenue trended over time?",
+  "Which product categories drive the most revenue?",
+  "Which states have the most active customers?",
+  "What's our average order value by payment method?"
 ];
 
 export function Hero() {

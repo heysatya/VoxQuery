@@ -77,7 +77,7 @@ def test_briefing_api_endpoint():
 
 
 @pytest.mark.asyncio
-async def test_generate_morning_briefing_anomaly_cap_and_date_formatting():
+async def test_generate_morning_briefing_anomaly_cap_and_ranked_titles():
     from unittest.mock import AsyncMock, MagicMock
     from datetime import date
     from app.models.contracts import ResultPayload
@@ -119,16 +119,23 @@ async def test_generate_morning_briefing_anomaly_cap_and_date_formatting():
 
     # (b) Cap to top 3 most significant anomalies
     assert len(briefing.anomalies) == 3
-    # (d) Check that title uses actual formatted date instead of "Week N", and
-    # that the wording is direction-aware and executive-attention-grabbing
-    # rather than a flat "Revenue Variance" restatement of the z-score test.
-    for anomaly in briefing.anomalies:
-        assert "Revenue spike — week of " in anomaly.title or (
-            "Revenue shortfall — week of " in anomaly.title
-        )
-        assert "Week " not in anomaly.title
+    # Titles must rank by magnitude ("Biggest", "Second-biggest", ...) and
+    # must NEVER surface a calendar date/year — a "week of Oct 2023" flag
+    # next to a header dated today reads as stale data, not a live pulse.
+    # Ranking is by absolute dollar deviation from baseline (not percent —
+    # a $8.5M swing outranks a smaller-dollar move even if its % happens to
+    # be lower against a different trailing baseline), so magnitude_pct is
+    # not expected to be monotonic across ranks; only the ordinal labels
+    # and the absence of any date are asserted here.
+    expected_ordinals = ["Biggest", "Second-biggest", "Third-biggest"]
+    for anomaly, ordinal in zip(briefing.anomalies, expected_ordinals):
+        assert anomaly.title == f"{ordinal} revenue spike"
+        assert "2023" not in anomaly.title
+        assert "2023" not in anomaly.description
         assert "%" in anomaly.description
         assert anomaly.severity in ("warning", "critical")
+        assert anomaly.direction == "up"
+        assert anomaly.magnitude_pct is not None and anomaly.magnitude_pct > 0
 
 
 @pytest.mark.asyncio

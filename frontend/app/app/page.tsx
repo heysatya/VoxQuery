@@ -127,9 +127,9 @@ const fakeAuthRelay: VoxQueryAuthRelay = {
 /* ── Starter questions ───────────────────────────────────────── */
 
 const STARTER_QUESTIONS = [
-  "How did revenue perform last quarter?",
-  "What are the top-selling products?",
-  "Show me pipeline by region",
+  "How has monthly revenue trended over time?",
+  "Which product categories drive the most revenue?",
+  "Which states have the most active customers?",
 ];
 
 /* ── Main App ────────────────────────────────────────────────── */

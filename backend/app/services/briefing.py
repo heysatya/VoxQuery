@@ -34,6 +34,12 @@ logger = logging.getLogger("voxquery.services.briefing")
 # so anomaly candidates in these years are excluded before ranking.
 _EXCLUDED_ANOMALY_YEARS = {2024, 2025}
 
+# Ordinal labels for ranking anomaly flags by magnitude instead of citing a
+# calendar date (see the ranking loop in _generate_morning_briefing_uncached
+# for why). Falls back to "#4", "#5", ... beyond this list, though the
+# anomaly cap is currently 3 per direction so that path is untested headroom.
+_RANK_ORDINALS = ["Biggest", "Second-biggest", "Third-biggest", "Fourth-biggest", "Fifth-biggest"]
+
 
 def _extract_year(value: Any) -> int | None:
     """Best-effort year extraction from a warehouse date/timestamp/string cell."""
@@ -318,25 +324,18 @@ async def _generate_morning_briefing_uncached(
                 # (b) Cap anomalies appended to the top 3 most significant (largest absolute deviation from baseline)
                 candidate_anomalies.sort(key=lambda c: c["abs_dev"], reverse=True)
                 top_3_anomalies = candidate_anomalies[:3]
-                top_3_anomalies.sort(key=lambda c: c["idx"])
+                # Deliberately NOT re-sorted back into chronological order here.
+                # Business Pulse never surfaces a calendar date for these flags
+                # (see title-building loop below) — showing "week of Oct 2023"
+                # next to a header dated "Today" reads as stale/broken, since
+                # this dataset's real timeline predates the app's live clock
+                # by years. Magnitude order lets the copy rank flags instead
+                # ("Biggest", "Second-biggest", ...), which is both accurate
+                # and meaningful without ever citing when the row occurred.
+                surge_rank = 0
+                shortfall_rank = 0
 
                 for item in top_3_anomalies:
-                    row_week = item["row"][0]
-                    # (d) Format actual order_week date from row[0]
-                    if hasattr(row_week, "strftime"):
-                        formatted_date = row_week.strftime("%b %d, %Y")
-                    elif isinstance(row_week, str):
-                        cleaned = row_week.split("T")[0].split(" ")[0]
-                        try:
-                            dt = datetime.strptime(cleaned, "%Y-%m-%d")
-                            formatted_date = dt.strftime("%b %d, %Y")
-                        except ValueError:
-                            formatted_date = cleaned
-                    else:
-                        formatted_date = (
-                            str(row_week) if row_week is not None else f"Week {item['idx'] + 1}"
-                        )
-
                     week_val = item["val"]
                     baseline_val = item["baseline_mean"]
                     pct_diff = item["pct_diff"]
@@ -351,17 +350,29 @@ async def _generate_morning_briefing_uncached(
                     severity = "critical" if abs(pct_diff) >= 50 else "warning"
 
                     if is_surge:
-                        title = f"Revenue spike — week of {formatted_date}"
+                        ordinal = (
+                            _RANK_ORDINALS[surge_rank]
+                            if surge_rank < len(_RANK_ORDINALS)
+                            else f"#{surge_rank + 1}"
+                        )
+                        surge_rank += 1
+                        title = f"{ordinal} revenue spike"
                         description = (
-                            f"${week_val:,.0f} that week, {abs(pct_diff):.0f}% above the "
+                            f"${week_val:,.0f} that period, {abs(pct_diff):.0f}% above the "
                             f"trailing baseline of ${baseline_val:,.0f}. Worth confirming "
                             "whether this was a promotion, bulk order, or one-off before "
                             "citing it as a trend."
                         )
                     else:
-                        title = f"Revenue shortfall — week of {formatted_date}"
+                        ordinal = (
+                            _RANK_ORDINALS[shortfall_rank]
+                            if shortfall_rank < len(_RANK_ORDINALS)
+                            else f"#{shortfall_rank + 1}"
+                        )
+                        shortfall_rank += 1
+                        title = f"{ordinal} revenue shortfall"
                         description = (
-                            f"${week_val:,.0f} that week, {abs(pct_diff):.0f}% below the "
+                            f"${week_val:,.0f} that period, {abs(pct_diff):.0f}% below the "
                             f"trailing baseline of ${baseline_val:,.0f}. Flag for review "
                             "ahead of the next leadership check-in."
                         )

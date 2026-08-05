@@ -9,8 +9,8 @@ test.describe('VoxQuery WOW Features E2E Automated Tests', () => {
     // 2. Verify Hero Header and Morning Briefing
     await expect(page.getByRole('heading', { name: /What would you like to know\?/i })).toBeVisible();
 
-    // 3. Click starter question "How did revenue perform last quarter?"
-    const starterBtn = page.getByRole('button', { name: 'How did revenue perform last quarter?' }).first();
+    // 3. Click starter question "How has monthly revenue trended over time?"
+    const starterBtn = page.getByRole('button', { name: 'How has monthly revenue trended over time?' }).first();
     await expect(starterBtn).toBeVisible();
     await starterBtn.click({ force: true });
 
