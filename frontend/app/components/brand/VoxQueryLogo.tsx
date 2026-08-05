@@ -17,20 +17,15 @@ export function VoxQueryLogo({ variant = "header", className = "" }: VoxQueryLog
   if (variant === "hero") {
     return (
       <div className={`flex flex-col items-center justify-center text-center ${className}`}>
-        <div
-          className="relative isolate w-[min(86vw,360px)] aspect-[3/2] overflow-hidden rounded-[28px] bg-[#090B10] shadow-[0_0_70px_rgba(20,184,166,0.13)]"
-        >
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(14,116,144,0.20),transparent_68%)]" />
+        <div className="relative isolate w-full max-w-[380px] p-2 flex flex-col items-center justify-center">
           <Image
-            src="/brand/voxquery-hero.png"
+            src="/brand/voxquery-hero.svg"
             alt="VoxQuery"
-            width={2048}
-            height={1536}
+            width={400}
+            height={260}
             priority
-            sizes="(max-width: 768px) 86vw, 360px"
-            className="absolute left-[-47%] top-[-59%] h-auto w-[189%] max-w-none mix-blend-screen"
+            className="w-full h-auto object-contain drop-shadow-[0_0_45px_rgba(56,189,248,0.28)]"
           />
-          <div className="pointer-events-none absolute inset-0 rounded-[28px] border border-white/[0.06]" />
           <span className="sr-only">{tagline}</span>
         </div>
       </div>
@@ -125,7 +120,7 @@ export function VoxQueryLogo({ variant = "header", className = "" }: VoxQueryLog
         width={26}
         height={26}
         priority
-          className="h-7 w-auto object-contain drop-shadow-[0_0_10px_rgba(56,189,248,0.2)]"
+        className="h-7 w-auto object-contain drop-shadow-[0_0_10px_rgba(56,189,248,0.2)]"
       />
       <Image
         src="/brand/voxquery-wordmark.svg"
@@ -133,7 +128,7 @@ export function VoxQueryLogo({ variant = "header", className = "" }: VoxQueryLog
         width={120}
         height={26}
         priority
-          className="h-7 w-auto object-contain"
+        className="h-7 w-auto object-contain"
       />
     </Link>
   );

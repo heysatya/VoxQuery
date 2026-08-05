@@ -30,7 +30,7 @@ export function CTASection() {
         </p>
         <div className="mt-8 flex justify-center">
           <SignInCTA className="touch-target inline-flex items-center justify-center px-7 py-3.5 rounded-xl text-sm font-semibold text-white bg-[var(--accent-blue)] hover:bg-[var(--accent-blue)]/85 transition-colors shadow-[0_0_40px_rgba(56,189,248,0.25)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)]">
-            Sign in to VoxQuery
+            Sign In
           </SignInCTA>
         </div>
       </motion.div>

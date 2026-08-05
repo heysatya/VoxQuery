@@ -510,6 +510,26 @@ def test_health_reports_local_stub_dependencies():
     assert response.json()["postgres"] in ("not_configured", "ok", "degraded")
 
 
+def test_get_result_turn_processing_202_logs_at_debug():
+    session = create_session()
+    query = client.post(
+        "/api/query",
+        json={
+            "session_id": session["session_id"],
+            "submitted_text": "Show revenue by region",
+            "input_modality": "text",
+        },
+    )
+    turn_id = query.json()["turn_id"]
+
+    with patch("app.main.logger.warning") as mock_warning, patch("app.main.logger.debug") as mock_debug:
+        res = client.get(f"/api/result/{turn_id}")
+        assert res.status_code == 202
+        assert res.json()["error"]["code"] == "turn_processing"
+        mock_warning.assert_not_called()
+        mock_debug.assert_called_once()
+
+
 def receive_until(ws, event_type: str):
     for _ in range(8):
         event = ws.receive_json()
@@ -518,3 +538,4 @@ def receive_until(ws, event_type: str):
         if event["type"] == event_type:
             return event
     raise AssertionError(f"Did not receive {event_type}")
+

@@ -193,13 +193,19 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="VoxQuery Voice Subsystem", version="0.1.0", lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+cors_kwargs: dict = {
+    "allow_credentials": True,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+}
+if "*" in settings.cors_origins:
+    cors_kwargs["allow_origins"] = ["*"]
+else:
+    cors_kwargs["allow_origins"] = settings.cors_origins
+    if settings.cors_origin_regex:
+        cors_kwargs["allow_origin_regex"] = settings.cors_origin_regex
+
+app.add_middleware(CORSMiddleware, **cors_kwargs)
 
 app.state.audit = audit_store
 app.state.sessions = build_session_store(settings=settings)
@@ -222,15 +228,23 @@ app.state.telemetry = StructuredLogger()
 
 @app.exception_handler(ApiError)
 async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
-    # Always log the real detail server-side, regardless of environment —
-    # only the *client-facing* response strips it in production.
-    logger.warning(
-        "api_error path=%s code=%s status=%s detail=%s",
-        request.url.path,
-        exc.code.value,
-        exc.status_code,
-        exc.detail,
-    )
+    # Non-error status codes (e.g. 202 Accepted for polling turn_processing) are expected
+    # control flow and should not pollute logs with warning-level 'api_error' entries.
+    if exc.status_code < 400:
+        logger.debug(
+            "turn_processing path=%s code=%s status=%s",
+            request.url.path,
+            exc.code.value,
+            exc.status_code,
+        )
+    else:
+        logger.warning(
+            "api_error path=%s code=%s status=%s detail=%s",
+            request.url.path,
+            exc.code.value,
+            exc.status_code,
+            exc.detail,
+        )
     detail = None if settings.app_env == "production" else exc.detail
     return JSONResponse(
         status_code=exc.status_code,

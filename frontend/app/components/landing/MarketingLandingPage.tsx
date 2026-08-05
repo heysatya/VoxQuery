@@ -20,7 +20,7 @@ export function MarketingLandingPage() {
       >
         Skip to content
       </a>
-      <main id="main-content" className="min-h-screen bg-[#090B10] overflow-x-hidden">
+      <main id="main-content" className="min-h-screen bg-[#0A111F] overflow-x-hidden">
         <LandingHeader />
         <Hero />
         <LiveDemoPreview />

@@ -1,24 +1,13 @@
 "use client";
 
-import React, { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { useAuth } from "@clerk/nextjs";
+import React from "react";
 import { MarketingLandingPage } from "./MarketingLandingPage";
 
-const authMode = process.env.NEXT_PUBLIC_AUTH_MODE ?? "fake";
-
-export function LandingPageClient() {
-  if (authMode === "clerk") return <ClerkLandingPage />;
-  return <MarketingLandingPage />;
-}
-
 /**
- * Wraps the marketing page with a lightweight redirect: a returning user who
- * is already signed in shouldn't have to click "Sign in" again from the
- * public landing page — send them straight into the workspace at /app.
- * Signed-out visitors (the common case for a marketing page) see the page
- * immediately with no gating or loading flash.
+ * LandingPageClient renders the marketing landing page for all visitors.
+ * Sign-in CTA buttons allow users to explicitly navigate to the workspace at /app
+ * or sign in via Clerk.
  */
-function ClerkLandingPage() {
+export function LandingPageClient() {
   return <MarketingLandingPage />;
 }

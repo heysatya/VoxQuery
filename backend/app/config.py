@@ -48,6 +48,10 @@ class Settings(BaseSettings):
         default="http://localhost:3000,http://127.0.0.1:3000",
         alias="BACKEND_CORS_ORIGINS",
     )
+    cors_origin_regex: str | None = Field(
+        default=r"https?://(localhost|127\.0\.0\.1|100\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?",
+        alias="CORS_ORIGIN_REGEX",
+    )
     canonical_sql_model: str = Field(
         default="claude-haiku-4-5-20251001", alias="CANONICAL_SQL_MODEL"
     )

@@ -71,10 +71,7 @@
     display: none;
   }
 
-  /* Business Pulse signature treatment: a restrained editorial display face
-     used only for the card's own wordmark/date line, plus a brushed-glass
-     top sheen and soft instrument glow used nowhere else in the app. Scoped
-     narrowly so the rest of the product keeps its plain Inter/mono voice. */
+  /* Business Pulse signature treatment */
   .font-pulse-display {
     font-family: 'Fraunces', ui-serif, Georgia, serif;
     font-feature-settings: 'ss01' 1;
@@ -100,4 +97,43 @@
       rgba(212, 175, 106, 0) 100%
     );
   }
+}
+
+/* Clerk Dark Mode Theme Overrides */
+.cl-organizationSwitcherTrigger,
+.cl-organizationPreviewMainIdentifier,
+.cl-organizationPreviewTextContainer,
+.cl-userButtonTrigger,
+.cl-userPreviewMainIdentifier,
+.cl-organizationSwitcherTriggerText,
+.cl-organizationSwitcherTriggerButton {
+  color: #FFFFFF !important;
+  font-weight: 600 !important;
+}
+
+.cl-organizationSwitcherTriggerIcon,
+.cl-organizationPreviewSecondaryIdentifier,
+.cl-userPreviewSecondaryIdentifier {
+  color: #CBD5E1 !important;
+}
+
+.cl-card,
+.cl-popoverBox,
+.cl-organizationSwitcherPopoverCard,
+.cl-userButtonPopoverCard {
+  background-color: #10141C !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #FFFFFF !important;
+}
+
+.cl-organizationSwitcherPopoverActionButton,
+.cl-userButtonPopoverActionButton,
+.cl-navbarButton {
+  color: #E2E8F0 !important;
+}
+
+.cl-organizationSwitcherPopoverActionButton:hover,
+.cl-userButtonPopoverActionButton:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  color: #FFFFFF !important;
 }

@@ -14,7 +14,19 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const authMode = process.env.NEXT_PUBLIC_AUTH_MODE ?? "fake";
   const wrappedChildren = <ErrorBoundary>{children}</ErrorBoundary>;
-  const body = authMode === "clerk" ? <ClerkProvider>{wrappedChildren}</ClerkProvider> : wrappedChildren;
+  const body =
+    authMode === "clerk" ? (
+      <ClerkProvider
+        signInForceRedirectUrl="/app"
+        signUpForceRedirectUrl="/app"
+        signInFallbackRedirectUrl="/app"
+        signUpFallbackRedirectUrl="/app"
+      >
+        {wrappedChildren}
+      </ClerkProvider>
+    ) : (
+      wrappedChildren
+    );
 
   return (
     <html lang="en">

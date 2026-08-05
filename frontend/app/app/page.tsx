@@ -76,9 +76,15 @@ function ClerkHomePage() {
         <section className="glass-card p-8 max-w-md w-full text-center space-y-6">
           <VoxQueryLogo variant="auth" />
           <p className="text-sm text-[var(--text-secondary)]">Sign in to start your secure voice analytics session.</p>
-          <SignInButton mode="modal">
+          <SignInButton
+            mode="modal"
+            forceRedirectUrl="/app"
+            fallbackRedirectUrl="/app"
+            signUpForceRedirectUrl="/app"
+            signUpFallbackRedirectUrl="/app"
+          >
             <button className="w-full py-3 px-4 bg-[var(--accent-blue)] hover:bg-[var(--accent-blue)]/80 text-white font-semibold rounded-xl transition-colors touch-target">
-              Sign in
+              Sign In
             </button>
           </SignInButton>
         </section>
@@ -106,7 +112,20 @@ function ClerkHomePage() {
           <h1 className="text-xl font-bold text-white">Select or Create an Organization</h1>
           <p className="text-[var(--text-secondary)] text-sm">VoxQuery requires an active Organization to isolate your company data.</p>
           <div className="flex justify-center pt-2">
-            <OrganizationList hidePersonal={true} afterSelectOrganizationUrl="/app" afterCreateOrganizationUrl="/app" />
+            <OrganizationList
+              hidePersonal={true}
+              afterSelectOrganizationUrl="/app"
+              afterCreateOrganizationUrl="/app"
+              appearance={{
+                elements: {
+                  card: "bg-[#10141C] border border-white/10 text-white shadow-2xl rounded-2xl",
+                  headerTitle: "text-white font-bold",
+                  headerSubtitle: "text-slate-300",
+                  organizationPreviewMainIdentifier: "text-white font-semibold",
+                  organizationPreviewSecondaryIdentifier: "text-slate-400"
+                }
+              }}
+            />
           </div>
         </section>
       </main>
@@ -305,7 +324,20 @@ function VoxQueryApp({ auth }: { auth: VoxQueryAuthRelay }) {
           {auth.mode === "clerk" && (
             <div className="flex items-center gap-2 pl-2 border-l border-white/10">
               <div className="glass-card px-2.5 py-1 rounded-full flex items-center">
-                <OrganizationSwitcher hidePersonal={true} afterSelectOrganizationUrl="/" afterLeaveOrganizationUrl="/" />
+                <OrganizationSwitcher
+                  hidePersonal={true}
+                  afterSelectOrganizationUrl="/"
+                  afterLeaveOrganizationUrl="/"
+                  appearance={{
+                    elements: {
+                      organizationSwitcherTrigger: "text-white font-semibold hover:text-[var(--accent-blue)] transition-colors text-xs md:text-sm",
+                      organizationSwitcherTriggerIcon: "text-slate-300",
+                      organizationPreviewTextContainer: "text-white font-semibold",
+                      organizationPreviewMainIdentifier: "text-white font-semibold",
+                      organizationPreviewSecondaryIdentifier: "text-slate-400"
+                    }
+                  }}
+                />
               </div>
               <div className="glass-card p-0.5 rounded-full flex items-center">
                 <UserButton />

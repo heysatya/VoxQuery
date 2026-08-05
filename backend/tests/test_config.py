@@ -106,3 +106,15 @@ def test_production_guardrails_require_keys():
 
     # Valid config passes
     Settings(**base_prod_kwargs).validate_startup()
+
+
+def test_cors_origin_regex_defaults():
+    settings = Settings(APP_ENV="development")
+    assert settings.cors_origin_regex is not None
+    import re
+    pattern = re.compile(settings.cors_origin_regex)
+    assert pattern.match("http://localhost:3000")
+    assert pattern.match("http://127.0.0.1:3000")
+    assert pattern.match("http://100.64.0.2:19864")
+    assert pattern.match("http://192.168.1.5:3000")
+
