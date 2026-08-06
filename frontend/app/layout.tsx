@@ -11,9 +11,9 @@ export const metadata: Metadata = {
   title: "VoxQuery",
   description: "Voice-driven data analyst local MVP",
   icons: {
-    icon: "/favicon.png",
-    shortcut: "/favicon.ico",
-    apple: "/favicon.png"
+    icon: "/brand/voxquery-mark.svg",
+    shortcut: "/brand/voxquery-mark.svg",
+    apple: "/brand/voxquery-mark.svg"
   }
 };
 

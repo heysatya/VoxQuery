@@ -497,32 +497,46 @@ async def execution_node(state: PipelineGraphState) -> dict:
                 sql_to_execute, snowflake_role=claims.snowflake_role, tenant_id=claims.tenant_id
             )
         except Exception as first_exc:
-            logger.warning("Warehouse execution failed (attempt 1): %s. Attempting LLM self-correction...", first_exc)
             retry_success = False
-            try:
-                raw_err = str(first_exc)
-                corrected_gen = await state["llm"].generate_sql(
-                    turn.user_input,
-                    state.get("schema_chunks", []),
-                    state.get("history", []),
-                    resolved_entities=state["session"].resolved_entities,
-                    feedback=f"Warehouse execution error: {raw_err}",
-                    previous_sql=sql_to_execute,
+            is_retryable = getattr(first_exc, "retryable", True)
+            if is_retryable:
+                logger.warning(
+                    "Warehouse execution failed (attempt 1): %s. Attempting LLM self-correction...",
+                    first_exc,
                 )
-                if corrected_gen.validation_passed and corrected_gen.sql:
-                    from app.warehouse.sql_policy import canonicalize_readonly_sql
-                    try:
-                        canonical = canonicalize_readonly_sql(corrected_gen.sql, schema_context=state.get("schema_chunks"))
-                        new_sql = canonical.sql
-                    except Exception:
-                        new_sql = corrected_gen.sql
-                    turn.generated_sql = new_sql
-                    result, shape = await state["warehouse"].execute_readonly(
-                        new_sql, snowflake_role=claims.snowflake_role, tenant_id=claims.tenant_id
+                try:
+                    raw_err = str(first_exc)
+                    corrected_gen = await state["llm"].generate_sql(
+                        turn.user_input,
+                        state.get("schema_chunks", []),
+                        state.get("history", []),
+                        resolved_entities=state["session"].resolved_entities,
+                        feedback=f"Warehouse execution error: {raw_err}",
+                        previous_sql=sql_to_execute,
                     )
-                    retry_success = True
-            except Exception as second_exc:
-                logger.error("Warehouse execution retry failed: %s. Using graceful text fallback.", second_exc)
+                    if corrected_gen.validation_passed and corrected_gen.sql:
+                        from app.warehouse.sql_policy import canonicalize_readonly_sql
+                        try:
+                            canonical = canonicalize_readonly_sql(corrected_gen.sql, schema_context=state.get("schema_chunks"))
+                            new_sql = canonical.sql
+                        except Exception:
+                            new_sql = corrected_gen.sql
+                        turn.generated_sql = new_sql
+                        result, shape = await state["warehouse"].execute_readonly(
+                            new_sql, snowflake_role=claims.snowflake_role, tenant_id=claims.tenant_id
+                        )
+                        retry_success = True
+                except Exception as second_exc:
+                    logger.error("Warehouse execution retry failed: %s. Using graceful text fallback.", second_exc)
+            else:
+                # Connection/timeout/warehouse-infrastructure failure — rewriting
+                # SQL cannot fix this. Skip the wasted LLM call + second cold
+                # connection attempt and go straight to the graceful fallback.
+                logger.error(
+                    "Warehouse execution failed with a non-retryable infrastructure error: %s. "
+                    "Skipping LLM self-correction and using graceful text fallback.",
+                    first_exc,
+                )
 
             if not retry_success:
                 # Return graceful text fallback to frontend instead of crashing with 500
@@ -625,7 +639,9 @@ async def render_node(state: PipelineGraphState) -> dict:
         try:
             from app.repositories.turn_repository import TurnRepository
 
-            await TurnRepository(state["db_pool"]).save(turn, tenant_name=identity.tenant_name)
+            await TurnRepository(state["db_pool"]).save(
+                turn, tenant_name=identity.tenant_name, ensure_parents=False
+            )
         except Exception as _persist_exc:
             logger.warning(
                 "render_node: failed to persist completed turn turn_id=%s error=%s",

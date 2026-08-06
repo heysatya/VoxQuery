@@ -10,14 +10,14 @@ export const metadata: Metadata = {
     title: "VoxQuery — Executive answers at the speed of speech!",
     description:
       "Voice-driven data analysis for the warehouse you already have. Speak directly to your data. Bypass the dashboard and accelerate your decisions.",
-    images: ["/brand/voxquery-hero.png"]
+    images: ["/brand/voxquery-hero.svg"]
   },
   twitter: {
     card: "summary_large_image",
     title: "VoxQuery — Executive answers at the speed of speech!",
     description:
       "Voice-driven data analysis for the warehouse you already have. Speak directly to your data. Bypass the dashboard and accelerate your decisions.",
-    images: ["/brand/voxquery-hero.png"]
+    images: ["/brand/voxquery-hero.svg"]
   }
 };
 

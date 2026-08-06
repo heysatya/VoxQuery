@@ -122,10 +122,22 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
 
 
 class ApiError(Exception):
-    def __init__(self, code: ErrorCode, status_code: int, detail: str | None = None) -> None:
+    def __init__(
+        self,
+        code: ErrorCode,
+        status_code: int,
+        detail: str | None = None,
+        retryable: bool = True,
+    ) -> None:
         self.code = code
         self.status_code = status_code
         self.detail = detail
+        # Whether this failure is plausibly fixable by asking the LLM to
+        # regenerate SQL (e.g. a SQL compilation error). Connection, timeout,
+        # and other warehouse-infrastructure failures are NOT fixable by
+        # rewriting SQL. Defaults to True so any call site that doesn't
+        # classify its error keeps today's behavior.
+        self.retryable = retryable
         super().__init__(code.value)
 
 

@@ -101,7 +101,7 @@ async def lifespan(app: FastAPI):
         pool = await asyncpg.create_pool(
             settings.supabase_database_url,
             min_size=1,
-            max_size=4,
+            max_size=10,
             statement_cache_size=0,
             max_inactive_connection_lifetime=300.0,
             server_settings={
@@ -132,7 +132,7 @@ async def lifespan(app: FastAPI):
                 pool = await asyncpg.create_pool(
                     settings.supabase_database_url,
                     min_size=1,
-                    max_size=4,
+                    max_size=10,
                     statement_cache_size=0,
                     max_inactive_connection_lifetime=300.0,
                     server_settings={
@@ -148,7 +148,11 @@ async def lifespan(app: FastAPI):
             # be shared across tenant connectors and could cross tenant data
             # boundaries. TenantRoutingWarehouseConnector resolves each
             # encrypted tenant DSN independently.
-            warehouse_connector = TenantRoutingWarehouseConnector(settings=settings, db_pool=pool)
+            warehouse_connector = TenantRoutingWarehouseConnector(
+                settings=settings,
+                db_pool=pool,
+                tenant_pool_size=settings.snowflake_tenant_pool_size,
+            )
         else:
             dsn = settings.snowflake_dsn or "dummy_dsn"
             warehouse_connector = SnowflakeWarehouseConnector(dsn=dsn)
@@ -181,6 +185,9 @@ async def lifespan(app: FastAPI):
     from app.observability.langfuse import tracer
     if tracer and tracer.langfuse:
         tracer.langfuse.flush()
+
+    if warehouse_connector is not None and hasattr(warehouse_connector, "close"):
+        await warehouse_connector.close()
 
     await audit_store.stop()
     await app.state.sessions.close()

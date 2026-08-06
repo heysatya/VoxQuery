@@ -250,3 +250,75 @@ async def test_is_provisioned_true_in_dev_fallback_mode(mock_db_pool):
     )
     assert await routing_connector.is_provisioned(uuid4()) is True
     mock_db_pool.acquire.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_tenant_isolation_pools_not_shared(mock_db_pool):
+    """Verify dedicated, isolated SnowflakeConnectionPool per tenant and proper pool reuse."""
+    from app.warehouse.snowflake import SnowflakeConnectionPool
+
+    settings = DummySettings()
+    fernet = Fernet(settings.fernet_key.encode())
+
+    tenant_a = "tenant_a_123"
+    tenant_b = "tenant_b_456"
+
+    dsn_a = "snowflake://usera:passa@accounta/dba/schemaa"
+    dsn_b = "snowflake://userb:passb@accountb/dbb/schemab"
+
+    enc_a = fernet.encrypt(dsn_a.encode()).decode()
+    enc_b = fernet.encrypt(dsn_b.encode()).decode()
+
+    async def mock_fetchrow(query, tenant_id):
+        if tenant_id == tenant_a:
+            return {"snowflake_dsn": enc_a}
+        elif tenant_id == tenant_b:
+            return {"snowflake_dsn": enc_b}
+        return None
+
+    mock_conn = AsyncMock()
+    mock_conn.fetchrow.side_effect = mock_fetchrow
+
+    class MockAcquireContext:
+        async def __aenter__(self):
+            return mock_conn
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+    mock_db_pool.acquire.return_value = MockAcquireContext()
+
+    routing_connector = TenantRoutingWarehouseConnector(settings=settings, db_pool=mock_db_pool)
+
+    # Call _get_connector for both tenants
+    connector_a = await routing_connector._get_connector(tenant_a)
+    connector_b = await routing_connector._get_connector(tenant_b)
+
+    # Assert connectors and pools are distinct non-None instances
+    assert connector_a is not connector_b
+    assert connector_a._pool is not None
+    assert connector_b._pool is not None
+    assert isinstance(connector_a._pool, SnowflakeConnectionPool)
+    assert isinstance(connector_b._pool, SnowflakeConnectionPool)
+    assert connector_a._pool is not connector_b._pool
+
+    # Assert params isolate tenant credentials
+    params_a = connector_a._pool._params
+    params_b = connector_b._pool._params
+
+    assert params_a["user"] == "usera"
+    assert params_a["password"] == "passa"
+    assert params_a["account"] == "accounta"
+
+    assert params_b["user"] == "userb"
+    assert params_b["password"] == "passb"
+    assert params_b["account"] == "accountb"
+
+    assert "userb" not in (params_a["user"], params_a["password"], params_a["account"])
+    assert "usera" not in (params_b["user"], params_b["password"], params_b["account"])
+
+    # Assert calling _get_connector("tenant_a") a second time returns exact same cached instance
+    connector_a_second = await routing_connector._get_connector(tenant_a)
+    assert connector_a_second is connector_a
+    assert connector_a_second._pool is connector_a._pool
+

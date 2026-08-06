@@ -32,8 +32,18 @@ class TurnRepository:
         tenant_name: str | None = None,
         source_tables: list[str] | None = None,
         filter_predicates: list[dict[str, Any]] | None = None,
+        ensure_parents: bool = True,
     ) -> None:
-        """Persists a TurnRecord to Postgres with multi-tenant scoping and row capping."""
+        """Persists a TurnRecord to Postgres with multi-tenant scoping and row capping.
+
+        `ensure_parents` controls whether the tenant/user/session/conversation
+        upserts run. These rows are only created once per turn's lifecycle —
+        `PipelineOrchestrator.submit_query` always calls save() with
+        ensure_parents=True (the default) before the pipeline runs. The later
+        completion save from render_node passes ensure_parents=False, since
+        those parent rows already exist and re-upserting them on every turn
+        is 4 redundant round trips against an already-contended pool.
+        """
         source_tables = source_tables or []
         filter_predicates = filter_predicates or []
 
@@ -57,42 +67,43 @@ class TurnRepository:
         confidence_tier_str = turn.confidence_tier.value if turn.confidence_tier else None
 
         async with self._pool.acquire() as conn:
-            # Ensure tenant, user, session, and conversation records exist for foreign key constraints
-            tenant_display = tenant_name or f"Tenant {turn.tenant_id[:8]}"
-            await conn.execute(
-                "INSERT INTO tenants (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
-                turn.tenant_id,
-                tenant_display,
-            )
-            await conn.execute(
-                """
-                INSERT INTO users (id, email)
-                VALUES ($1, $2)
-                ON CONFLICT (id) DO NOTHING
-                """,
-                turn.user_id,
-                f"user-{turn.user_id}@system.local",
-            )
-            await conn.execute(
-                """
-                INSERT INTO sessions (session_id, tenant_id, user_id, last_active_at)
-                VALUES ($1, $2, $3, NOW())
-                ON CONFLICT (session_id) DO UPDATE SET last_active_at = NOW()
-                """,
-                turn.session_id,
-                turn.tenant_id,
-                turn.user_id,
-            )
-            await conn.execute(
-                """
-                INSERT INTO conversations (id, user_id, tenant_id, title)
-                VALUES ($1, $2, $3, 'Voice Session')
-                ON CONFLICT (id) DO NOTHING
-                """,
-                turn.conversation_id,
-                turn.user_id,
-                turn.tenant_id,
-            )
+            if ensure_parents:
+                # Ensure tenant, user, session, and conversation records exist for foreign key constraints
+                tenant_display = tenant_name or f"Tenant {turn.tenant_id[:8]}"
+                await conn.execute(
+                    "INSERT INTO tenants (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+                    turn.tenant_id,
+                    tenant_display,
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO users (id, email)
+                    VALUES ($1, $2)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    turn.user_id,
+                    f"user-{turn.user_id}@system.local",
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO sessions (session_id, tenant_id, user_id, last_active_at)
+                    VALUES ($1, $2, $3, NOW())
+                    ON CONFLICT (session_id) DO UPDATE SET last_active_at = NOW()
+                    """,
+                    turn.session_id,
+                    turn.tenant_id,
+                    turn.user_id,
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO conversations (id, user_id, tenant_id, title)
+                    VALUES ($1, $2, $3, 'Voice Session')
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    turn.conversation_id,
+                    turn.user_id,
+                    turn.tenant_id,
+                )
 
             await conn.execute(
                 """

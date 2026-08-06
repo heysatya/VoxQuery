@@ -111,11 +111,22 @@ class SnowflakeConnectionPool:
                 rows = cur.fetchall()
                 columns = [d[0].lower() for d in cur.description] if cur.description else []
                 return rows, columns, cur.rowcount
+        except snowflake.connector.errors.ProgrammingError as e:
+            # SQL compilation/syntax error — LLM self-correction may fix this.
+            raise ApiError(
+                ErrorCode.warehouse_error,
+                status_code=400,
+                detail=f"Snowflake SQL error: {type(e).__name__}: {e}",
+                retryable=True,
+            ) from e
         except snowflake.connector.errors.OperationalError as e:
+            # Connection / warehouse-resume / network failure — rewriting SQL
+            # cannot fix this, so callers should not retry with self-correction.
             raise ApiError(
                 ErrorCode.warehouse_error,
                 status_code=502,
                 detail=f"Snowflake warehouse error: {type(e).__name__}",
+                retryable=False,
             ) from e
 
     async def execute(self, sql: str, snowflake_role: str) -> tuple:
@@ -165,6 +176,26 @@ class SnowflakeWarehouseConnector(WarehouseConnector):
             "schema": schema,
         }
 
+    def pool_connection_params(self) -> dict:
+        """Connection kwargs for SnowflakeConnectionPool. Deliberately omits
+        `role` — a pooled connection is reused across queries that may run
+        under different Snowflake roles within the same tenant, so role is
+        switched per-query via `USE ROLE` inside SnowflakeConnectionPool's
+        cursor instead of being baked into the connection itself."""
+        conn_params = self._parse_dsn()
+        params = {
+            "user": conn_params["user"],
+            "password": conn_params["password"],
+            "account": conn_params["account"],
+            "login_timeout": self.timeout_seconds,
+            "network_timeout": self.timeout_seconds,
+        }
+        if conn_params["database"]:
+            params["database"] = conn_params["database"]
+        if conn_params["schema"]:
+            params["schema"] = conn_params["schema"]
+        return params
+
     def _execute_sync(self, sql: str, snowflake_role: str):
         conn_params = self._parse_dsn()
         kwargs = {
@@ -190,12 +221,21 @@ class SnowflakeWarehouseConnector(WarehouseConnector):
                     )
                     row_count = cur.rowcount
                     return rows, columns, row_count
+        except snowflake.connector.errors.ProgrammingError as e:
+            redacted = _redact_dsn(self.dsn)
+            raise ApiError(
+                ErrorCode.warehouse_error,
+                status_code=400,
+                detail=f"Snowflake SQL error (DSN redacted: {redacted}): {type(e).__name__}: {e}",
+                retryable=True,
+            ) from e
         except snowflake.connector.errors.OperationalError as e:
             redacted = _redact_dsn(self.dsn)
             raise ApiError(
                 ErrorCode.warehouse_error,
                 status_code=502,
                 detail=f"Snowflake warehouse timeout or connection error (DSN redacted: {redacted}): {type(e).__name__}",
+                retryable=False,
             ) from e
         except Exception as e:
             redacted = _redact_dsn(self.dsn)
@@ -232,6 +272,7 @@ class SnowflakeWarehouseConnector(WarehouseConnector):
                 ErrorCode.warehouse_timeout,
                 status_code=504,
                 detail=f"Snowflake query timed out after {self.timeout_seconds}s (DSN redacted: {redacted}).",
+                retryable=False,
             )
 
         list_rows = [list(r) for r in rows]

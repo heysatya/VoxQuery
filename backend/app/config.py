@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     snowflake_dsn: str | None = Field(default=None, alias="SNOWFLAKE_DSN")
     fernet_key: str | None = Field(default=None, alias="FERNET_KEY")
     rate_limit_per_minute: int = Field(default=60, alias="RATE_LIMIT_PER_MINUTE")
+    # Number of pre-authenticated, reused Snowflake connections held per
+    # tenant by TenantRoutingWarehouseConnector. Each is a real Snowflake
+    # session + a worker thread, so keep this modest — it's per tenant, not
+    # global. 3 is a reasonable default for moderate per-tenant concurrency.
+    snowflake_tenant_pool_size: int = Field(default=3, alias="SNOWFLAKE_TENANT_POOL_SIZE")
 
     @field_validator("auth_mode")
     @classmethod
