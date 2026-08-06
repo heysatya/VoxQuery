@@ -188,16 +188,16 @@ async def _generate_morning_briefing_uncached(
 
     if warehouse is not None:
         try:
+            from app.services.briefing_compiler import get_or_compile_tenant_briefing_sql
+
+            compiled_queries = await get_or_compile_tenant_briefing_sql(
+                tenant_id=tenant_id,
+                warehouse=warehouse,
+                snowflake_role=snowflake_role,
+            )
+
             # Query 1: Core KPIs
-            kpi_sql = canonicalize_readonly_sql(
-                "SELECT "
-                "SUM(order_items.price * (1 - order_items.discount_rate) + order_items.freight_value) AS total_revenue, "
-                "AVG(order_items.price) AS avg_order_value, "
-                "COUNT(DISTINCT orders.order_id) AS total_orders, "
-                "COUNT(DISTINCT orders.customer_id) AS active_customers "
-                "FROM order_items "
-                "JOIN orders ON order_items.order_id = orders.order_id"
-            ).sql
+            kpi_sql = compiled_queries["kpi_sql"]
             result_payload, _ = await warehouse.execute_readonly(
                 kpi_sql, snowflake_role=snowflake_role, tenant_id=tenant_id
             )
@@ -245,32 +245,32 @@ async def _generate_morning_briefing_uncached(
                     ),
                 ]
 
-            # Query 2: Weekly trend series for outlier anomaly detection, and for
-            # week-over-week KPI deltas (orders/customers pulled alongside revenue
-            # so the WoW comparison below doesn't need a third round trip).
-            trend_sql = canonicalize_readonly_sql(
-                "SELECT "
-                "DATE_TRUNC('week', TRY_TO_TIMESTAMP(orders.order_purchase_timestamp)) AS order_week, "
-                "SUM(order_items.price) AS weekly_revenue, "
-                "COUNT(DISTINCT orders.order_id) AS weekly_orders, "
-                "COUNT(DISTINCT orders.customer_id) AS weekly_customers "
-                "FROM order_items "
-                "JOIN orders ON order_items.order_id = orders.order_id "
-                "GROUP BY 1 ORDER BY 1"
-            ).sql
+            # Query 2: Weekly multi-metric trend series across core business pillars
+            trend_sql = compiled_queries["trend_sql"]
             trend_payload, _ = await warehouse.execute_readonly(
                 trend_sql, snowflake_role=snowflake_role, tenant_id=tenant_id
             )
+
+            # Query 3 (Best-effort): Category driver breakdown for dimensional attribution
+            category_drivers: dict[Any, str] = {}
+            try:
+                cat_sql = compiled_queries["cat_sql"]
+                cat_payload, _ = await warehouse.execute_readonly(
+                    cat_sql, snowflake_role=snowflake_role, tenant_id=tenant_id
+                )
+                if cat_payload and cat_payload.rows:
+                    for c_row in cat_payload.rows:
+                        if len(c_row) >= 2 and c_row[0] is not None and c_row[1]:
+                            w_key = str(c_row[0])
+                            if w_key not in category_drivers:
+                                category_drivers[w_key] = str(c_row[1]).replace("_", " ").title()
+            except Exception as cat_exc:
+                logger.debug("Category driver query omitted/unavailable: %s", cat_exc)
+
             if trend_payload and trend_payload.rows and len(trend_payload.rows) >= 3:
                 valid_rows = [r for r in trend_payload.rows if len(r) > 1 and r[1] is not None]
-                weekly_values = [float(r[1]) for r in valid_rows]
 
                 # ── Week-over-week KPI deltas ───────────────────────────────
-                # Compares the two most recent complete weeks in the dataset's
-                # own timeline (not wall-clock "today" — this is historical
-                # data). Only a relative % and direction are surfaced on the
-                # KPI cards, never a calendar date, so this stays meaningful
-                # regardless of which actual years the underlying rows fall in.
                 if len(valid_rows) >= 2 and kpis:
                     latest_row, prev_row = valid_rows[-1], valid_rows[-2]
 
@@ -306,116 +306,196 @@ async def _generate_morning_briefing_uncached(
                             kpi_idx
                         ].insight = f"{direction_word} {abs(pct):.1f}% vs. the prior week."
 
-                candidate_anomalies = []
-                for i, val in enumerate(weekly_values):
-                    # Trailing window of most recent 8-12 weeks relative to point i (up to 12 weeks)
-                    window = weekly_values[max(0, i - 12) : i]
-                    if len(window) < 3:
-                        window = [v for j, v in enumerate(weekly_values) if j != i]
+                # ── Multi-Pillar Anomaly Engine (NMS Deduplication) ─────────
+                # Evaluates 4 distinct operational pillars:
+                #   Pillar 0: Revenue (Financial / Topline)
+                #   Pillar 1: Orders (Transaction Volume)
+                #   Pillar 2: Customers (Active Accounts)
+                #   Pillar 3: Freight Ratio (Logistics & Unit Economics)
+                #
+                # Enforces Non-Maximum Suppression (NMS): selects at most ONE
+                # top anomaly per pillar, taking top 3 distinct pillars overall.
+                # This guarantees the executive briefing never surfaces 3
+                # repetitive revenue flags.
 
-                    if not window:
-                        continue
+                pillar_definitions = [
+                    {
+                        "key": "revenue",
+                        "col_idx": 1,
+                        "name": "Revenue",
+                        "is_ratio": False,
+                    },
+                    {
+                        "key": "customers",
+                        "col_idx": 3,
+                        "name": "Active Accounts",
+                        "is_ratio": False,
+                    },
+                    {
+                        "key": "orders",
+                        "col_idx": 2,
+                        "name": "Order Volume",
+                        "is_ratio": False,
+                    },
+                    {
+                        "key": "fulfillment",
+                        "col_idx": 4,
+                        "name": "Freight Ratio",
+                        "is_ratio": True,
+                    },
+                ]
 
-                    baseline_mean = sum(window) / len(window)
-                    variance = sum((x - baseline_mean) ** 2 for x in window) / len(window)
-                    std_dev = math.sqrt(variance)
+                candidates_by_pillar: dict[str, list[dict[str, Any]]] = {
+                    p["key"]: [] for p in pillar_definitions
+                }
 
-                    if std_dev > 0:
-                        z_score = abs(val - baseline_mean) / std_dev
-                        if z_score > 2.5:  # (a) Raised threshold to 2.5
-                            row_week = valid_rows[i][0] if i < len(valid_rows) else None
-                            if _extract_year(row_week) in _EXCLUDED_ANOMALY_YEARS:
-                                # Stale/synthetic years — see _EXCLUDED_ANOMALY_YEARS.
-                                # Skip rather than filter after ranking, so a real
-                                # anomaly outside this window can take the slot.
-                                continue
-                            abs_dev = abs(val - baseline_mean)
-                            candidate_anomalies.append(
-                                {
-                                    "idx": i,
-                                    "row": valid_rows[i],
-                                    "val": val,
-                                    "abs_dev": abs_dev,
-                                    "baseline_mean": baseline_mean,
-                                    "pct_diff": (
-                                        (val - baseline_mean) / baseline_mean * 100
-                                        if baseline_mean
-                                        else 0.0
-                                    ),
-                                }
-                            )
+                for pillar in pillar_definitions:
+                    pkey = pillar["key"]
+                    cidx = pillar["col_idx"]
+                    is_ratio = pillar["is_ratio"]
 
-                # (b) Cap anomalies appended to the top 3 most significant (largest absolute deviation from baseline)
-                candidate_anomalies.sort(key=lambda c: c["abs_dev"], reverse=True)
-                top_3_anomalies = candidate_anomalies[:3]
-                # Deliberately NOT re-sorted back into chronological order here.
-                # Business Pulse never surfaces a calendar date for these flags
-                # (see title-building loop below) — showing "week of Oct 2023"
-                # next to a header dated "Today" reads as stale/broken, since
-                # this dataset's real timeline predates the app's live clock
-                # by years. Magnitude order lets the copy rank flags instead
-                # ("Biggest", "Second-biggest", ...), which is both accurate
-                # and meaningful without ever citing when the row occurred.
-                surge_rank = 0
-                shortfall_rank = 0
+                    # Extract time series values for this pillar
+                    p_values: list[float] = []
+                    p_rows: list[Any] = []
+                    for r in valid_rows:
+                        if len(r) > cidx and r[cidx] is not None:
+                            if is_ratio:
+                                rev_val = float(r[1]) if len(r) > 1 and r[1] else 0.0
+                                frt_val = float(r[cidx])
+                                ratio_val = (frt_val / rev_val * 100) if rev_val > 0 else 0.0
+                                p_values.append(ratio_val)
+                            else:
+                                p_values.append(float(r[cidx]))
+                            p_rows.append(r)
 
-                for item in top_3_anomalies:
+                    for i, val in enumerate(p_values):
+                        window = p_values[max(0, i - 12) : i]
+                        if len(window) < 3:
+                            window = [v for j, v in enumerate(p_values) if j != i]
+
+                        if not window:
+                            continue
+
+                        baseline_mean = sum(window) / len(window)
+                        variance = sum((x - baseline_mean) ** 2 for x in window) / len(window)
+                        std_dev = math.sqrt(variance)
+
+                        if std_dev > 0:
+                            z_score = abs(val - baseline_mean) / std_dev
+                        elif val != baseline_mean and baseline_mean != 0:
+                            z_score = abs(val - baseline_mean) / (abs(baseline_mean) * 0.05)
+                        else:
+                            z_score = 0.0
+
+                        if z_score > 2.0:
+                                row_week = p_rows[i][0] if i < len(p_rows) else None
+                                if _extract_year(row_week) in _EXCLUDED_ANOMALY_YEARS:
+                                    continue
+                                abs_dev = abs(val - baseline_mean)
+                                pct_diff = (
+                                    ((val - baseline_mean) / baseline_mean * 100)
+                                    if baseline_mean != 0
+                                    else 0.0
+                                )
+                                candidates_by_pillar[pkey].append(
+                                    {
+                                        "pillar": pkey,
+                                        "pillar_name": pillar["name"],
+                                        "idx": i,
+                                        "row": p_rows[i],
+                                        "val": val,
+                                        "abs_dev": abs_dev,
+                                        "baseline_mean": baseline_mean,
+                                        "pct_diff": pct_diff,
+                                        "z_score": z_score,
+                                    }
+                                )
+
+                # Select top 1 anomaly per pillar (NMS)
+                selected_per_pillar: list[dict[str, Any]] = []
+                for pkey, items in candidates_by_pillar.items():
+                    if items:
+                        # Sort by z_score within each pillar to get the pillar's best signal
+                        items.sort(key=lambda c: c["z_score"], reverse=True)
+                        selected_per_pillar.append(items[0])
+
+                # Sort across pillars by significance and pick top 3 distinct pillars
+                selected_per_pillar.sort(key=lambda c: c["z_score"], reverse=True)
+                top_pillars = selected_per_pillar[:3]
+
+                for item in top_pillars:
+                    pkey = item["pillar"]
                     week_val = item["val"]
                     baseline_val = item["baseline_mean"]
                     pct_diff = item["pct_diff"]
                     is_surge = week_val > baseline_val
+                    severity = "critical" if abs(pct_diff) >= 40 else "warning"
 
-                    # Executive-attention-grabbing framing: lead with the size and
-                    # direction of the swing (the number a VP actually reacts to),
-                    # not just a flat "deviates from baseline" restatement of the
-                    # z-score test. Severity escalates to "critical" for the
-                    # largest swings so the UI can visually distinguish a >50%
-                    # move from a routine week-to-week wobble.
-                    severity = "critical" if abs(pct_diff) >= 50 else "warning"
                     row_week = item["row"][0] if item.get("row") else None
-                    formatted_date = _format_internal_date(row_week)
-                    period_phrase = (
-                        f"the week of {formatted_date}" if formatted_date else "that period"
-                    )
+                    w_key = str(row_week) if row_week else ""
+                    driver_cat = category_drivers.get(w_key)
 
-                    if is_surge:
-                        ordinal = (
-                            _RANK_ORDINALS[surge_rank]
-                            if surge_rank < len(_RANK_ORDINALS)
-                            else f"#{surge_rank + 1}"
-                        )
-                        surge_rank += 1
-                        title = f"{ordinal} revenue spike"
+                    # Build date-free UI title and description (User Requirement 1).
+                    # Historical calendar dates (e.g. "Oct 2023") are NEVER displayed in UI text.
+                    if pkey == "revenue":
+                        if driver_cat:
+                            title = f"Revenue {'Surge' if is_surge else 'Shortfall'} in {driver_cat}"
+                        else:
+                            title = f"Topline Revenue {'Surge' if is_surge else 'Shortfall'}"
                         description = (
-                            f"${week_val:,.0f} that period, {abs(pct_diff):.0f}% above the "
-                            f"trailing baseline of ${baseline_val:,.0f}. Worth confirming "
-                            "whether this was a promotion, bulk order, or one-off before "
-                            "citing it as a trend."
+                            f"${week_val:,.0f} in revenue, {abs(pct_diff):.0f}% "
+                            f"{'above' if is_surge else 'below'} trailing baseline "
+                            f"(${baseline_val:,.0f})."
+                            + (f" Driven by strong demand in {driver_cat}." if driver_cat else "")
                         )
+                        # Build safe, aggregated follow-up query with TOP 5 limits (User Requirement 2)
+                        formatted_date = _format_internal_date(row_week)
+                        p_phrase = f"the week of {formatted_date}" if formatted_date else "that period"
                         follow_up_query = (
-                            f"What drove the {abs(pct_diff):.0f}% revenue spike in "
-                            f"{period_phrase} (revenue reached ${week_val:,.0f} vs. a typical "
-                            f"${baseline_val:,.0f})? Show me daily revenue for that week, "
-                            "broken down by product category."
+                            f"What drove the {abs(pct_diff):.0f}% revenue {'surge' if is_surge else 'shortfall'} in {p_phrase}? "
+                            f"Show me the top 5 product categories by total revenue with weekly totals."
                         )
-                    else:
-                        ordinal = (
-                            _RANK_ORDINALS[shortfall_rank]
-                            if shortfall_rank < len(_RANK_ORDINALS)
-                            else f"#{shortfall_rank + 1}"
-                        )
-                        shortfall_rank += 1
-                        title = f"{ordinal} revenue shortfall"
+
+                    elif pkey == "customers":
+                        title = f"Active Account {'Surge' if is_surge else 'Volume Drop'}"
                         description = (
-                            f"${week_val:,.0f} that period, {abs(pct_diff):.0f}% below the "
-                            f"trailing baseline of ${baseline_val:,.0f}. Flag for review "
-                            "ahead of the next leadership check-in."
+                            f"{int(week_val):,} active accounts, {abs(pct_diff):.0f}% "
+                            f"{'above' if is_surge else 'below'} trailing baseline "
+                            f"({int(baseline_val):,}). Flagged for business review."
                         )
+                        formatted_date = _format_internal_date(row_week)
+                        p_phrase = f"the week of {formatted_date}" if formatted_date else "that period"
                         follow_up_query = (
-                            f"What drove the {abs(pct_diff):.0f}% revenue shortfall in "
-                            f"{period_phrase} (revenue fell to ${week_val:,.0f} vs. a typical "
-                            f"${baseline_val:,.0f})? Show me daily revenue for that week, "
-                            "broken down by product category."
+                            f"What caused the {abs(pct_diff):.0f}% change in active customer accounts in {p_phrase}? "
+                            f"Show me weekly active account volume for the top 5 customer states."
+                        )
+
+                    elif pkey == "orders":
+                        title = f"Transaction Volume {'Surge' if is_surge else 'Contraction'}"
+                        description = (
+                            f"{int(week_val):,} total orders, {abs(pct_diff):.0f}% "
+                            f"{'above' if is_surge else 'below'} trailing average "
+                            f"({int(baseline_val):,} orders)."
+                        )
+                        formatted_date = _format_internal_date(row_week)
+                        p_phrase = f"the week of {formatted_date}" if formatted_date else "that period"
+                        follow_up_query = (
+                            f"What drove the {abs(pct_diff):.0f}% shift in order volume in {p_phrase}? "
+                            f"Show me weekly order counts for the top 5 payment types."
+                        )
+
+                    else:  # fulfillment
+                        title = f"Freight Cost Ratio {'Spike' if is_surge else 'Drop'}"
+                        description = (
+                            f"Freight costs reached {week_val:.1f}% of revenue, {abs(pct_diff):.0f}% "
+                            f"{'above' if is_surge else 'below'} typical ratio "
+                            f"({baseline_val:.1f}%)."
+                        )
+                        formatted_date = _format_internal_date(row_week)
+                        p_phrase = f"the week of {formatted_date}" if formatted_date else "that period"
+                        follow_up_query = (
+                            f"What drove the {abs(pct_diff):.0f}% shift in freight cost ratio in {p_phrase}? "
+                            f"Show me weekly freight cost and order totals for the top 5 shipping regions."
                         )
 
                     anomalies.append(

@@ -592,7 +592,7 @@ sample_queries:
               / NULLIF(pp.total_revenue, 0) * 100, 2
           )                                                       AS revenue_growth_pct
       FROM current_period cp
-      CROSS JOIN previous_period pp
+      JOIN previous_period pp ON 1=1
     tables_used:
       - ORDERS
       - ORDER_ITEMS

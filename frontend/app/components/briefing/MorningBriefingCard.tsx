@@ -234,25 +234,33 @@ export function MorningBriefingCard({
     }
   }, [getToken, token]);
 
-  const audioFetchedTokenRef = React.useRef<string | null>(null);
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
 
-  useEffect(() => {
-    if (!token || audioFetchedTokenRef.current === token) return;
-    audioFetchedTokenRef.current = token;
-    let objectUrl: string | undefined;
-    fetchBriefingBlob("/api/briefing/audio?voice=aura-asteria-en")
-      .then((blob) => {
-        objectUrl = URL.createObjectURL(blob);
+  const handleTogglePlayAudio = async () => {
+    if (isPlayingTopAudio) {
+      setIsPlayingTopAudio(false);
+      return;
+    }
+
+    if (!showDetails) setShowDetails(true);
+
+    if (!audioUrl) {
+      try {
+        setIsLoadingAudio(true);
+        const blob = await fetchBriefingBlob("/api/briefing/audio?voice=aura-asteria-en");
+        const objectUrl = URL.createObjectURL(blob);
         setAudioUrl(objectUrl);
-      })
-      .catch((err) => {
-        console.warn("Failed to prefetch briefing audio:", err);
-        setAudioUrl(undefined);
-      });
-    return () => {
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [fetchBriefingBlob, token]);
+        setIsPlayingTopAudio(true);
+      } catch (err) {
+        console.warn("Failed to load briefing audio:", err);
+        setIsPlayingTopAudio(false);
+      } finally {
+        setIsLoadingAudio(false);
+      }
+    } else {
+      setIsPlayingTopAudio(true);
+    }
+  };
 
   const handleDownloadPdf = async () => {
     try {
@@ -515,14 +523,13 @@ export function MorningBriefingCard({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => {
-                const nextPlaying = !isPlayingTopAudio;
-                setIsPlayingTopAudio(nextPlaying);
-                if (nextPlaying && !showDetails) setShowDetails(true);
-              }}
-              className="px-2.5 py-1 rounded-full bg-[var(--accent-blue)]/10 hover:bg-[var(--accent-blue)]/20 border border-[var(--accent-blue)]/25 text-[var(--accent-blue)] text-[11px] font-medium flex items-center gap-1.5 transition-colors touch-target"
+              onClick={() => void handleTogglePlayAudio()}
+              disabled={isLoadingAudio}
+              className="px-2.5 py-1 rounded-full bg-[var(--accent-blue)]/10 hover:bg-[var(--accent-blue)]/20 border border-[var(--accent-blue)]/25 text-[var(--accent-blue)] text-[11px] font-medium flex items-center gap-1.5 transition-colors touch-target disabled:opacity-50"
             >
-              {isPlayingTopAudio ? (
+              {isLoadingAudio ? (
+                <span>Loading audio...</span>
+              ) : isPlayingTopAudio ? (
                 <>
                   <Pause className="w-3 h-3 fill-[var(--accent-blue)]" />
                   <span>Pause</span>

@@ -5,11 +5,13 @@ Responsibility: Authenticate the connection, look up the turn_id to get the TTS 
 invoke the TTS provider, and stream raw PCM audio bytes to the browser.
 """
 
+import asyncio
 import logging
 import time
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from websockets.exceptions import ConnectionClosed
 
 from app.api.rest import _get_turn_for_user
 from app.config import Settings, get_settings
@@ -81,8 +83,9 @@ async def tts_socket(
             latency_ms=int((time.monotonic() - started_at) * 1000),
         )
         await websocket.close(code=close_code)
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, ConnectionClosed, asyncio.CancelledError):
         close_code = 1006
+        logger.info("TTS WebSocket connection closed cleanly (session: %s)", session_id)
         return
     except TTSUnavailableError:
         telemetry.emit("tts.error", tier=2, error_type="deepgram_connection")

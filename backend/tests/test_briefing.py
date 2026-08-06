@@ -77,7 +77,7 @@ def test_briefing_api_endpoint():
 
 
 @pytest.mark.asyncio
-async def test_generate_morning_briefing_anomaly_cap_and_ranked_titles():
+async def test_generate_morning_briefing_multi_pillar_anomalies():
     from unittest.mock import AsyncMock, MagicMock
     from datetime import date
     from app.models.contracts import ResultPayload
@@ -92,58 +92,55 @@ async def test_generate_morning_briefing_anomaly_cap_and_ranked_titles():
         row_count=1,
     )
 
-    # 15 weeks with 5 huge spikes (kept off 2024/2025 — those years are
-    # deliberately excluded from anomaly flags; see test below for that).
+    # Multi-metric series with distinct spikes across pillars (Revenue, Orders, Customers, Freight)
     rows2 = [
-        [date(2023, 1, 1), 100.0],
-        [date(2023, 1, 8), 102.0],
-        [date(2023, 1, 15), 98.0],
-        [date(2023, 1, 22), 101.0],
-        [date(2023, 1, 29), 1000.0],  # Outlier 1
-        [date(2023, 2, 5), 99.0],
-        [date(2023, 2, 12), 101.0],
-        [date(2023, 2, 19), 1500.0],  # Outlier 2
-        [date(2023, 2, 26), 100.0],
-        [date(2023, 3, 5), 2000.0],  # Outlier 3
-        [date(2023, 3, 12), 2500.0],  # Outlier 4
-        [date(2023, 3, 19), 3000.0],  # Outlier 5
+        [date(2023, 1, 1), 100.0, 10, 8, 10.0],
+        [date(2023, 1, 8), 102.0, 10, 8, 10.0],
+        [date(2023, 1, 15), 98.0, 10, 8, 10.0],
+        [date(2023, 1, 22), 101.0, 10, 8, 10.0],
+        [date(2023, 1, 29), 1000.0, 10, 8, 10.0],  # Revenue Spike
+        [date(2023, 2, 5), 99.0, 10, 8, 10.0],
+        [date(2023, 2, 12), 101.0, 100, 8, 10.0],  # Order Spike
+        [date(2023, 2, 19), 100.0, 10, 80, 10.0],  # Customer Spike
+        [date(2023, 2, 26), 100.0, 10, 8, 50.0],  # Freight Ratio Spike
     ]
     payload2 = ResultPayload(
-        columns=["order_week", "weekly_revenue"], rows=rows2, row_count=len(rows2)
+        columns=["order_week", "weekly_revenue", "weekly_orders", "weekly_customers", "weekly_freight"],
+        rows=rows2,
+        row_count=len(rows2),
     )
-    mock_warehouse.execute_readonly = AsyncMock(side_effect=[(payload1, 10), (payload2, 10)])
+    # Category driver payload
+    payload3 = ResultPayload(
+        columns=["order_week", "product_category_name", "cat_revenue"],
+        rows=[[date(2023, 1, 29), "health_beauty", 800.0]],
+        row_count=1,
+    )
+    mock_warehouse.execute_readonly = AsyncMock(side_effect=[(payload1, 10), (payload2, 10), (payload3, 10)])
 
     briefing = await generate_morning_briefing(
         tenant_id, settings, user_name="Exec Test", warehouse=mock_warehouse
     )
 
-    # (b) Cap to top 3 most significant anomalies
+    # Cap to top 3 distinct domain pillars
     assert len(briefing.anomalies) == 3
-    # Titles must rank by magnitude ("Biggest", "Second-biggest", ...) and
-    # must NEVER surface a calendar date/year — a "week of Oct 2023" flag
-    # next to a header dated today reads as stale data, not a live pulse.
-    # Ranking is by absolute dollar deviation from baseline (not percent —
-    # a $8.5M swing outranks a smaller-dollar move even if its % happens to
-    # be lower against a different trailing baseline), so magnitude_pct is
-    # not expected to be monotonic across ranks; only the ordinal labels
-    # and the absence of any date are asserted here.
-    expected_ordinals = ["Biggest", "Second-biggest", "Third-biggest"]
-    for anomaly, ordinal in zip(briefing.anomalies, expected_ordinals):
-        assert anomaly.title == f"{ordinal} revenue spike"
+
+    titles = [a.title for a in briefing.anomalies]
+    # Verify that titles represent distinct domains (never 3 revenue flags)
+    assert any("Revenue" in t for t in titles)
+    assert any("Account" in t or "Customer" in t for t in titles)
+    assert any("Transaction" in t or "Order" in t for t in titles)
+
+    # Verify User Requirement 1: NEVER surface a calendar date/year in UI titles or descriptions
+    for anomaly in briefing.anomalies:
         assert "2023" not in anomaly.title
         assert "2023" not in anomaly.description
         assert "%" in anomaly.description
         assert anomaly.severity in ("warning", "critical")
-        assert anomaly.direction == "up"
         assert anomaly.magnitude_pct is not None and anomaly.magnitude_pct > 0
-        # follow_up_query is the ONE place the real date is allowed to
-        # appear: it's a hidden prompt sent to the pipeline when the user
-        # clicks the flag (never rendered in the UI), and it needs a
-        # concrete week to anchor a real, aggregated query instead of the
-        # vague-prompt join fan-out a bare "Biggest revenue spike" causes.
+
+        # Verify User Requirement 2: follow_up_query includes top-5 aggregated limits
         assert anomaly.follow_up_query is not None
-        assert "2023" in anomaly.follow_up_query
-        assert "%" in anomaly.follow_up_query
+        assert "top 5" in anomaly.follow_up_query.lower()
         assert anomaly.follow_up_query != anomaly.title
 
 
@@ -182,7 +179,8 @@ async def test_generate_morning_briefing_excludes_2024_2025_anomalies():
         rows=rows2,
         row_count=len(rows2),
     )
-    mock_warehouse.execute_readonly = AsyncMock(side_effect=[(payload1, 10), (payload2, 10)])
+    payload3 = ResultPayload(columns=["order_week", "product_category_name", "cat_revenue"], rows=[], row_count=0)
+    mock_warehouse.execute_readonly = AsyncMock(side_effect=[(payload1, 10), (payload2, 10), (payload3, 10)])
 
     briefing = await generate_morning_briefing(
         tenant_id, settings, user_name="Exec Test", warehouse=mock_warehouse
@@ -226,7 +224,8 @@ async def test_generate_morning_briefing_week_over_week_kpi_deltas():
         rows=rows2,
         row_count=len(rows2),
     )
-    mock_warehouse.execute_readonly = AsyncMock(side_effect=[(payload1, 10), (payload2, 10)])
+    payload3 = ResultPayload(columns=["order_week", "product_category_name", "cat_revenue"], rows=[], row_count=0)
+    mock_warehouse.execute_readonly = AsyncMock(side_effect=[(payload1, 10), (payload2, 10), (payload3, 10)])
 
     briefing = await generate_morning_briefing(
         tenant_id, settings, user_name="Exec Test", warehouse=mock_warehouse

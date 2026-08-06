@@ -22,6 +22,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, WebSocket
 from starlette.websockets import WebSocketDisconnect
+from websockets.exceptions import ConnectionClosed
 
 from app.config import Settings, get_settings
 from app.core.stt import build_stt_provider
@@ -55,9 +56,8 @@ async def _frame_generator(websocket: WebSocket) -> AsyncGenerator[bytes, None]:
                         return  # signal: stream is over; provider will emit final transcript
                 except (json.JSONDecodeError, AttributeError):
                     pass  # malformed text frame — ignore and keep reading
-    except WebSocketDisconnect:
-        import logging
-        logging.getLogger("ws_audio").info("Voice WebSocket session closed cleanly.")
+    except (WebSocketDisconnect, ConnectionClosed, asyncio.CancelledError):
+        logger.info("Voice WebSocket session closed cleanly.")
 
 
 @router.websocket("/ws/audio")
@@ -157,9 +157,10 @@ async def audio_socket(
             await websocket.send_json(event.model_dump(mode="json"))
         # Stream exhausted (stop_recording received and final transcript emitted)
         await websocket.close(code=close_code)
-    except WebSocketDisconnect:
-        # Browser disconnected mid-stream
+    except (WebSocketDisconnect, ConnectionClosed, asyncio.CancelledError):
+        # Browser disconnected mid-stream or ping timed out
         close_code = 1006
+        logger.info("Audio WebSocket session closed cleanly (session: %s)", session_id)
         return
 
     except DeepgramUnavailableError as exc:
