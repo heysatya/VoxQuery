@@ -6,6 +6,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  async rewrites() {
+    return [
+      {
+        source: "/favicon.ico",
+        destination: "/brand/voxquery-mark.svg",
+      },
+      {
+        source: "/favicon.png",
+        destination: "/brand/voxquery-mark.svg",
+      },
+    ];
+  },
 };
 
 export default nextConfig;
