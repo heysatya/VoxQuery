@@ -22,7 +22,7 @@ VoxQuery is an AI-powered voice assistant for data analysis. It enables non-tech
 ### 1. Start the Backend
 ```powershell
 cd backend
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --ws-ping-interval 30 --ws-ping-timeout 120
 ```
 
 ### 2. Start the Frontend

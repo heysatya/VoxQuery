@@ -15,7 +15,8 @@ export function InlineAnomalyNudge({
 }: InlineAnomalyNudgeProps) {
   if (!anomaly) return null;
 
-  const queryText = `Give me the breakdown for ${anomaly.title}`;
+  const queryText =
+    anomaly.follow_up_query ?? `Show me a breakdown for ${anomaly.title}`;
 
   return (
     <div className="my-4 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-200">

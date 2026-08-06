@@ -14,6 +14,7 @@ Frame protocol (interface-contracts.md §1):
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -129,7 +130,18 @@ async def audio_socket(
             yield frame
         stop_time = time.monotonic()
 
+    _heartbeat_task: asyncio.Task | None = None
+
+    async def _heartbeat(ws: WebSocket) -> None:
+        try:
+            while True:
+                await asyncio.sleep(15)
+                await ws.send_json({"type": "heartbeat"})
+        except Exception:
+            pass
+
     try:
+        _heartbeat_task = asyncio.get_event_loop().create_task(_heartbeat(websocket))
         async for event in provider.stream(intercept_stop(_frame_generator(websocket))):
             if isinstance(event, FinalTranscriptEvent):
                 if stop_time is None:
@@ -180,4 +192,6 @@ async def audio_socket(
         except Exception as exc:
             logger.exception("Audio streaming error: %s", str(exc))
     finally:
+        if _heartbeat_task is not None:
+            _heartbeat_task.cancel()
         telemetry.emit("stt.ws.lifecycle", tier=2, action="closed", close_code=close_code)

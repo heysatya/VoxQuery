@@ -39,6 +39,26 @@ def detect_outliers(
     return outliers
 
 
+def _format_dimension_label(raw: str) -> str:
+    """
+    Format a raw warehouse dimension value for display in the UI.
+
+    Bare DB timestamp strings like "2023-11-01 00:00:00" look broken in a banner title;
+    reformat them to "Nov 01, 2023". Non-date values (segment names, product categories, etc.)
+    pass through unchanged.
+    """
+    import datetime
+
+    cleaned = str(raw).strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            dt = datetime.datetime.strptime(cleaned, fmt)
+            return dt.strftime("%b %d, %Y")
+        except ValueError:
+            continue
+    return cleaned
+
+
 def check_turn_anomaly(result_payload: Any) -> Any:
     """
     Lightweight check against metric values returned by current turn query.
@@ -93,8 +113,20 @@ def check_turn_anomaly(result_payload: Any) -> Any:
     direction = "above" if val > mean else "below"
     metric_name = result_payload.columns[num_col_idx].replace("_", " ").title()
 
+    display_label = _format_dimension_label(label)
+
+    follow_up_query = (
+        f"Show me a breakdown of {metric_name} around {display_label} "
+        f"({abs(pct_diff):.1f}% {direction} average). "
+        "What drove this variance? Break it down by product category."
+    )
+
     return BriefingAnomaly(
         severity="warning" if abs(pct_diff) > 20 else "info",
-        title=f"Variance in {label}",
+        title=f"Unusual {metric_name} — {display_label}",
         description=f"{metric_name} ({val:,.2f}) is {abs(pct_diff)}% {direction} average.",
+        direction="up" if val > mean else "down",
+        magnitude_pct=round(abs(pct_diff), 1),
+        follow_up_query=follow_up_query,
     )
+
