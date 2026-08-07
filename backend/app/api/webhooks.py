@@ -68,6 +68,24 @@ def _extract_email(data: dict) -> str:
     return f"unknown_{user_id}@example.com"
 
 
+async def _upsert_user(conn: asyncpg.Connection, user_id: str, email: str) -> None:
+    # Deactivate any stale active user row holding this email under a different ID
+    await conn.execute(
+        "UPDATE users SET deleted_at = NOW() WHERE email = $1 AND id != $2 AND deleted_at IS NULL",
+        email,
+        user_id,
+    )
+    # Upsert the user profile by ID
+    await conn.execute(
+        """
+        INSERT INTO users (id, email, updated_at, deleted_at) VALUES ($1, $2, NOW(), NULL)
+        ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, updated_at = NOW(), deleted_at = NULL
+        """,
+        user_id,
+        email,
+    )
+
+
 @router.post("/api/webhooks/clerk")
 async def clerk_webhook(
     request: Request,
@@ -192,14 +210,7 @@ async def clerk_webhook(
                 if tenant_id and user_id:
                     email = _extract_email(data)
                     # Upsert user
-                    await conn.execute(
-                        """
-                        INSERT INTO users (id, email) VALUES ($1, $2)
-                        ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, deleted_at = NULL
-                        """,
-                        user_id,
-                        email,
-                    )
+                    await _upsert_user(conn, user_id, email)
                     # Upsert membership
                     await conn.execute(
                         """
@@ -259,14 +270,7 @@ async def clerk_webhook(
                 user_id = data.get("id")
                 if user_id:
                     email = _extract_email(data)
-                    await conn.execute(
-                        """
-                        INSERT INTO users (id, email) VALUES ($1, $2)
-                        ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, deleted_at = NULL
-                        """,
-                        user_id,
-                        email,
-                    )
+                    await _upsert_user(conn, user_id, email)
                     logger.info(f"Upserted user profile: {user_id} ({email})")
 
             # 8. user.updated
@@ -274,14 +278,7 @@ async def clerk_webhook(
                 user_id = data.get("id")
                 if user_id:
                     email = _extract_email(data)
-                    await conn.execute(
-                        """
-                        INSERT INTO users (id, email, updated_at, deleted_at) VALUES ($1, $2, NOW(), NULL)
-                        ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, updated_at = NOW(), deleted_at = NULL
-                        """,
-                        user_id,
-                        email,
-                    )
+                    await _upsert_user(conn, user_id, email)
                     logger.info(f"Updated user profile: {user_id}")
 
             # 9. user.deleted

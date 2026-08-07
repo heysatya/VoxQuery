@@ -130,3 +130,30 @@ async def test_user_deleted_webhook_deactivates_user_and_memberships(mock_svix, 
     assert response.status_code == 200
     assert response.json() == {"status": "success"}
     assert mock_conn.execute.call_count >= 2
+
+
+@pytest.mark.asyncio
+async def test_user_created_deactivates_stale_email_collisions(mock_svix, mock_db_pool):
+    _, mock_conn = mock_db_pool
+    mock_svix.return_value = {
+        "type": "user.created",
+        "data": {
+            "id": "user_new_123",
+            "email_addresses": [{"email_address": "voxquery@gmail.com"}],
+        },
+    }
+    headers = {
+        "svix-id": "msg_127",
+        "svix-timestamp": "1234567890",
+        "svix-signature": "v1,signature",
+    }
+
+    response = client.post("/api/webhooks/clerk", json={"data": {}}, headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "success"}
+
+    calls = [str(call) for call in mock_conn.execute.mock_calls]
+    assert any("UPDATE users SET deleted_at = NOW() WHERE email =" in call for call in calls)
+    assert any("INSERT INTO users" in call for call in calls)
+
