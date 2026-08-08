@@ -157,7 +157,7 @@ Request: {submitted_text}"""
         try:
             response = await self.client.messages.create(
                 model=self.model_name,
-                max_tokens=1000,
+                max_tokens=3000,
                 system=[
                     {
                         "type": "text",
@@ -170,6 +170,9 @@ Request: {submitted_text}"""
         except anthropic.AnthropicError as e:
             logger.error(f"LLM Generation failed: {e}")
             raise ApiError(ErrorCode.llm_unavailable, status_code=503) from e
+
+        if getattr(response, "stop_reason", None) == "max_tokens":
+            logger.warning("LLM SQL output was truncated because it reached max_tokens limit (3000).")
 
         response_text = response.content[0].text.strip()
         sql, llm_self_confidence = extract_sql_and_confidence(response_text)
