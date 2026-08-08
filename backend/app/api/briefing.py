@@ -63,10 +63,24 @@ async def get_briefing(
         "Generating morning briefing for tenant_id=%s user_id=%s", claims.tenant_id, claims.user_id
     )
     user_name = _get_user_name(claims)
+    tenant_name = claims.tenant_name
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if not tenant_name and db_pool:
+        try:
+            async with db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT name FROM tenants WHERE id = $1", claims.tenant_id
+                )
+                if row and row["name"]:
+                    tenant_name = row["name"]
+        except Exception:
+            pass
+
     return await generate_morning_briefing(
         claims.tenant_id,
         settings,
         user_name=user_name,
+        tenant_name=tenant_name,
         warehouse=warehouse,
         snowflake_role=claims.snowflake_role,
         redis_client=getattr(getattr(request.app.state, "sessions", None), "client", None),

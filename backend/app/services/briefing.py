@@ -110,6 +110,7 @@ async def generate_morning_briefing(
     tenant_id: str,
     settings: Settings,
     user_name: str = "Executive",
+    tenant_name: str | None = None,
     warehouse: WarehouseConnector | None = None,
     snowflake_role: str = "ANALYST_READONLY",
     redis_client: Any | None = None,
@@ -121,7 +122,7 @@ async def generate_morning_briefing(
     requests from repeating the two warehouse queries while keeping the data
     fresh for the next briefing window.
     """
-    cache_key = (tenant_id, user_name, snowflake_role, warehouse is not None)
+    cache_key = (tenant_id, user_name, snowflake_role, warehouse is not None, tenant_name)
     shared_cache_key = (
         f"briefing:{tenant_id}:{user_name}:{snowflake_role}:"
         f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}:"
@@ -154,6 +155,7 @@ async def generate_morning_briefing(
             tenant_id,
             settings,
             user_name=user_name,
+            tenant_name=tenant_name,
             warehouse=warehouse,
             snowflake_role=snowflake_role,
         )
@@ -174,6 +176,7 @@ async def _generate_morning_briefing_uncached(
     tenant_id: str,
     settings: Settings,
     user_name: str = "Executive",
+    tenant_name: str | None = None,
     warehouse: WarehouseConnector | None = None,
     snowflake_role: str = "ANALYST_READONLY",
 ) -> ExecutiveBriefingResponse:
@@ -214,13 +217,14 @@ async def _generate_morning_briefing_uncached(
                     if tot_rev is not None and tot_rev >= 1e6
                     else (f"${tot_rev:,.2f}" if tot_rev is not None else "No data")
                 )
+                org_label = tenant_name if (tenant_name and not tenant_name.startswith("org_")) else "Organization"
                 kpis = [
                     BriefingKpi(
                         label="Total Revenue (YTD)",
                         value=rev_formatted,
                         change_pct=None,
                         trend=None,
-                        insight=f"Tenant {tenant_id[:8]} revenue target performance.",
+                        insight=f"{org_label} revenue target performance.",
                     ),
                     BriefingKpi(
                         label="Active Accounts",

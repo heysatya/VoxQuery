@@ -159,6 +159,61 @@ async def enforce_active_membership(claims: AuthClaims, app) -> AuthClaims:
             claims.tenant_id,
             claims.user_id,
         )
+        if not row:
+            # Just-In-Time (JIT) membership auto-provisioning for valid authenticated Clerk claims.
+            # Ensures authenticated users/orgs are never locked out when database sync webhooks are pending/delayed.
+            async with pool.acquire() as conn:
+                t_name = claims.tenant_name or f"Organization {claims.tenant_id[:8]}"
+                user_email = claims.email or f"{claims.user_id}@voxquery.local"
+                role_val = claims.role or "admin"
+
+                await conn.execute(
+                    """
+                    INSERT INTO tenants (id, name) VALUES ($1, $2)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    claims.tenant_id,
+                    t_name,
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO users (id, email) VALUES ($1, $2)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    claims.user_id,
+                    user_email,
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO tenant_memberships (tenant_id, user_id, role) VALUES ($1, $2, $3)
+                    ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = EXCLUDED.role, deleted_at = NULL
+                    """,
+                    claims.tenant_id,
+                    claims.user_id,
+                    role_val,
+                )
+                row = await conn.fetchrow(
+                    """
+                    SELECT tm.role, usr.snowflake_role
+                    FROM tenants t
+                    JOIN tenant_memberships tm
+                      ON tm.tenant_id = t.id
+                     AND tm.user_id = $2
+                     AND tm.deleted_at IS NULL
+                    LEFT JOIN user_snowflake_roles usr
+                      ON usr.tenant_id = tm.tenant_id
+                     AND usr.user_id = tm.user_id
+                    LEFT JOIN users u
+                      ON u.id = tm.user_id
+                     AND u.deleted_at IS NULL
+                    WHERE t.id = $1
+                      AND t.deleted_at IS NULL
+                      AND u.id IS NOT NULL
+                    LIMIT 1
+                    """,
+                    claims.tenant_id,
+                    claims.user_id,
+                )
     except Exception as exc:
         logger.exception(
             "auth.membership_lookup_failed user_id=%s tenant_id=%s error=%s",
