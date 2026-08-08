@@ -598,7 +598,15 @@ async def render_node(state: PipelineGraphState) -> dict:
     # background task. summary is on the critical path (TTS depends on it) and is
     # awaited fully; proactive_questions keeps its existing 100ms budget so a slow
     # call never delays turn completion.
-    summary_task = asyncio.create_task(state["story"].summarize(shape, turn.user_input))
+    is_fallback = (
+        getattr(shape, "aggregate_summary", "") == "Execution failed after retry."
+    )
+    if is_fallback:
+        summary_text = result.rows[0][0] if (result.rows and result.rows[0]) else "Query execution temporarily unavailable."
+        async def _mock_summary(*args, **kwargs): return summary_text
+        summary_task = asyncio.create_task(_mock_summary())
+    else:
+        summary_task = asyncio.create_task(state["story"].summarize(shape, turn.user_input))
     proactive_task = asyncio.create_task(
         state["story"].generate_proactive_questions(shape, turn.user_input)
     )

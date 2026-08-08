@@ -126,6 +126,7 @@ IMPORTANT DIALECT & TYPE RULES:
 3. Safe Division: Always use `DIV0(numerator, denominator)` when dividing to prevent division by zero runtime errors.
 4. Case-Insensitive Matching: Use `ILIKE` or `LOWER(col) = LOWER('val')` for string filters.
 5. Numeric Operations: If aggregating numerical values stored in VARCHAR fields, wrap with `TRY_TO_DOUBLE(col)` or `TRY_TO_NUMBER(col)`.
+6. Syntax & Aliases: Ensure all calculated expressions and window functions (e.g. `RANK() OVER (...)`) have complete, valid column aliases. Never leave keywords like 'AS' dangling without an identifier.
 Return your output exactly in the following XML format:
 <sql>
 your valid SQL query here
