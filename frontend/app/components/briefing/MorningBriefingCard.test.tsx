@@ -124,12 +124,15 @@ describe("MorningBriefingCard", () => {
     expect(screen.queryByText(/^[+-]\d/)).not.toBeInTheDocument();
   });
 
-  it("shows a clear/no-flags state when there are no anomalies", () => {
+  it("shows a clear/no-flags state and renders 3 fallback KPI takeaway items when there are no anomalies", () => {
     const briefing = makeBriefing({ anomalies: [] });
 
     render(<MorningBriefingCard token={null} briefing={briefing} variant="drawer" />);
 
     expect(screen.getByText("Clear")).toBeInTheDocument();
+    expect(screen.getByText("Total Revenue (YTD): $4.2M")).toBeInTheDocument();
+    expect(screen.getByText("Active Accounts: 1,204")).toBeInTheDocument();
+    expect(screen.getByText("Avg Order Value: $118.40")).toBeInTheDocument();
   });
 
   it("sends the rich follow_up_query (not the bare ranked title) when a flagged anomaly is clicked", () => {

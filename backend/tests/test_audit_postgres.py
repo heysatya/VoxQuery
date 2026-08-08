@@ -178,3 +178,28 @@ async def test_worker_emits_telemetry_on_queue_failure():
         task.cancel()
 
         mock_emit.assert_called_with("audit.worker.queue_read_error", tier=1, error="queue dead")
+
+
+@pytest.mark.asyncio
+async def test_get_low_quality_feedback_query():
+    store = PostgresAuditStore("fake-dsn")
+    mock_conn = AsyncMock()
+    mock_conn.fetch.return_value = []
+    
+    mock_pool = MagicMock()
+    class MockAcquireContext:
+        async def __aenter__(self):
+            return mock_conn
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+    mock_pool.acquire = MagicMock(return_value=MockAcquireContext())
+    store._pool = mock_pool
+
+    res = await store.get_low_quality_feedback(limit=10, offset=0, tenant_id="tenant-123")
+    assert res == []
+    mock_conn.fetch.assert_called_once()
+    query_args = mock_conn.fetch.call_args[0]
+    assert "t.turn_id" in query_args[0]
+    assert "t.id" not in query_args[0]
+

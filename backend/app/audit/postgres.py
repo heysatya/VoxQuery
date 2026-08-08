@@ -250,7 +250,7 @@ class PostgresAuditStore(AuditStore):
         self, limit: int = 50, offset: int = 0, tenant_id: str | None = None
     ) -> list[dict]:
         query = """
-            SELECT COALESCE(t.turn_id, t.id) as turn_id, t.conversation_id, t.user_input, t.raw_transcript, 
+            SELECT t.turn_id, t.conversation_id, t.user_input, t.raw_transcript, 
                    t.generated_sql, t.chart_type, t.created_at, u.email as user_email
             FROM turns t
             LEFT JOIN users u ON t.user_id = u.id

@@ -1,0 +1,508 @@
+<svg width="698" height="878" viewBox="0 0 698 878" fill="none" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <linearGradient id="brand-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#38BDF8" />
+    <stop offset="50%" stop-color="#0284C7" />
+    <stop offset="100%" stop-color="#4ADE80" />
+  </linearGradient>
+  <linearGradient id="finder-outer" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#38BDF8" />
+    <stop offset="100%" stop-color="#0284C7" />
+  </linearGradient>
+  <linearGradient id="finder-inner" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#4ADE80" />
+    <stop offset="100%" stop-color="#10B981" />
+  </linearGradient>
+  <linearGradient id="bg-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+    <stop offset="0%" stop-color="#0B0F19" />
+    <stop offset="100%" stop-color="#030712" />
+  </linearGradient>
+  <radialGradient id="qr-glow" cx="50%" cy="45%" r="55%">
+    <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.22" />
+    <stop offset="50%" stop-color="#4ADE80" stop-opacity="0.10" />
+    <stop offset="100%" stop-color="#000000" stop-opacity="0" />
+  </radialGradient>
+  <filter id="neon-glow" x="-20%" y="-20%" width="140%" height="140%">
+    <feGaussianBlur stdDeviation="3" result="blur" />
+    <feMerge>
+      <feMergeNode in="blur" />
+      <feMergeNode in="SourceGraphic" />
+    </feMerge>
+  </filter>
+  <filter id="badge-glow" x="-30%" y="-30%" width="160%" height="160%">
+    <feGaussianBlur stdDeviation="6" result="blur" />
+    <feMerge>
+      <feMergeNode in="blur" />
+      <feMergeNode in="SourceGraphic" />
+    </feMerge>
+  </filter>
+</defs>
+<rect width="698" height="878" rx="28" fill="url(#bg-grad)" />
+<rect width="698" height="878" fill="url(#qr-glow)" />
+<rect x="1.5" y="1.5" width="695" height="875" rx="26.5" stroke="url(#brand-grad)" stroke-width="1.5" stroke-opacity="0.4" fill="none" />
+
+<g transform="translate(239, 48)">
+  <!-- Voice Waveform Soundbars -->
+  <rect x="0" y="10" width="4" height="14" rx="2" fill="#38BDF8" />
+  <rect x="7" y="3" width="4" height="28" rx="2" fill="#38BDF8" />
+  <rect x="14" y="0" width="4" height="34" rx="2" fill="url(#brand-grad)" />
+  <rect x="21" y="8" width="4" height="22" rx="2" fill="#4ADE80" />
+  <rect x="28" y="14" width="4" height="8" rx="2" fill="#4ADE80" opacity="0.8" />
+  
+  <!-- VoxQuery Text -->
+  <text x="42" y="25" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="28" letter-spacing="-0.5">
+    <tspan fill="#FFFFFF">Vox</tspan><tspan fill="#38BDF8">Query</tspan>
+  </text>
+</g>
+
+
+<rect x="38" y="98" width="622" height="622" rx="20" fill="#0B0F19" fill-opacity="0.95" stroke="url(#brand-grad)" stroke-width="1.5" stroke-opacity="0.35" />
+
+<circle cx="223.00" cy="121.00" r="7.56" fill="#3ac1e7" />
+<circle cx="241.00" cy="121.00" r="7.56" fill="#3ac2e5" />
+<circle cx="313.00" cy="121.00" r="7.56" fill="#3bc4de" />
+<circle cx="331.00" cy="121.00" r="7.56" fill="#3cc4dc" />
+<circle cx="367.00" cy="121.00" r="7.56" fill="#3cc5d9" />
+<circle cx="385.00" cy="121.00" r="7.56" fill="#3cc6d7" />
+<circle cx="403.00" cy="121.00" r="7.56" fill="#3dc6d5" />
+<circle cx="421.00" cy="121.00" r="7.56" fill="#3dc7d3" />
+<circle cx="439.00" cy="121.00" r="7.56" fill="#3dc7d1" />
+<circle cx="475.00" cy="121.00" r="7.56" fill="#3ec8ce" />
+<circle cx="493.00" cy="121.00" r="7.56" fill="#3ec9cc" />
+<circle cx="223.00" cy="139.00" r="7.56" fill="#3ac2e5" />
+<circle cx="241.00" cy="139.00" r="7.56" fill="#3bc2e4" />
+<circle cx="277.00" cy="139.00" r="7.56" fill="#3bc3e0" />
+<circle cx="295.00" cy="139.00" r="7.56" fill="#3bc4de" />
+<circle cx="313.00" cy="139.00" r="7.56" fill="#3cc4dc" />
+<circle cx="331.00" cy="139.00" r="7.56" fill="#3cc5da" />
+<circle cx="349.00" cy="139.00" r="7.56" fill="#3cc5d9" />
+<circle cx="367.00" cy="139.00" r="7.56" fill="#3cc6d7" />
+<circle cx="421.00" cy="139.00" r="7.56" fill="#3dc7d1" />
+<circle cx="457.00" cy="139.00" r="7.56" fill="#3ec8ce" />
+<circle cx="475.00" cy="139.00" r="7.56" fill="#3ec9cc" />
+<circle cx="223.00" cy="157.00" r="7.56" fill="#3bc2e4" />
+<circle cx="241.00" cy="157.00" r="7.56" fill="#3bc3e2" />
+<circle cx="259.00" cy="157.00" r="7.56" fill="#3bc3e0" />
+<circle cx="331.00" cy="157.00" r="7.56" fill="#3cc5d9" />
+<circle cx="367.00" cy="157.00" r="7.56" fill="#3dc6d5" />
+<circle cx="403.00" cy="157.00" r="7.56" fill="#3dc7d1" />
+<circle cx="475.00" cy="157.00" r="7.56" fill="#3ec9ca" />
+<circle cx="223.00" cy="175.00" r="7.56" fill="#3bc3e2" />
+<circle cx="241.00" cy="175.00" r="7.56" fill="#3bc3e0" />
+<circle cx="385.00" cy="175.00" r="7.56" fill="#3dc7d1" />
+<circle cx="421.00" cy="175.00" r="7.56" fill="#3ec8ce" />
+<circle cx="457.00" cy="175.00" r="7.56" fill="#3ec9ca" />
+<circle cx="475.00" cy="175.00" r="7.56" fill="#3fcac8" />
+<circle cx="205.00" cy="193.00" r="7.56" fill="#3bc3e2" />
+<circle cx="223.00" cy="193.00" r="7.56" fill="#3bc3e0" />
+<circle cx="259.00" cy="193.00" r="7.56" fill="#3cc4dc" />
+<circle cx="331.00" cy="193.00" r="7.56" fill="#3dc6d5" />
+<circle cx="367.00" cy="193.00" r="7.56" fill="#3dc7d1" />
+<circle cx="385.00" cy="193.00" r="7.56" fill="#3ec8d0" />
+<circle cx="457.00" cy="193.00" r="7.56" fill="#3fcac8" />
+<circle cx="493.00" cy="193.00" r="7.56" fill="#3fcbc5" />
+<circle cx="223.00" cy="211.00" r="7.56" fill="#3bc4de" />
+<circle cx="259.00" cy="211.00" r="7.56" fill="#3cc5da" />
+<circle cx="313.00" cy="211.00" r="7.56" fill="#3dc6d5" />
+<circle cx="349.00" cy="211.00" r="7.56" fill="#3dc7d1" />
+<circle cx="367.00" cy="211.00" r="7.56" fill="#3ec8d0" />
+<circle cx="421.00" cy="211.00" r="7.56" fill="#3ec9ca" />
+<circle cx="439.00" cy="211.00" r="7.56" fill="#3fcac8" />
+<circle cx="205.00" cy="229.00" r="7.56" fill="#3bc4de" />
+<circle cx="241.00" cy="229.00" r="7.56" fill="#3cc5da" />
+<circle cx="277.00" cy="229.00" r="7.56" fill="#3cc6d7" />
+<circle cx="313.00" cy="229.00" r="7.56" fill="#3dc7d3" />
+<circle cx="349.00" cy="229.00" r="7.56" fill="#3ec8d0" />
+<circle cx="385.00" cy="229.00" r="7.56" fill="#3ec9cc" />
+<circle cx="421.00" cy="229.00" r="7.56" fill="#3fcac8" />
+<circle cx="457.00" cy="229.00" r="7.56" fill="#3fcbc5" />
+<circle cx="493.00" cy="229.00" r="7.56" fill="#40ccc1" />
+<circle cx="205.00" cy="247.00" r="7.56" fill="#3cc4dc" />
+<circle cx="223.00" cy="247.00" r="7.56" fill="#3cc5da" />
+<circle cx="241.00" cy="247.00" r="7.56" fill="#3cc5d9" />
+<circle cx="385.00" cy="247.00" r="7.56" fill="#3ec9ca" />
+<circle cx="403.00" cy="247.00" r="7.56" fill="#3fcac8" />
+<circle cx="475.00" cy="247.00" r="7.56" fill="#40ccc1" />
+<circle cx="97.00" cy="265.00" r="7.56" fill="#3ac2e5" />
+<circle cx="115.00" cy="265.00" r="7.56" fill="#3bc2e4" />
+<circle cx="169.00" cy="265.00" r="7.56" fill="#3bc4de" />
+<circle cx="187.00" cy="265.00" r="7.56" fill="#3cc4dc" />
+<circle cx="205.00" cy="265.00" r="7.56" fill="#3cc5da" />
+<circle cx="223.00" cy="265.00" r="7.56" fill="#3cc5d9" />
+<circle cx="277.00" cy="265.00" r="7.56" fill="#3dc7d3" />
+<circle cx="313.00" cy="265.00" r="7.56" fill="#3ec8d0" />
+<circle cx="331.00" cy="265.00" r="7.56" fill="#3ec8ce" />
+<circle cx="367.00" cy="265.00" r="7.56" fill="#3ec9ca" />
+<circle cx="385.00" cy="265.00" r="7.56" fill="#3fcac8" />
+<circle cx="421.00" cy="265.00" r="7.56" fill="#3fcbc5" />
+<circle cx="439.00" cy="265.00" r="7.56" fill="#3fcbc3" />
+<circle cx="493.00" cy="265.00" r="7.56" fill="#40cdbd" />
+<circle cx="511.00" cy="265.00" r="7.56" fill="#41cdbc" />
+<circle cx="529.00" cy="265.00" r="7.56" fill="#41ceba" />
+<circle cx="565.00" cy="265.00" r="7.56" fill="#41cfb6" />
+<circle cx="79.00" cy="283.00" r="7.56" fill="#3ac2e5" />
+<circle cx="97.00" cy="283.00" r="7.56" fill="#3bc2e4" />
+<circle cx="115.00" cy="283.00" r="7.56" fill="#3bc3e2" />
+<circle cx="133.00" cy="283.00" r="7.56" fill="#3bc3e0" />
+<circle cx="187.00" cy="283.00" r="7.56" fill="#3cc5da" />
+<circle cx="205.00" cy="283.00" r="7.56" fill="#3cc5d9" />
+<circle cx="241.00" cy="283.00" r="7.56" fill="#3dc6d5" />
+<circle cx="259.00" cy="283.00" r="7.56" fill="#3dc7d3" />
+<circle cx="295.00" cy="283.00" r="7.56" fill="#3ec8d0" />
+<circle cx="313.00" cy="283.00" r="7.56" fill="#3ec8ce" />
+<circle cx="331.00" cy="283.00" r="7.56" fill="#3ec9cc" />
+<circle cx="349.00" cy="283.00" r="7.56" fill="#3ec9ca" />
+<circle cx="367.00" cy="283.00" r="7.56" fill="#3fcac8" />
+<circle cx="403.00" cy="283.00" r="7.56" fill="#3fcbc5" />
+<circle cx="421.00" cy="283.00" r="7.56" fill="#3fcbc3" />
+<circle cx="439.00" cy="283.00" r="7.56" fill="#40ccc1" />
+<circle cx="475.00" cy="283.00" r="7.56" fill="#40cdbd" />
+<circle cx="511.00" cy="283.00" r="7.56" fill="#41ceba" />
+<circle cx="529.00" cy="283.00" r="7.56" fill="#41ceb8" />
+<circle cx="583.00" cy="283.00" r="7.56" fill="#42d0b2" />
+<circle cx="637.00" cy="283.00" r="7.56" fill="#43d1ad" />
+<circle cx="79.00" cy="301.00" r="7.56" fill="#3bc2e4" />
+<circle cx="97.00" cy="301.00" r="7.56" fill="#3bc3e2" />
+<circle cx="151.00" cy="301.00" r="7.56" fill="#3cc4dc" />
+<circle cx="169.00" cy="301.00" r="7.56" fill="#3cc5da" />
+<circle cx="187.00" cy="301.00" r="7.56" fill="#3cc5d9" />
+<circle cx="205.00" cy="301.00" r="7.56" fill="#3cc6d7" />
+<circle cx="259.00" cy="301.00" r="7.56" fill="#3dc7d1" />
+<circle cx="277.00" cy="301.00" r="7.56" fill="#3ec8d0" />
+<circle cx="313.00" cy="301.00" r="7.56" fill="#3ec9cc" />
+<circle cx="349.00" cy="301.00" r="7.56" fill="#3fcac8" />
+<circle cx="403.00" cy="301.00" r="7.56" fill="#3fcbc3" />
+<circle cx="475.00" cy="301.00" r="7.56" fill="#41cdbc" />
+<circle cx="511.00" cy="301.00" r="7.56" fill="#41ceb8" />
+<circle cx="619.00" cy="301.00" r="7.56" fill="#43d1ad" />
+<circle cx="637.00" cy="301.00" r="7.56" fill="#43d2ab" />
+<circle cx="97.00" cy="319.00" r="7.56" fill="#3bc3e0" />
+<circle cx="115.00" cy="319.00" r="7.56" fill="#3bc4de" />
+<circle cx="133.00" cy="319.00" r="7.56" fill="#3cc4dc" />
+<circle cx="205.00" cy="319.00" r="7.56" fill="#3dc6d5" />
+<circle cx="295.00" cy="319.00" r="7.56" fill="#3ec9cc" />
+<circle cx="349.00" cy="319.00" r="7.56" fill="#3fcac6" />
+<circle cx="385.00" cy="319.00" r="7.56" fill="#3fcbc3" />
+<circle cx="403.00" cy="319.00" r="7.56" fill="#40ccc1" />
+<circle cx="457.00" cy="319.00" r="7.56" fill="#41cdbc" />
+<circle cx="475.00" cy="319.00" r="7.56" fill="#41ceba" />
+<circle cx="493.00" cy="319.00" r="7.56" fill="#41ceb8" />
+<circle cx="547.00" cy="319.00" r="7.56" fill="#42d0b2" />
+<circle cx="565.00" cy="319.00" r="7.56" fill="#42d0b1" />
+<circle cx="583.00" cy="319.00" r="7.56" fill="#42d1af" />
+<circle cx="619.00" cy="319.00" r="7.56" fill="#43d2ab" />
+<circle cx="637.00" cy="319.00" r="7.56" fill="#43d2a9" />
+<circle cx="97.00" cy="337.00" r="7.56" fill="#3bc4de" />
+<circle cx="115.00" cy="337.00" r="7.56" fill="#3cc4dc" />
+<circle cx="133.00" cy="337.00" r="7.56" fill="#3cc5da" />
+<circle cx="151.00" cy="337.00" r="7.56" fill="#3cc5d9" />
+<circle cx="169.00" cy="337.00" r="7.56" fill="#3cc6d7" />
+<circle cx="241.00" cy="337.00" r="7.56" fill="#3ec8d0" />
+<circle cx="259.00" cy="337.00" r="7.56" fill="#3ec8ce" />
+<circle cx="475.00" cy="337.00" r="7.56" fill="#41ceb8" />
+<circle cx="493.00" cy="337.00" r="7.56" fill="#41cfb6" />
+<circle cx="511.00" cy="337.00" r="7.56" fill="#42cfb4" />
+<circle cx="547.00" cy="337.00" r="7.56" fill="#42d0b1" />
+<circle cx="565.00" cy="337.00" r="7.56" fill="#42d1af" />
+<circle cx="583.00" cy="337.00" r="7.56" fill="#43d1ad" />
+<circle cx="619.00" cy="337.00" r="7.56" fill="#43d2a9" />
+<circle cx="97.00" cy="355.00" r="7.56" fill="#3cc4dc" />
+<circle cx="151.00" cy="355.00" r="7.56" fill="#3cc6d7" />
+<circle cx="223.00" cy="355.00" r="7.56" fill="#3ec8d0" />
+<circle cx="241.00" cy="355.00" r="7.56" fill="#3ec8ce" />
+<circle cx="259.00" cy="355.00" r="7.56" fill="#3ec9cc" />
+<circle cx="439.00" cy="355.00" r="7.56" fill="#41ceba" />
+<circle cx="493.00" cy="355.00" r="7.56" fill="#42cfb4" />
+<circle cx="511.00" cy="355.00" r="7.56" fill="#42d0b2" />
+<circle cx="583.00" cy="355.00" r="7.56" fill="#43d2ab" />
+<circle cx="61.00" cy="373.00" r="7.56" fill="#3bc4de" />
+<circle cx="97.00" cy="373.00" r="7.56" fill="#3cc5da" />
+<circle cx="115.00" cy="373.00" r="7.56" fill="#3cc5d9" />
+<circle cx="133.00" cy="373.00" r="7.56" fill="#3cc6d7" />
+<circle cx="169.00" cy="373.00" r="7.56" fill="#3dc7d3" />
+<circle cx="187.00" cy="373.00" r="7.56" fill="#3dc7d1" />
+<circle cx="205.00" cy="373.00" r="7.56" fill="#3ec8d0" />
+<circle cx="223.00" cy="373.00" r="7.56" fill="#3ec8ce" />
+<circle cx="259.00" cy="373.00" r="7.56" fill="#3ec9ca" />
+<circle cx="439.00" cy="373.00" r="7.56" fill="#41ceb8" />
+<circle cx="493.00" cy="373.00" r="7.56" fill="#42d0b2" />
+<circle cx="565.00" cy="373.00" r="7.56" fill="#43d2ab" />
+<circle cx="583.00" cy="373.00" r="7.56" fill="#43d2a9" />
+<circle cx="601.00" cy="373.00" r="7.56" fill="#44d3a8" />
+<circle cx="79.00" cy="391.00" r="7.56" fill="#3cc5da" />
+<circle cx="97.00" cy="391.00" r="7.56" fill="#3cc5d9" />
+<circle cx="115.00" cy="391.00" r="7.56" fill="#3cc6d7" />
+<circle cx="205.00" cy="391.00" r="7.56" fill="#3ec8ce" />
+<circle cx="241.00" cy="391.00" r="7.56" fill="#3ec9ca" />
+<circle cx="259.00" cy="391.00" r="7.56" fill="#3fcac8" />
+<circle cx="439.00" cy="391.00" r="7.56" fill="#41cfb6" />
+<circle cx="457.00" cy="391.00" r="7.56" fill="#42cfb4" />
+<circle cx="511.00" cy="391.00" r="7.56" fill="#42d1af" />
+<circle cx="565.00" cy="391.00" r="7.56" fill="#43d2a9" />
+<circle cx="583.00" cy="391.00" r="7.56" fill="#44d3a8" />
+<circle cx="601.00" cy="391.00" r="7.56" fill="#44d3a6" />
+<circle cx="637.00" cy="391.00" r="7.56" fill="#44d4a2" />
+<circle cx="61.00" cy="409.00" r="7.56" fill="#3cc5da" />
+<circle cx="79.00" cy="409.00" r="7.56" fill="#3cc5d9" />
+<circle cx="97.00" cy="409.00" r="7.56" fill="#3cc6d7" />
+<circle cx="115.00" cy="409.00" r="7.56" fill="#3dc6d5" />
+<circle cx="133.00" cy="409.00" r="7.56" fill="#3dc7d3" />
+<circle cx="151.00" cy="409.00" r="7.56" fill="#3dc7d1" />
+<circle cx="169.00" cy="409.00" r="7.56" fill="#3ec8d0" />
+<circle cx="187.00" cy="409.00" r="7.56" fill="#3ec8ce" />
+<circle cx="205.00" cy="409.00" r="7.56" fill="#3ec9cc" />
+<circle cx="241.00" cy="409.00" r="7.56" fill="#3fcac8" />
+<circle cx="439.00" cy="409.00" r="7.56" fill="#42cfb4" />
+<circle cx="475.00" cy="409.00" r="7.56" fill="#42d0b1" />
+<circle cx="493.00" cy="409.00" r="7.56" fill="#42d1af" />
+<circle cx="511.00" cy="409.00" r="7.56" fill="#43d1ad" />
+<circle cx="529.00" cy="409.00" r="7.56" fill="#43d2ab" />
+<circle cx="565.00" cy="409.00" r="7.56" fill="#44d3a8" />
+<circle cx="583.00" cy="409.00" r="7.56" fill="#44d3a6" />
+<circle cx="601.00" cy="409.00" r="7.56" fill="#44d4a4" />
+<circle cx="637.00" cy="409.00" r="7.56" fill="#45d5a0" />
+<circle cx="61.00" cy="427.00" r="7.56" fill="#3cc5d9" />
+<circle cx="79.00" cy="427.00" r="7.56" fill="#3cc6d7" />
+<circle cx="97.00" cy="427.00" r="7.56" fill="#3dc6d5" />
+<circle cx="205.00" cy="427.00" r="7.56" fill="#3ec9ca" />
+<circle cx="241.00" cy="427.00" r="7.56" fill="#3fcac6" />
+<circle cx="259.00" cy="427.00" r="7.56" fill="#3fcbc5" />
+<circle cx="457.00" cy="427.00" r="7.56" fill="#42d0b1" />
+<circle cx="475.00" cy="427.00" r="7.56" fill="#42d1af" />
+<circle cx="511.00" cy="427.00" r="7.56" fill="#43d2ab" />
+<circle cx="529.00" cy="427.00" r="7.56" fill="#43d2a9" />
+<circle cx="547.00" cy="427.00" r="7.56" fill="#44d3a8" />
+<circle cx="565.00" cy="427.00" r="7.56" fill="#44d3a6" />
+<circle cx="601.00" cy="427.00" r="7.56" fill="#44d4a2" />
+<circle cx="619.00" cy="427.00" r="7.56" fill="#45d5a0" />
+<circle cx="637.00" cy="427.00" r="7.56" fill="#45d59e" />
+<circle cx="79.00" cy="445.00" r="7.56" fill="#3dc6d5" />
+<circle cx="97.00" cy="445.00" r="7.56" fill="#3dc7d3" />
+<circle cx="115.00" cy="445.00" r="7.56" fill="#3dc7d1" />
+<circle cx="169.00" cy="445.00" r="7.56" fill="#3ec9cc" />
+<circle cx="223.00" cy="445.00" r="7.56" fill="#3fcac6" />
+<circle cx="259.00" cy="445.00" r="7.56" fill="#3fcbc3" />
+<circle cx="511.00" cy="445.00" r="7.56" fill="#43d2a9" />
+<circle cx="529.00" cy="445.00" r="7.56" fill="#44d3a8" />
+<circle cx="601.00" cy="445.00" r="7.56" fill="#45d5a0" />
+<circle cx="619.00" cy="445.00" r="7.56" fill="#45d59e" />
+<circle cx="97.00" cy="463.00" r="7.56" fill="#3dc7d1" />
+<circle cx="133.00" cy="463.00" r="7.56" fill="#3ec8ce" />
+<circle cx="187.00" cy="463.00" r="7.56" fill="#3fcac8" />
+<circle cx="205.00" cy="463.00" r="7.56" fill="#3fcac6" />
+<circle cx="259.00" cy="463.00" r="7.56" fill="#40ccc1" />
+<circle cx="565.00" cy="463.00" r="7.56" fill="#44d4a2" />
+<circle cx="61.00" cy="481.00" r="7.56" fill="#3dc7d3" />
+<circle cx="115.00" cy="481.00" r="7.56" fill="#3ec8ce" />
+<circle cx="169.00" cy="481.00" r="7.56" fill="#3fcac8" />
+<circle cx="205.00" cy="481.00" r="7.56" fill="#3fcbc5" />
+<circle cx="439.00" cy="481.00" r="7.56" fill="#43d1ad" />
+<circle cx="493.00" cy="481.00" r="7.56" fill="#44d3a8" />
+<circle cx="583.00" cy="481.00" r="7.56" fill="#45d59e" />
+<circle cx="601.00" cy="481.00" r="7.56" fill="#45d69d" />
+<circle cx="619.00" cy="481.00" r="7.56" fill="#45d69b" />
+<circle cx="61.00" cy="499.00" r="7.56" fill="#3dc7d1" />
+<circle cx="79.00" cy="499.00" r="7.56" fill="#3ec8d0" />
+<circle cx="133.00" cy="499.00" r="7.56" fill="#3ec9ca" />
+<circle cx="205.00" cy="499.00" r="7.56" fill="#3fcbc3" />
+<circle cx="241.00" cy="499.00" r="7.56" fill="#40ccbf" />
+<circle cx="259.00" cy="499.00" r="7.56" fill="#40cdbd" />
+<circle cx="295.00" cy="499.00" r="7.56" fill="#41ceba" />
+<circle cx="313.00" cy="499.00" r="7.56" fill="#41ceb8" />
+<circle cx="331.00" cy="499.00" r="7.56" fill="#41cfb6" />
+<circle cx="349.00" cy="499.00" r="7.56" fill="#42cfb4" />
+<circle cx="439.00" cy="499.00" r="7.56" fill="#43d2ab" />
+<circle cx="457.00" cy="499.00" r="7.56" fill="#43d2a9" />
+<circle cx="475.00" cy="499.00" r="7.56" fill="#44d3a8" />
+<circle cx="529.00" cy="499.00" r="7.56" fill="#44d4a2" />
+<circle cx="547.00" cy="499.00" r="7.56" fill="#45d5a0" />
+<circle cx="583.00" cy="499.00" r="7.56" fill="#45d69d" />
+<circle cx="637.00" cy="499.00" r="7.56" fill="#46d797" />
+<circle cx="97.00" cy="517.00" r="7.56" fill="#3ec9cc" />
+<circle cx="115.00" cy="517.00" r="7.56" fill="#3ec9ca" />
+<circle cx="151.00" cy="517.00" r="7.56" fill="#3fcac6" />
+<circle cx="169.00" cy="517.00" r="7.56" fill="#3fcbc5" />
+<circle cx="187.00" cy="517.00" r="7.56" fill="#3fcbc3" />
+<circle cx="205.00" cy="517.00" r="7.56" fill="#40ccc1" />
+<circle cx="241.00" cy="517.00" r="7.56" fill="#40cdbd" />
+<circle cx="277.00" cy="517.00" r="7.56" fill="#41ceba" />
+<circle cx="295.00" cy="517.00" r="7.56" fill="#41ceb8" />
+<circle cx="331.00" cy="517.00" r="7.56" fill="#42cfb4" />
+<circle cx="367.00" cy="517.00" r="7.56" fill="#42d0b1" />
+<circle cx="385.00" cy="517.00" r="7.56" fill="#42d1af" />
+<circle cx="403.00" cy="517.00" r="7.56" fill="#43d1ad" />
+<circle cx="457.00" cy="517.00" r="7.56" fill="#44d3a8" />
+<circle cx="475.00" cy="517.00" r="7.56" fill="#44d3a6" />
+<circle cx="493.00" cy="517.00" r="7.56" fill="#44d4a4" />
+<circle cx="529.00" cy="517.00" r="7.56" fill="#45d5a0" />
+<circle cx="601.00" cy="517.00" r="7.56" fill="#46d799" />
+<circle cx="637.00" cy="517.00" r="7.56" fill="#46d895" />
+<circle cx="79.00" cy="535.00" r="7.56" fill="#3ec9cc" />
+<circle cx="97.00" cy="535.00" r="7.56" fill="#3ec9ca" />
+<circle cx="115.00" cy="535.00" r="7.56" fill="#3fcac8" />
+<circle cx="133.00" cy="535.00" r="7.56" fill="#3fcac6" />
+<circle cx="151.00" cy="535.00" r="7.56" fill="#3fcbc5" />
+<circle cx="223.00" cy="535.00" r="7.56" fill="#40cdbd" />
+<circle cx="241.00" cy="535.00" r="7.56" fill="#41cdbc" />
+<circle cx="259.00" cy="535.00" r="7.56" fill="#41ceba" />
+<circle cx="295.00" cy="535.00" r="7.56" fill="#41cfb6" />
+<circle cx="385.00" cy="535.00" r="7.56" fill="#43d1ad" />
+<circle cx="403.00" cy="535.00" r="7.56" fill="#43d2ab" />
+<circle cx="511.00" cy="535.00" r="7.56" fill="#45d5a0" />
+<circle cx="583.00" cy="535.00" r="7.56" fill="#46d799" />
+<circle cx="61.00" cy="553.00" r="7.56" fill="#3ec9cc" />
+<circle cx="97.00" cy="553.00" r="7.56" fill="#3fcac8" />
+<circle cx="169.00" cy="553.00" r="7.56" fill="#40ccc1" />
+<circle cx="187.00" cy="553.00" r="7.56" fill="#40ccbf" />
+<circle cx="205.00" cy="553.00" r="7.56" fill="#40cdbd" />
+<circle cx="259.00" cy="553.00" r="7.56" fill="#41ceb8" />
+<circle cx="277.00" cy="553.00" r="7.56" fill="#41cfb6" />
+<circle cx="313.00" cy="553.00" r="7.56" fill="#42d0b2" />
+<circle cx="385.00" cy="553.00" r="7.56" fill="#43d2ab" />
+<circle cx="457.00" cy="553.00" r="7.56" fill="#44d4a4" />
+<circle cx="493.00" cy="553.00" r="7.56" fill="#45d5a0" />
+<circle cx="511.00" cy="553.00" r="7.56" fill="#45d59e" />
+<circle cx="529.00" cy="553.00" r="7.56" fill="#45d69d" />
+<circle cx="547.00" cy="553.00" r="7.56" fill="#45d69b" />
+<circle cx="565.00" cy="553.00" r="7.56" fill="#46d799" />
+<circle cx="583.00" cy="553.00" r="7.56" fill="#46d797" />
+<circle cx="637.00" cy="553.00" r="7.56" fill="#47d992" />
+<circle cx="205.00" cy="571.00" r="7.56" fill="#41cdbc" />
+<circle cx="259.00" cy="571.00" r="7.56" fill="#41cfb6" />
+<circle cx="277.00" cy="571.00" r="7.56" fill="#42cfb4" />
+<circle cx="295.00" cy="571.00" r="7.56" fill="#42d0b2" />
+<circle cx="367.00" cy="571.00" r="7.56" fill="#43d2ab" />
+<circle cx="385.00" cy="571.00" r="7.56" fill="#43d2a9" />
+<circle cx="403.00" cy="571.00" r="7.56" fill="#44d3a8" />
+<circle cx="439.00" cy="571.00" r="7.56" fill="#44d4a4" />
+<circle cx="457.00" cy="571.00" r="7.56" fill="#44d4a2" />
+<circle cx="475.00" cy="571.00" r="7.56" fill="#45d5a0" />
+<circle cx="493.00" cy="571.00" r="7.56" fill="#45d59e" />
+<circle cx="565.00" cy="571.00" r="7.56" fill="#46d797" />
+<circle cx="583.00" cy="571.00" r="7.56" fill="#46d895" />
+<circle cx="619.00" cy="571.00" r="7.56" fill="#47d992" />
+<circle cx="205.00" cy="589.00" r="7.56" fill="#41ceba" />
+<circle cx="223.00" cy="589.00" r="7.56" fill="#41ceb8" />
+<circle cx="241.00" cy="589.00" r="7.56" fill="#41cfb6" />
+<circle cx="277.00" cy="589.00" r="7.56" fill="#42d0b2" />
+<circle cx="313.00" cy="589.00" r="7.56" fill="#42d1af" />
+<circle cx="331.00" cy="589.00" r="7.56" fill="#43d1ad" />
+<circle cx="385.00" cy="589.00" r="7.56" fill="#44d3a8" />
+<circle cx="421.00" cy="589.00" r="7.56" fill="#44d4a4" />
+<circle cx="439.00" cy="589.00" r="7.56" fill="#44d4a2" />
+<circle cx="475.00" cy="589.00" r="7.56" fill="#45d59e" />
+<circle cx="493.00" cy="589.00" r="7.56" fill="#45d69d" />
+<circle cx="529.00" cy="589.00" r="7.56" fill="#46d799" />
+<circle cx="565.00" cy="589.00" r="7.56" fill="#46d895" />
+<circle cx="223.00" cy="607.00" r="7.56" fill="#41cfb6" />
+<circle cx="241.00" cy="607.00" r="7.56" fill="#42cfb4" />
+<circle cx="295.00" cy="607.00" r="7.56" fill="#42d1af" />
+<circle cx="331.00" cy="607.00" r="7.56" fill="#43d2ab" />
+<circle cx="349.00" cy="607.00" r="7.56" fill="#43d2a9" />
+<circle cx="439.00" cy="607.00" r="7.56" fill="#45d5a0" />
+<circle cx="457.00" cy="607.00" r="7.56" fill="#45d59e" />
+<circle cx="493.00" cy="607.00" r="7.56" fill="#45d69b" />
+<circle cx="565.00" cy="607.00" r="7.56" fill="#47d894" />
+<circle cx="583.00" cy="607.00" r="7.56" fill="#47d992" />
+<circle cx="601.00" cy="607.00" r="7.56" fill="#47d990" />
+<circle cx="619.00" cy="607.00" r="7.56" fill="#47da8e" />
+<circle cx="637.00" cy="607.00" r="7.56" fill="#48da8c" />
+<circle cx="223.00" cy="625.00" r="7.56" fill="#42cfb4" />
+<circle cx="241.00" cy="625.00" r="7.56" fill="#42d0b2" />
+<circle cx="259.00" cy="625.00" r="7.56" fill="#42d0b1" />
+<circle cx="277.00" cy="625.00" r="7.56" fill="#42d1af" />
+<circle cx="313.00" cy="625.00" r="7.56" fill="#43d2ab" />
+<circle cx="331.00" cy="625.00" r="7.56" fill="#43d2a9" />
+<circle cx="349.00" cy="625.00" r="7.56" fill="#44d3a8" />
+<circle cx="385.00" cy="625.00" r="7.56" fill="#44d4a4" />
+<circle cx="475.00" cy="625.00" r="7.56" fill="#45d69b" />
+<circle cx="493.00" cy="625.00" r="7.56" fill="#46d799" />
+<circle cx="511.00" cy="625.00" r="7.56" fill="#46d797" />
+<circle cx="529.00" cy="625.00" r="7.56" fill="#46d895" />
+<circle cx="547.00" cy="625.00" r="7.56" fill="#47d894" />
+<circle cx="565.00" cy="625.00" r="7.56" fill="#47d992" />
+<circle cx="583.00" cy="625.00" r="7.56" fill="#47d990" />
+<circle cx="601.00" cy="625.00" r="7.56" fill="#47da8e" />
+<circle cx="619.00" cy="625.00" r="7.56" fill="#48da8c" />
+<circle cx="205.00" cy="643.00" r="7.56" fill="#42cfb4" />
+<circle cx="223.00" cy="643.00" r="7.56" fill="#42d0b2" />
+<circle cx="295.00" cy="643.00" r="7.56" fill="#43d2ab" />
+<circle cx="313.00" cy="643.00" r="7.56" fill="#43d2a9" />
+<circle cx="331.00" cy="643.00" r="7.56" fill="#44d3a8" />
+<circle cx="385.00" cy="643.00" r="7.56" fill="#44d4a2" />
+<circle cx="457.00" cy="643.00" r="7.56" fill="#45d69b" />
+<circle cx="547.00" cy="643.00" r="7.56" fill="#47d992" />
+<circle cx="583.00" cy="643.00" r="7.56" fill="#47da8e" />
+<circle cx="619.00" cy="643.00" r="7.56" fill="#48db8a" />
+<circle cx="637.00" cy="643.00" r="7.56" fill="#48db89" />
+<circle cx="205.00" cy="661.00" r="7.56" fill="#42d0b2" />
+<circle cx="241.00" cy="661.00" r="7.56" fill="#42d1af" />
+<circle cx="367.00" cy="661.00" r="7.56" fill="#44d4a2" />
+<circle cx="457.00" cy="661.00" r="7.56" fill="#46d799" />
+<circle cx="475.00" cy="661.00" r="7.56" fill="#46d797" />
+<circle cx="493.00" cy="661.00" r="7.56" fill="#46d895" />
+<circle cx="511.00" cy="661.00" r="7.56" fill="#47d894" />
+<circle cx="529.00" cy="661.00" r="7.56" fill="#47d992" />
+<circle cx="583.00" cy="661.00" r="7.56" fill="#48da8c" />
+<circle cx="601.00" cy="661.00" r="7.56" fill="#48db8a" />
+<circle cx="223.00" cy="679.00" r="7.56" fill="#42d1af" />
+<circle cx="277.00" cy="679.00" r="7.56" fill="#43d2a9" />
+<circle cx="295.00" cy="679.00" r="7.56" fill="#44d3a8" />
+<circle cx="331.00" cy="679.00" r="7.56" fill="#44d4a4" />
+<circle cx="367.00" cy="679.00" r="7.56" fill="#45d5a0" />
+<circle cx="493.00" cy="679.00" r="7.56" fill="#47d894" />
+<circle cx="529.00" cy="679.00" r="7.56" fill="#47d990" />
+<circle cx="637.00" cy="679.00" r="7.56" fill="#49dc85" />
+<circle cx="223.00" cy="697.00" r="7.56" fill="#43d1ad" />
+<circle cx="241.00" cy="697.00" r="7.56" fill="#43d2ab" />
+<circle cx="259.00" cy="697.00" r="7.56" fill="#43d2a9" />
+<circle cx="277.00" cy="697.00" r="7.56" fill="#44d3a8" />
+<circle cx="313.00" cy="697.00" r="7.56" fill="#44d4a4" />
+<circle cx="349.00" cy="697.00" r="7.56" fill="#45d5a0" />
+<circle cx="439.00" cy="697.00" r="7.56" fill="#46d797" />
+<circle cx="475.00" cy="697.00" r="7.56" fill="#47d894" />
+<circle cx="547.00" cy="697.00" r="7.56" fill="#48da8c" />
+<circle cx="565.00" cy="697.00" r="7.56" fill="#48db8a" />
+<circle cx="601.00" cy="697.00" r="7.56" fill="#48dc87" />
+<rect x="52" y="112" width="126" height="126" rx="32.4" fill="none" stroke="url(#finder-outer)" stroke-width="20.7" />
+<rect x="88" y="148" width="54" height="54" rx="18.0" fill="url(#finder-inner)" filter="url(#neon-glow)" />
+<rect x="520" y="112" width="126" height="126" rx="32.4" fill="none" stroke="url(#finder-outer)" stroke-width="20.7" />
+<rect x="556" y="148" width="54" height="54" rx="18.0" fill="url(#finder-inner)" filter="url(#neon-glow)" />
+<rect x="52" y="580" width="126" height="126" rx="32.4" fill="none" stroke="url(#finder-outer)" stroke-width="20.7" />
+<rect x="88" y="616" width="54" height="54" rx="18.0" fill="url(#finder-inner)" filter="url(#neon-glow)" />
+
+<!-- Outer Glow & Badge Ring -->
+<circle cx="349.0" cy="409.0" r="88.0" fill="#38BDF8" fill-opacity="0.15" filter="url(#badge-glow)" />
+<circle cx="349.0" cy="409.0" r="84.0" fill="#0B0F19" stroke="url(#brand-grad)" stroke-width="3" />
+<circle cx="349.0" cy="409.0" r="79.0" fill="#0F172A" />
+
+<!-- VoxQuery Emblem: Voice Waveform + Data Cube -->
+<g transform="translate(317.0, 389.0) scale(0.4)">
+  <!-- Flowing Voice Waveform -->
+  <path d="M7 51H18C28 51 27 39 36 39C45 39 44 63 53 63C62 63 61 25 71 25C81 25 80 75 90 75C100 75 99 35 109 35C119 35 117 56 128 56" stroke="url(#brand-grad)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  <path d="M7 51H18C29 51 30 70 39 70C48 70 48 31 58 31C68 31 67 69 77 69C87 69 86 42 96 42C106 42 106 57 117 57C126 57 130 51 139 51" stroke="url(#brand-grad)" stroke-width="5" opacity="0.85" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+
+  <!-- Geometric Data Cube -->
+  <path d="M106 35L130 20L151 33L127 48L106 35Z" stroke="#4ADE80" stroke-width="4.5" fill="none" />
+  <path d="M106 35V67L127 82V48" stroke="#38BDF8" stroke-width="4.5" fill="none" />
+  <path d="M127 48L151 33V65L127 82" stroke="#4ADE80" stroke-width="4.5" fill="none" />
+  <path d="M106 67L130 52L151 65L127 80L106 67Z" stroke="#38BDF8" stroke-width="3" opacity="0.9" fill="none" />
+
+  <circle cx="130" cy="20" r="5.5" fill="#4ADE80" />
+  <circle cx="151" cy="33" r="5.5" fill="#4ADE80" />
+  <circle cx="127" cy="82" r="5.5" fill="#38BDF8" />
+</g>
+
+
+<text x="349" y="760" text-anchor="middle" fill="#94A3B8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="14" letter-spacing="2">
+  SCAN TO LAUNCH VOICE DATA ANALYST
+</text>
+
+<g transform="translate(204, 776)">
+  <rect width="290" height="36" rx="18" fill="#1E293B" fill-opacity="0.9" stroke="#334155" stroke-width="1.2" />
+  <text x="145" y="23" text-anchor="middle" fill="#38BDF8" font-family="system-ui, -apple-system, sans-serif" font-weight="600" font-size="14">
+    https://vox-query-pied.vercel.app/
+  </text>
+</g>
+
+</svg>

@@ -351,27 +351,37 @@ export function MorningBriefingCard({
             ]
           : []),
       ]
+    : briefing.kpis && briefing.kpis.length > 0
+    ? briefing.kpis.slice(0, 3).map((kpi) => {
+        const normalized = kpi.label.toLowerCase();
+        let followUp = `Show top 5 breakdown for ${kpi.label}`;
+        if (normalized.includes("revenue")) {
+          followUp = "Show top 5 product categories by total revenue with monthly totals";
+        } else if (normalized.includes("account") || normalized.includes("customer")) {
+          followUp = "Show top 5 customer states by active account count";
+        } else if (normalized.includes("order value") || normalized.includes("aov")) {
+          followUp = "Show top 5 product categories by average order value";
+        } else if (normalized.includes("order")) {
+          followUp = "Show top 5 payment types by total order count";
+        }
+        return {
+          severity: "info" as const,
+          direction: (kpi.trend === "up" || kpi.trend === "down") ? kpi.trend : null,
+          magnitudePct: kpi.change_pct != null ? Math.abs(kpi.change_pct) : null,
+          headline: `${kpi.label}: ${kpi.value}`,
+          subtext: kpi.insight || "Performance matches 30-day benchmarks",
+          query: followUp,
+        };
+      })
     : [
         {
-          severity: "info",
+          severity: "info" as const,
           direction: null,
           magnitudePct: null,
-          headline: briefing.kpis[0] ? `${briefing.kpis[0].label}: ${briefing.kpis[0].value}` : "All primary metrics on track",
-          subtext: briefing.kpis[0]?.insight || "Performance matches 30-day benchmarks",
-          query: briefing.kpis[0] ? `Show breakdown for ${briefing.kpis[0].label}` : "How are we tracking against our usual benchmarks?",
+          headline: "All primary metrics on track",
+          subtext: "Performance matches 30-day benchmarks",
+          query: "How are we tracking against our usual benchmarks?",
         },
-        ...(briefing.kpis[1]
-          ? [
-              {
-                severity: "info" as const,
-                direction: null,
-                magnitudePct: null,
-                headline: `${briefing.kpis[1].label}: ${briefing.kpis[1].value}`,
-                subtext: briefing.kpis[1].insight || "Stable trajectory",
-                query: `Show breakdown for ${briefing.kpis[1].label}`,
-              },
-            ]
-          : []),
       ];
 
   const statusBadgeTone = !hasLiveData
@@ -439,7 +449,7 @@ export function MorningBriefingCard({
 
         {/* Key takeaways — instrument ledger, not a bullet list */}
         <div className="relative">
-          {visibleTakeaways.slice(0, 2).map((item, idx) => (
+          {visibleTakeaways.slice(0, 3).map((item, idx) => (
             <button
               key={idx}
               type="button"
