@@ -157,7 +157,13 @@ Request: {submitted_text}"""
             response = await self.client.messages.create(
                 model=self.model_name,
                 max_tokens=1000,
-                system=system_prompt,
+                system=[
+                    {
+                        "type": "text",
+                        "text": system_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
                 messages=[{"role": "user", "content": user_prompt}],
             )
         except anthropic.AnthropicError as e:
@@ -240,7 +246,13 @@ Specifically, the ambiguity is: {description}"""
             response = await self.client.messages.create(
                 model=self.model_name,
                 max_tokens=300,
-                system=system_prompt,
+                system=[
+                    {
+                        "type": "text",
+                        "text": system_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
                 messages=[{"role": "user", "content": user_prompt}],
             )
         except anthropic.AnthropicError as e:
@@ -283,7 +295,7 @@ class ClaudeStoryteller(Storyteller):
                 else AsyncAnthropic(timeout=120.0)
             )
         self.client = client
-        self.model_name = get_settings().canonical_sql_model
+        self.model_name = get_settings().storyteller_model
 
     @observe(as_type="generation", capture_input=False, capture_output=False)
     async def summarize(self, result_shape: ResultShape, user_query: str) -> str:
@@ -307,7 +319,13 @@ Chart Type: {result_shape.chart_type}"""
             response = await self.client.messages.create(
                 model=self.model_name,
                 max_tokens=300,
-                system=system_prompt,
+                system=[
+                    {
+                        "type": "text",
+                        "text": system_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
                 messages=[{"role": "user", "content": user_prompt}],
             )
         except anthropic.AnthropicError as e:
@@ -344,7 +362,13 @@ Chart Type: {result_shape.chart_type}"""
             response = await self.client.messages.create(
                 model=self.model_name,
                 max_tokens=200,
-                system=system_prompt,
+                system=[
+                    {
+                        "type": "text",
+                        "text": system_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
                 messages=[{"role": "user", "content": user_prompt}],
             )
         except Exception as e:

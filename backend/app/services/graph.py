@@ -591,8 +591,14 @@ async def render_node(state: PipelineGraphState) -> dict:
     duplication_warning = detect_possible_duplication(turn.generated_sql, result)
     chart_type, rationale = state["chart"].select(result)
     shape.chart_type = chart_type
-    summary = await state["story"].summarize(shape, turn.user_input)
 
+    # summarize() and generate_proactive_questions() are independent Claude calls
+    # that both only need `shape` and `turn.user_input` — start them concurrently
+    # instead of blocking summarize() before even starting the proactive-questions
+    # background task. summary is on the critical path (TTS depends on it) and is
+    # awaited fully; proactive_questions keeps its existing 100ms budget so a slow
+    # call never delays turn completion.
+    summary_task = asyncio.create_task(state["story"].summarize(shape, turn.user_input))
     proactive_task = asyncio.create_task(
         state["story"].generate_proactive_questions(shape, turn.user_input)
     )
@@ -606,6 +612,8 @@ async def render_node(state: PipelineGraphState) -> dict:
             logger.warning("Background proactive questions failed: %s", e)
 
     proactive_task.add_done_callback(_on_proactive_done)
+
+    summary = await summary_task
 
     try:
         proactive_questions = await asyncio.wait_for(asyncio.shield(proactive_task), timeout=0.1)

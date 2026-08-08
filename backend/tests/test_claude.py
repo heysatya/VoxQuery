@@ -133,11 +133,17 @@ async def test_langfuse_generation_update_failure_does_not_break_sql_generation(
 
 @pytest.mark.asyncio
 async def test_storyteller_reads_model_from_config(mock_anthropic_client):
-    """2. Storyteller also reads model centrally from config."""
+    """2. Storyteller reads its own model centrally from config (storyteller_model),
+    independent of canonical_sql_model — this is intentional: storytelling and
+    proactive questions have no accuracy stakes the way SQL generation does, so
+    they're allowed to stay on a fast model even when CANONICAL_SQL_MODEL is
+    escalated to a stronger model for SQL generation."""
     get_settings.cache_clear()
     storyteller = ClaudeStoryteller(mock_anthropic_client)
     settings = get_settings()
-    assert storyteller.model_name == settings.canonical_sql_model
+    assert storyteller.model_name == settings.storyteller_model
+    assert storyteller.model_name is not None
+    assert isinstance(storyteller.model_name, str)
 
 
 def test_model_is_overridable_via_config_not_adapter(mock_anthropic_client):
@@ -241,10 +247,20 @@ async def test_system_prompt_separation(mock_anthropic_sql_client, mock_anthropi
         conversation_history=[],
     )
 
+    def _system_text(call_kwargs):
+        """system is a list of content blocks (for prompt caching via
+        cache_control). Unwrap it and also assert caching is actually applied."""
+        system_value = call_kwargs["system"]
+        assert isinstance(system_value, list) and len(system_value) == 1
+        block = system_value[0]
+        assert block["type"] == "text"
+        assert block.get("cache_control") == {"type": "ephemeral"}
+        return block["text"]
+
     mock_anthropic_sql_client.messages.create.assert_awaited_once()
     sql_call_kwargs = mock_anthropic_sql_client.messages.create.call_args[1]
     assert "system" in sql_call_kwargs
-    assert sql_call_kwargs["system"].startswith("You are an expert")
+    assert _system_text(sql_call_kwargs).startswith("You are an expert")
     assert sql_call_kwargs["messages"][0]["role"] == "user"
 
     # Test generate_clarification
@@ -255,7 +271,7 @@ async def test_system_prompt_separation(mock_anthropic_sql_client, mock_anthropi
     mock_anthropic_client.messages.create.assert_awaited_once()
     clarif_call_kwargs = mock_anthropic_client.messages.create.call_args[1]
     assert "system" in clarif_call_kwargs
-    assert clarif_call_kwargs["system"].startswith("You are an expert")
+    assert _system_text(clarif_call_kwargs).startswith("You are an expert")
     assert clarif_call_kwargs["messages"][0]["role"] == "user"
 
     # Test summarize
@@ -271,7 +287,7 @@ async def test_system_prompt_separation(mock_anthropic_sql_client, mock_anthropi
     mock_anthropic_client.messages.create.assert_awaited_once()
     summary_call_kwargs = mock_anthropic_client.messages.create.call_args[1]
     assert "system" in summary_call_kwargs
-    assert summary_call_kwargs["system"].startswith("You are an expert")
+    assert _system_text(summary_call_kwargs).startswith("You are an expert")
     assert summary_call_kwargs["messages"][0]["role"] == "user"
 
     # Test generate_proactive_questions
@@ -283,7 +299,7 @@ async def test_system_prompt_separation(mock_anthropic_sql_client, mock_anthropi
     mock_anthropic_client.messages.create.assert_awaited_once()
     proactive_call_kwargs = mock_anthropic_client.messages.create.call_args[1]
     assert "system" in proactive_call_kwargs
-    assert proactive_call_kwargs["system"].startswith("You are an expert")
+    assert _system_text(proactive_call_kwargs).startswith("You are an expert")
     assert proactive_call_kwargs["messages"][0]["role"] == "user"
 
 

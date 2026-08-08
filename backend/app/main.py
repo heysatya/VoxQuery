@@ -100,8 +100,8 @@ async def lifespan(app: FastAPI):
     if settings.rag_provider == "pgvector" and settings.supabase_database_url:
         pool = await asyncpg.create_pool(
             settings.supabase_database_url,
-            min_size=1,
-            max_size=10,
+            min_size=settings.db_pool_min_size,
+            max_size=settings.db_pool_max_size,
             statement_cache_size=0,
             max_inactive_connection_lifetime=300.0,
             server_settings={
@@ -131,8 +131,8 @@ async def lifespan(app: FastAPI):
                 # Ensure we have a pool if not created by pgvector
                 pool = await asyncpg.create_pool(
                     settings.supabase_database_url,
-                    min_size=1,
-                    max_size=10,
+                    min_size=settings.db_pool_min_size,
+                    max_size=settings.db_pool_max_size,
                     statement_cache_size=0,
                     max_inactive_connection_lifetime=300.0,
                     server_settings={

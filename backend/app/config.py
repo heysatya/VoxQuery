@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     canonical_sql_model: str = Field(
         default="claude-haiku-4-5-20251001", alias="CANONICAL_SQL_MODEL"
     )
+    # Storytelling (result narration) and proactive-question generation don't
+    # produce the answer itself and have no accuracy stakes the way SQL
+    # generation does — keep them on a fast model independent of whatever
+    # CANONICAL_SQL_MODEL is set to, so upgrading SQL-gen accuracy never
+    # silently slows down every turn's narration too.
+    storyteller_model: str = Field(
+        default="claude-haiku-4-5-20251001", alias="STORYTELLER_MODEL"
+    )
     llm_provider: str = Field(default="fake", alias="LLM_PROVIDER")
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
@@ -68,6 +76,12 @@ class Settings(BaseSettings):
     # session + a worker thread, so keep this modest — it's per tenant, not
     # global. 3 is a reasonable default for moderate per-tenant concurrency.
     snowflake_tenant_pool_size: int = Field(default=3, alias="SNOWFLAKE_TENANT_POOL_SIZE")
+    # RAG retrieval now issues two concurrent queries per turn (vector + BM25,
+    # see rag/pgvector.py), doubling pool pressure per in-flight turn versus the
+    # previous sequential implementation. Tune based on your Postgres tier's
+    # max_connections and observed pool-wait metrics.
+    db_pool_min_size: int = Field(default=2, alias="DB_POOL_MIN_SIZE")
+    db_pool_max_size: int = Field(default=20, alias="DB_POOL_MAX_SIZE")
 
     @field_validator("auth_mode")
     @classmethod

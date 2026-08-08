@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import json
 import asyncpg
@@ -52,9 +53,18 @@ class PgVectorSchemaRetriever(SchemaRetriever):
             LIMIT 50;
         """
 
-        async with self.pool.acquire() as conn:
-            vector_rows = await conn.fetch(vector_sql, embedding_str, str(tenant_id))
-            bm25_rows = await conn.fetch(bm25_sql, bm25_query, str(tenant_id))
+        # vector_sql and bm25_sql are independent read queries over the same
+        # table. Running them concurrently on two pooled connections instead of
+        # sequentially on one roughly halves RAG retrieval latency.
+        async def _fetch_vector() -> list:
+            async with self.pool.acquire() as conn:
+                return await conn.fetch(vector_sql, embedding_str, str(tenant_id))
+
+        async def _fetch_bm25() -> list:
+            async with self.pool.acquire() as conn:
+                return await conn.fetch(bm25_sql, bm25_query, str(tenant_id))
+
+        vector_rows, bm25_rows = await asyncio.gather(_fetch_vector(), _fetch_bm25())
 
         k = 60
         scores: dict[str, float] = {}

@@ -1,0 +1,103 @@
+You are working in the VoxQuery repository. Follow these steps exactly, in order.
+Do not deviate, do not "improve" anything beyond what is specified, and do not skip
+the verification steps.
+
+STEP 1 — Confirm base state
+Run:
+  git status
+  git log -1 --oneline
+Confirm the working tree is clean and the current commit is on branch
+`voxquery-wow-build` at commit `538ca4e` ("fix Clerk webhook issue due to email and
+user id conflict"). If the working tree is not clean, or the commit does not match,
+STOP and report back instead of proceeding.
+
+STEP 2 — Apply the patch
+A file named `voxquery_perf_patch.diff` is provided alongside this prompt. From the
+repository root, run:
+  git apply --check voxquery_perf_patch.diff
+If this fails for any reason (patch does not apply cleanly), STOP and report the
+exact error. Do not attempt to manually resolve conflicts or reconstruct the changes
+by hand — the diff was generated and verified against this exact commit, so a failure
+means something about the repo state has changed and needs to be investigated, not
+worked around.
+
+If the check succeeds, apply it for real:
+  git apply voxquery_perf_patch.diff
+
+This patch touches exactly 6 files:
+  backend/app/config.py
+  backend/app/llm/claude.py
+  backend/app/main.py
+  backend/app/rag/pgvector.py
+  backend/app/services/graph.py
+  backend/tests/test_claude.py
+
+Do not modify any file outside this list. Do not add, remove, or rename any other
+files. Do not touch requirements/dependencies — no new packages are needed.
+
+STEP 3 — What this patch does (for your context only, not additional instructions)
+  1. config.py: adds two new settings, db_pool_min_size (default 2) and
+     db_pool_max_size (default 20), used to size the Postgres/pgvector connection
+     pool. canonical_sql_model is NOT changed by this patch — it intentionally stays
+     at the PRD-specified default (see Step 5 below for why).
+  2. llm/claude.py: wraps all 4 static system prompts (generate_sql,
+     generate_clarification, ClaudeStoryteller.summarize,
+     ClaudeStoryteller.generate_proactive_questions) in Anthropic's prompt-caching
+     format (system=[{"type": "text", "text": ..., "cache_control":
+     {"type": "ephemeral"}}]) instead of a bare string, to enable prompt caching on
+     repeated calls.
+  3. main.py: both asyncpg.create_pool() call sites now read min_size/max_size from
+     the new settings instead of hardcoded values (1/10).
+  4. rag/pgvector.py: the vector-search and BM25-search queries in schema
+     retrieval now run concurrently (via asyncio.gather across two pooled
+     connections) instead of sequentially on one connection.
+  5. services/graph.py: in render_node, the summarize() call and the
+     generate_proactive_questions() background task are now started concurrently
+     instead of summarize() blocking before the proactive task is even created.
+  6. tests/test_claude.py: updates test_system_prompt_separation (SEC-3) to match
+     the new list-based system prompt shape from change #2, and additionally
+     asserts that cache_control is actually present — this strengthens the test,
+     it does not weaken it. This is the only test file change in the patch.
+
+STEP 4 — Verify
+Run the full backend test suite:
+  cd backend
+  python -m pytest tests/ -q
+Expected result: 256 passed, 27 skipped, 0 failed. The 27 skips are pre-existing
+and require a live Postgres/Snowflake connection not available in a sandboxed test
+run — they are unrelated to this patch and were skipped before this patch too.
+
+If you see ANY failure, STOP immediately, do not attempt to fix it by modifying
+test assertions or adding workarounds, and report the exact failing test name and
+traceback back to me instead.
+
+Also run a basic import/syntax sanity check:
+  python -m py_compile app/config.py app/rag/pgvector.py app/main.py app/llm/claude.py app/services/graph.py
+
+STEP 5 — Model upgrade (env var only, NOT a code change — do this separately)
+There is a deliberate, existing test in this repo — test_sql_model_is_prd_specified_by_default
+in tests/test_claude.py — that asserts the default canonical_sql_model must remain
+"claude-haiku-4-5-20251001" per the product requirements doc. Do NOT change this
+default in config.py and do NOT modify or remove that test. The correct way to run
+SQL generation on a stronger model (claude-sonnet-4-6) for this demo is to set an
+environment variable at deploy/runtime, which the existing config already supports
+via Pydantic's alias mechanism:
+
+  CANONICAL_SQL_MODEL=claude-sonnet-4-6
+
+Add this to the deployment .env / environment configuration (wherever the other
+runtime environment variables like ANTHROPIC_API_KEY are set) — this is an
+infrastructure/deployment change, not a code change, and is explicitly out of scope
+for this patch. Do not add this line to any committed .env.example or config file
+unless I separately ask you to.
+
+STEP 6 — Report back
+After verification passes, report:
+  - Confirmation that git apply succeeded with no conflicts
+  - The full pytest output line (e.g. "256 passed, 27 skipped, ... in X.XXs")
+  - A `git diff --stat` summary confirming exactly the 6 files above were changed
+  - A reminder that the CANONICAL_SQL_MODEL=claude-sonnet-4-6 env var still needs
+    to be set in the deployment environment separately (this patch does not do it)
+
+Do not commit or push anything unless I explicitly ask you to in a follow-up
+instruction. Stop after Step 6 and wait for my review.
